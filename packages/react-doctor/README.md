@@ -7,80 +7,49 @@
 [![version](https://img.shields.io/npm/v/react-doctor?style=flat&colorA=000000&colorB=000000)](https://npmjs.com/package/react-doctor)
 [![downloads](https://img.shields.io/npm/dt/react-doctor.svg?style=flat&colorA=000000&colorB=000000)](https://npmjs.com/package/react-doctor)
 
-Your agent writes bad React, this catches it.
+React Doctor runs deterministic checks on your code. It reports issues in state and effects, performance, architecture, security, accessibility, and maintainability.
 
-React Doctor deterministically scans your codebase and finds issues across state and effects, performance, architecture, security, accessibility, and maintainability. It highlights overly complex React functions and repeated JSX trees that are good candidates for composition.
+Supports React projects built with Next.js, Vite, Astro, TanStack, React Native, and Expo.
 
-Works across React frameworks and React-enabled sites - Next.js, Vite, Astro, TanStack, React Native, Expo, you name it.
-
-[Website →](https://react.doctor/docs)
+[Documentation →](https://react.doctor/docs)
 
 ## Install
 
-### 1. Quick start
+### 1. Run a scan
 
-Run this at your project root to get an audit.
+Run this command from your project root:
 
 ```bash
 npx react-doctor@latest
-```
-
-Pass file paths to scan only the files that another CI step selected.
-
-```bash
-npx react-doctor@latest src/a.tsx src/b.tsx
 ```
 
 https://github.com/user-attachments/assets/07cc88d9-9589-44c3-aa73-5d603cb1c570
 
 ### 2. Install for agents
 
-Once you have an audit, you can install the skill for your coding agent to learn from the issues and fix them in the future.
+Install the skill to help your coding agent find and fix React issues:
 
 ```bash
 npx react-doctor@latest install
 ```
 
-Works with Claude Code, Cursor, Codex, OpenCode, and many more.
+Supports coding agents including Claude Code, Cursor, Codex, and OpenCode.
 
 ### 3. Run in CI
 
-React Doctor reviews every pull request and reports only the issues your change introduced, not your existing backlog. Set it up with one command:
+Scan each pull request and report the issues it introduces:
 
 ```bash
 npx react-doctor@latest ci install
 ```
 
-This adds a workflow that scans each pull request and posts a summary comment.
-
-Set `comment-on-clean: false` in the Action inputs to create comments only when the scan finds issues. Existing comments still update after a clean scan.
-
-With the default `version: latest`, the Action uses an installed `react-doctor` dependency when available. Set another `version` value to override the installed version. Install your project dependencies before the Action to use this path.
-
-For a GitLab warning status without blocking a merge, use a separate warning exit code:
-
-```yaml
-react-doctor:
-  script:
-    - npx react-doctor@latest . --warning-exit-code 123
-  allow_failure:
-    exit_codes: 123
-```
-
-With the default `--blocking error`, errors and hard lint failures exit with `1`. Warnings exit with `123`. Clean scans exit with `0`. The warning code must be an integer from `2` to `255`. Without this option, warnings still exit with `0`.
-
-`--blocking warning` takes priority and exits with `1` for warnings. `--blocking none` disables the warning exit code. Score-only mode and degraded baseline comparisons also skip the warning exit code. The existing warning filters and `ciFailure` surface settings still apply.
-
 [CI docs →](https://react.doctor/ci)
 
 ### 4. Configure rules
 
-You can configure which rules to run and how to run them in `doctor.config.ts`.
+Choose rules and scan settings in `doctor.config.ts`.
 
-The pnpm hardening check is off by default. To enable it, set
-`rules: { "react-doctor/require-pnpm-hardening": "warn" }` in your config.
-
-[Learn more →](https://react.doctor/docs/configuration/config-files)
+[Configuration docs →](https://react.doctor/docs/configuration/config-files)
 
 ## Runtime performance traces
 
@@ -90,41 +59,16 @@ Record a Chrome DevTools performance trace while you interact with a running Rea
 npx react-doctor@latest scan http://localhost:3000
 ```
 
-React Doctor opens system Chrome in a temporary isolated profile, records until you press Enter
-(up to five minutes), and flashes purple outlines with component names as React renders. It then
-returns a readable summary plus the path to a compressed DevTools trace. Use `--format json` or
-`--format jsonl` for coding agents. In an interactive terminal, you can run `react-doctor scan`
-without a URL and choose a detected localhost app or enter another URL; coding agents and CI must
-pass the URL explicitly.
-
-An already-open normal browser is left alone. To reuse an authenticated session, start a dedicated
-Chrome profile with remote debugging, sign in, close its non-blank tabs, and pass its endpoint:
-
-```bash
-npx react-doctor@latest scan https://app.example.com --cdp http://127.0.0.1:9222
-```
-
-Chrome performance tracing is browser-wide, so React Doctor rejects attached profiles with open
-pages. It closes blank startup tabs before tracing and closes its scan tab afterward; the attached
-browser stays open. The trace is stored locally and is never uploaded, but it can contain page
-URLs, source paths, and React profiling details. Treat it as sensitive application data.
+[Runtime trace docs →](https://react.doctor/docs/reference/cli-reference#runtime-performance-traces)
 
 ## Telemetry
 
-The CLI reports crashes, basic run traces, and anonymous usage counters to [Sentry](https://sentry.io/) to help us fix bugs and prioritize work.
-
-We collect:
-
-- Environment: CLI version, platform, Node version
-- Invocation: which command, package manager, and run context (whether it's local vs. CI vs. coding agent)
-- Project shape: framework, React version, TypeScript, project size (NO file contents)
-- Rules fired: rule names and counts only (e.g. `react-doctor/no-array-index-as-key`) (NO code or specific findings)
-- De-minified React Doctor CLI stack traces
+The CLI collects crash reports and anonymous usage data. See [Data use](https://react.doctor/docs/legal/data-use) for details.
 
 To opt out, run: `npx react-doctor@latest --no-telemetry`
 
 ## Contributing
 
-[Issues welcome!](https://github.com/millionco/react-doctor/issues)
+[Report an issue](https://github.com/millionco/react-doctor/issues)
 
 MIT-licensed
