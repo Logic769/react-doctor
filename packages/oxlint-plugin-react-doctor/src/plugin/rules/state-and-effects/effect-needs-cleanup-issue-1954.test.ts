@@ -3,10 +3,10 @@ import { runRule } from "../../../test-utils/run-rule.js";
 import { effectNeedsCleanup } from "./effect-needs-cleanup.js";
 
 describe("effect-needs-cleanup — issue 1954 (nullish coalescing receiver)", () => {
-	it("should not report when subscribing through a nullish coalescing expression", () => {
-		const result = runRule(
-			effectNeedsCleanup,
-			`import { useEffect } from 'react'
+  it("should not report when subscribing through a nullish coalescing expression", () => {
+    const result = runRule(
+      effectNeedsCleanup,
+      `import { useEffect } from 'react'
 
 			type Navigation = {
 				addListener: (type: string, callback: () => void) => () => void
@@ -29,16 +29,16 @@ describe("effect-needs-cleanup — issue 1954 (nullish coalescing receiver)", ()
 
 				return null
 			}`,
-		);
+    );
 
-		expect(result.parseErrors).toEqual([]);
-		expect(result.diagnostics).toEqual([]);
-	});
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toEqual([]);
+  });
 
-	it("should not report when subscribing through an aliased nullish coalescing expression", () => {
-		const result = runRule(
-			effectNeedsCleanup,
-			`import { useEffect } from 'react'
+  it("should not report when subscribing through an aliased nullish coalescing expression", () => {
+    const result = runRule(
+      effectNeedsCleanup,
+      `import { useEffect } from 'react'
 
 			type Navigation = {
 				addListener: (type: string, callback: () => void) => () => void
@@ -61,16 +61,16 @@ describe("effect-needs-cleanup — issue 1954 (nullish coalescing receiver)", ()
 
 				return null
 			}`,
-		);
+    );
 
-		expect(result.parseErrors).toEqual([]);
-		expect(result.diagnostics).toEqual([]);
-	});
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toEqual([]);
+  });
 
-	it("should not report when subscribing through a logical OR expression", () => {
-		const result = runRule(
-			effectNeedsCleanup,
-			`import { useEffect } from 'react'
+  it("should not report when subscribing through a logical OR expression", () => {
+    const result = runRule(
+      effectNeedsCleanup,
+      `import { useEffect } from 'react'
 
 			type Emitter = {
 				on: (event: string, handler: () => void) => () => void
@@ -88,16 +88,16 @@ describe("effect-needs-cleanup — issue 1954 (nullish coalescing receiver)", ()
 
 				return null
 			}`,
-		);
+    );
 
-		expect(result.parseErrors).toEqual([]);
-		expect(result.diagnostics).toEqual([]);
-	});
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toEqual([]);
+  });
 
-	it("should not report when subscribing through a logical AND expression with guard", () => {
-		const result = runRule(
-			effectNeedsCleanup,
-			`import { useEffect } from 'react'
+  it("should not report when subscribing through a logical AND expression with guard", () => {
+    const result = runRule(
+      effectNeedsCleanup,
+      `import { useEffect } from 'react'
 
 			type Emitter = {
 				on: (event: string, handler: () => void) => () => void
@@ -117,16 +117,16 @@ describe("effect-needs-cleanup — issue 1954 (nullish coalescing receiver)", ()
 
 				return null
 			}`,
-		);
+    );
 
-		expect(result.parseErrors).toEqual([]);
-		expect(result.diagnostics).toEqual([]);
-	});
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toEqual([]);
+  });
 
-	it("should still report when cleanup does not match the receiver", () => {
-		const result = runRule(
-			effectNeedsCleanup,
-			`import { useEffect } from 'react'
+  it("should still report when cleanup does not match the receiver", () => {
+    const result = runRule(
+      effectNeedsCleanup,
+      `import { useEffect } from 'react'
 
 			type Navigation = {
 				addListener: (type: string, callback: () => void) => () => void
@@ -149,9 +149,9 @@ describe("effect-needs-cleanup — issue 1954 (nullish coalescing receiver)", ()
 
 				return null
 			}`,
-		);
+    );
 
-		expect(result.parseErrors).toEqual([]);
-		expect(result.diagnostics.length).toBeGreaterThan(0);
-	});
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics.length).toBeGreaterThan(0);
+  });
 });

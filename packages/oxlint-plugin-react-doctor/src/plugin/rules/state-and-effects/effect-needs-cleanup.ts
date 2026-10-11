@@ -328,7 +328,9 @@ const resolveExpressionKey = (
       visitedSymbolIds,
       parameterSubstitutions,
     );
-    return leftKey && rightKey ? `logical:${unwrappedExpression.operator}:${leftKey}:${rightKey}` : null;
+    return leftKey && rightKey
+      ? `logical:${unwrappedExpression.operator}:${leftKey}:${rightKey}`
+      : null;
   }
   if (isNodeOfType(unwrappedExpression, "ThisExpression")) return "this";
   if (
