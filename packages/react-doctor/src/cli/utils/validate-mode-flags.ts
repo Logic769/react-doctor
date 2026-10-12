@@ -11,7 +11,7 @@ const usedScope = (flags: InspectFlags): boolean =>
   typeof flags.scope === "string" && flags.scope.length > 0;
 
 // `--include-untracked` folds untracked files into a working-tree scope, so it
-// needs `files` / `changed` / `lines` in effect. This is checked against the
+// needs `files` / `changed` / `lines` / `contextual` in effect. This is checked against the
 // RESOLVED scope (so a `config.scope` / `config.diff` value counts, not just
 // the CLI flags), which is why it lives apart from `validateModeFlags`. `full`
 // already walks the filesystem and sees untracked files; no scope is a no-op.
@@ -21,7 +21,7 @@ export const validateIncludeUntrackedScope = (
 ): void => {
   if (!includeUntracked || (scope !== undefined && scope !== "full")) return;
   throw new CliInputError(
-    "--include-untracked requires the files, changed, or lines scope (via --scope, --diff, or config).",
+    "--include-untracked requires the files, changed, lines, or contextual scope (via --scope, --diff, or config).",
   );
 };
 
@@ -49,7 +49,13 @@ export const validateFilePathSelectionFlags = (flags: InspectFlags): void => {
 };
 
 export const validateModeFlags = (flags: InspectFlags): void => {
-  if (flags.baseline && (flags.staged || flags.scope === "lines" || flags.scope === "files")) {
+  if (
+    flags.baseline &&
+    (flags.staged ||
+      flags.scope === "lines" ||
+      flags.scope === "contextual" ||
+      flags.scope === "files")
+  ) {
     throw new CliInputError(
       "--baseline requires a full or changed scan; it cannot be combined with --staged.",
     );
@@ -61,10 +67,10 @@ export const validateModeFlags = (flags: InspectFlags): void => {
     throw new CliInputError("Cannot combine --staged and --diff; pick one mode.");
   }
   // `--staged` scans the git index; `full` / `changed` (which need a base
-  // branch) don't apply. `files` (default) and `lines` compose with it.
+  // branch) don't apply. `files` (default), `lines`, and `contextual` compose with it.
   if (flags.staged && (flags.scope === "full" || flags.scope === "changed")) {
     throw new CliInputError(
-      `Cannot combine --staged with --scope ${flags.scope}; use --scope files or --scope lines, or drop --scope.`,
+      `Cannot combine --staged with --scope ${flags.scope}; use --scope files, --scope lines, or --scope contextual, or drop --scope.`,
     );
   }
   // The scope requirement is enforced separately (against the resolved scope)

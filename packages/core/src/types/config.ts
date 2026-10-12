@@ -14,7 +14,7 @@ export type BlockingLevel = "error" | "warning" | "none";
 /**
  * How much of the project a scan looks at and reports on — the single knob the
  * CLI `--scope` flag, the GitHub Action `scope` input, and this config field
- * all share. Ordered widest to narrowest:
+ * all share:
  *
  * - `"full"` — whole project, every issue (the default). Environment and
  *   supply-chain checks run only at this scope.
@@ -23,8 +23,9 @@ export type BlockingLevel = "error" | "warning" | "none";
  * - `"changed"` — only issues the change INTRODUCED vs the base (the baseline
  *   delta). What `--diff <base>` and the action's `scope: changed` do today.
  * - `"lines"` — only issues on the lines the change actually touched.
+ * - `"contextual"` — issues in modified functions, JSX elements, or files, as selected by each rule.
  */
-export type ScopeValue = "full" | "files" | "changed" | "lines";
+export type ScopeValue = "full" | "files" | "changed" | "lines" | "contextual";
 
 export interface ReactDoctorIgnoreOverride {
   /** Glob patterns the override applies to (e.g. `["src/legacy/**"]`). */
@@ -228,13 +229,13 @@ export interface ReactDoctorConfig {
    */
   warnings?: boolean;
   /**
-   * Scan scope. Defaults to `"full"`. See `ScopeValue` for the four values.
+   * Scan scope. Defaults to `"full"`. See `ScopeValue` for the supported values.
    * The CLI `--scope` flag and the GitHub Action `scope` input set the same
    * thing; flags win over config.
    */
   scope?: ScopeValue;
   /**
-   * Base git ref the `"files"` / `"changed"` / `"lines"` scopes compare
+   * Base git ref the `"files"` / `"changed"` / `"lines"` / `"contextual"` scopes compare
    * against. Auto-detected from the default branch / merge-base when unset.
    */
   base?: string;

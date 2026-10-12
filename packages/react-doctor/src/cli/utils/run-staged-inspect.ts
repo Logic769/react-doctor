@@ -323,6 +323,7 @@ const scanStagedProject = async ({
     includePaths: [...includePaths],
     configOverride: projectScan.projectConfig,
     configSourceDirectory: projectScan.projectConfigSourceDirectory ?? undefined,
+    contextual: resolveScope(input.flags, input.scanTarget.userConfig).scope === "contextual",
     changedLineRanges:
       stagedLineRanges === null
         ? undefined
@@ -521,11 +522,13 @@ export const runStagedInspect = async (input: RunStagedInspectInput): Promise<vo
     logger.break();
   }
 
-  const stagedWantsLines = resolveScope(flags, scanTarget.userConfig).scope === "lines";
+  const stagedScope = resolveScope(flags, scanTarget.userConfig).scope;
+  const stagedWantsLines = stagedScope === "lines" || stagedScope === "contextual";
   const stagedLineRanges = stagedWantsLines
     ? await getChangedLineRanges({
         directory: resolvedDirectory,
         cached: true,
+        includeDeletions: stagedScope === "contextual",
         files: selectedStagedFiles,
       })
     : null;

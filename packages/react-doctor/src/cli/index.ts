@@ -216,13 +216,16 @@ const program = new Command()
   )
   .option(
     "--scope <value>",
-    "how much supported JS/TS and inline HTML script source to scan/report: full (default), files, changed (only new issues vs base), or lines (issues whose source spans touch changed lines)",
+    "how much supported JS/TS and inline HTML script source to scan/report: full (default), files, changed (only new issues vs base), lines (issues whose source spans touch changed lines), or contextual (issues in modified rule contexts)",
+  )
+  .option(
+    "--base <ref>",
+    "base git ref for files/changed/lines/contextual scope (auto-detected when omitted)",
   )
   .option("--baseline <report.json>", "report only new issues compared with a saved JSON report")
-  .option("--base <ref>", "base git ref for files/changed/lines scope (auto-detected when omitted)")
   .option(
     "--include-untracked",
-    "with --scope files/changed/lines, also scan ordinary untracked files (respects .gitignore)",
+    "with --scope files/changed/lines/contextual, also scan ordinary untracked files (respects .gitignore)",
   )
   .addOption(
     // Deprecated alias for `--scope` (warns at runtime). `--diff <base>` →
@@ -393,7 +396,10 @@ ci.command("config")
   .description("Change the gate, scan scope, and pull-request reporting")
   .option(...providerOption)
   .option("--blocking <level>", "gate level: none (advisory), warning, or error")
-  .option("--scope <value>", "what a pull-request scan reports: changed, files, lines, or full")
+  .option(
+    "--scope <value>",
+    "what a pull-request scan reports: changed, files, lines, contextual, or full",
+  )
   .option("--comment", "post a summary comment on each pull request")
   .option("--no-comment", "don't post a summary comment")
   .option("--review-comments", "add inline review comments on changed lines")

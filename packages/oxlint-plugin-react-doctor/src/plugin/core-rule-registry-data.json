@@ -460,6 +460,7 @@
       "category": "Bugs",
       "framework": "global",
       "requires": ["react"],
+      "diffScope": "jsx-element",
       "isScanRule": false
     }
   },
@@ -3184,6 +3185,7 @@
       "framework": "nextjs",
       "requires": ["nextjs"],
       "tags": ["test-noise"],
+      "diffScope": "file",
       "isScanRule": false
     }
   },
@@ -4454,6 +4456,7 @@
       "framework": "global",
       "requires": ["react"],
       "tags": ["test-noise"],
+      "diffScope": "function",
       "isScanRule": false
     }
   },
@@ -5240,6 +5243,7 @@
       "category": "Performance",
       "framework": "global",
       "requires": ["react"],
+      "diffScope": "jsx-element",
       "isScanRule": false
     }
   },
@@ -8121,6 +8125,7 @@
       "category": "Maintainability",
       "framework": "global",
       "requires": ["react"],
+      "diffScope": "file",
       "isScanRule": false
     }
   },
@@ -11367,6 +11372,7 @@
       "framework": "global",
       "requires": ["react"],
       "tags": ["test-noise"],
+      "diffScope": "function",
       "isScanRule": false
     }
   },

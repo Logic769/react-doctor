@@ -74,6 +74,7 @@ const findEagerInitializerCall = (
 };
 
 export const rerenderLazyStateInit = defineRule({
+  diffScope: "function",
   id: "rerender-lazy-state-init",
   title: "State initializer runs on every render",
   tags: ["test-noise"],

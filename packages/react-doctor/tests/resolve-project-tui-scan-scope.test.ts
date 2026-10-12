@@ -33,27 +33,31 @@ describe("resolveProjectTuiScanScope", () => {
     ).toEqual({});
   });
 
-  it("maps changed files and line ranges into a workspace project", () => {
-    const plan = buildPlan("lines");
-    const scopedPlan: TuiScanScopePlan = {
-      ...plan,
-      changedLineRanges: [{ file: "apps/web/src/app.tsx", ranges: [[3, 5]] }],
-    };
+  it.each<ScopeValue>(["lines", "contextual"])(
+    "maps %s ranges into a workspace project",
+    (scope) => {
+      const plan = buildPlan(scope);
+      const scopedPlan: TuiScanScopePlan = {
+        ...plan,
+        changedLineRanges: [{ file: "apps/web/src/app.tsx", ranges: [[3, 5]], deletionLines: [6] }],
+      };
 
-    expect(
-      resolveProjectTuiScanScope({
-        plan: scopedPlan,
-        projectDirectory: "/repo/apps/web",
-        rootDirectory: "/repo",
-        supplyChainEnabled: true,
-      }),
-    ).toEqual({
-      baseline: undefined,
-      changedLineRanges: [{ file: "src/app.tsx", ranges: [[3, 5]] }],
-      includePaths: ["src/app.tsx"],
-      supplyChainManifestChanged: false,
-    });
-  });
+      expect(
+        resolveProjectTuiScanScope({
+          plan: scopedPlan,
+          projectDirectory: "/repo/apps/web",
+          rootDirectory: "/repo",
+          supplyChainEnabled: true,
+        }),
+      ).toEqual({
+        contextual: scope === "contextual",
+        baseline: undefined,
+        changedLineRanges: [{ file: "src/app.tsx", ranges: [[3, 5]], deletionLines: [6] }],
+        includePaths: ["src/app.tsx"],
+        supplyChainManifestChanged: false,
+      });
+    },
+  );
 
   it("keeps a manifest-only project when supply-chain checks are enabled", () => {
     expect(
@@ -64,6 +68,7 @@ describe("resolveProjectTuiScanScope", () => {
         supplyChainEnabled: true,
       }),
     ).toEqual({
+      contextual: false,
       baseline: undefined,
       changedLineRanges: undefined,
       includePaths: ["package.json"],
@@ -90,6 +95,7 @@ describe("resolveProjectTuiScanScope", () => {
         supplyChainEnabled: false,
       }),
     ).toEqual({
+      contextual: false,
       baseline: {
         ref: "base-commit",
         baseFiles: ["src/deleted.tsx"],

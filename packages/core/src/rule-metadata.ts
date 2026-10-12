@@ -1,3 +1,4 @@
+import type { CoreRuleMetadata } from "oxlint-plugin-react-doctor/core";
 import { REACT_DOCTOR_RULE_REGISTRY } from "oxlint-plugin-react-doctor/core";
 
 /**
@@ -7,6 +8,7 @@ import { REACT_DOCTOR_RULE_REGISTRY } from "oxlint-plugin-react-doctor/core";
  * and default activation without importing the plugin themselves.
  */
 export interface RuleMetadata {
+  readonly diffScope: NonNullable<CoreRuleMetadata["diffScope"]>;
   readonly id: string;
   readonly plugin: string;
   readonly category: string | null;
@@ -19,6 +21,7 @@ const lookupOwnRule = (
   rule: string,
 ):
   | {
+      diffScope?: RuleMetadata["diffScope"];
       category?: string;
       recommendation?: string;
       tags?: ReadonlyArray<string>;
@@ -38,6 +41,7 @@ export const getRuleMetadata = (plugin: string, rule: string): RuleMetadata | nu
   const definition = lookupOwnRule(rule);
   if (!definition) return null;
   return {
+    diffScope: definition.diffScope ?? "line",
     id: rule,
     plugin,
     category: definition.category ?? null,

@@ -43,7 +43,7 @@ export interface RunEventInput {
   readonly result?: InspectResult;
   /** `"diff"` / `"full"` / `"staged"`. */
   readonly mode: string;
-  /** Resolved scan scope: full | files | changed | lines. */
+  /** Resolved scan scope: full | files | changed | lines | contextual. */
   readonly scope: string;
   readonly parallel: boolean;
   readonly workerCount: number | undefined;

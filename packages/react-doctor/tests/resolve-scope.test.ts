@@ -37,6 +37,11 @@ describe("resolveScope", () => {
     vi.clearAllMocks();
   });
 
+  it("accepts contextual scope from flags and config", () => {
+    expect(resolveScope({ scope: "contextual" }, null).scope).toBe("contextual");
+    expect(resolveScope({}, { scope: "contextual" }).scope).toBe("contextual");
+  });
+
   it("reads an explicit --scope value", () => {
     expect(resolveScope({ scope: "lines" }, null)).toEqual({
       scope: "lines",

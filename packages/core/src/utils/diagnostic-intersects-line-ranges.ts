@@ -1,4 +1,4 @@
-import type { Diagnostic } from "@react-doctor/core";
+import type { Diagnostic } from "../types/index.js";
 
 export const diagnosticIntersectsLineRanges = (
   diagnostic: Diagnostic,

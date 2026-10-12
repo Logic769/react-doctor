@@ -25,6 +25,7 @@ describe("core rule registry", () => {
       expect(coreEntry?.rule.disabledWhen).toEqual(fullEntry.rule.disabledWhen);
       expect(coreEntry?.rule.tags).toEqual(fullEntry.rule.tags);
       expect(coreEntry?.rule.defaultEnabled).toBe(fullEntry.rule.defaultEnabled);
+      expect(coreEntry?.rule.diffScope).toBe(fullEntry.rule.diffScope);
       expect(coreEntry?.rule.matchByOccurrence).toBe(fullEntry.rule.matchByOccurrence);
       expect(coreEntry?.rule.isScanRule).toBe(typeof fullEntry.rule.scan === "function");
       expect(coreEntry?.rule.isProjectRule).toBe(

@@ -95,6 +95,11 @@ const baseInput = (overrides: Partial<RunEventInput> = {}): RunEventInput => ({
 });
 
 describe("buildRunEventAttributes", () => {
+  it("records contextual scope for adoption measurement", () => {
+    expect(buildRunEventAttributes(baseInput({ scope: "contextual" }))["scan.scope"]).toBe(
+      "contextual",
+    );
+  });
   let savedEnv: Record<string, string | undefined>;
 
   beforeEach(() => {

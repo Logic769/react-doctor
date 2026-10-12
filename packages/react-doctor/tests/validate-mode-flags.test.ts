@@ -6,6 +6,12 @@ import {
 } from "../src/cli/utils/validate-mode-flags.js";
 
 describe("validateModeFlags", () => {
+  it("rejects a saved baseline with contextual scope", () => {
+    expect(() => validateModeFlags({ baseline: "base.json", scope: "contextual" })).toThrow(
+      "--baseline requires a full or changed scan",
+    );
+  });
+
   it("allows JSON mode with --blocking", () => {
     expect(() => validateModeFlags({ json: true, blocking: "none" })).not.toThrow();
   });
@@ -55,6 +61,7 @@ describe("validateModeFlags", () => {
   it("allows --staged with --scope files or lines (composing source + granularity)", () => {
     expect(() => validateModeFlags({ staged: true, scope: "files" })).not.toThrow();
     expect(() => validateModeFlags({ staged: true, scope: "lines" })).not.toThrow();
+    expect(() => validateModeFlags({ staged: true, scope: "contextual" })).not.toThrow();
     expect(() => validateModeFlags({ staged: true })).not.toThrow();
   });
 
@@ -98,10 +105,10 @@ describe("validateIncludeUntrackedScope", () => {
 
   it("rejects --include-untracked without a working-tree scope in effect", () => {
     expect(() => validateIncludeUntrackedScope(true, undefined)).toThrow(
-      "--include-untracked requires the files, changed, or lines scope",
+      "--include-untracked requires the files, changed, lines, or contextual scope",
     );
     expect(() => validateIncludeUntrackedScope(true, "full")).toThrow(
-      "--include-untracked requires the files, changed, or lines scope",
+      "--include-untracked requires the files, changed, lines, or contextual scope",
     );
   });
 

@@ -8,6 +8,7 @@ const MESSAGE =
   '`<img loading="lazy">` defers the request while `fetchPriority="high"` asks the browser to rush it, so the two directives contradict each other. Drop one: keep `fetchPriority="high"` (and eager loading) for an LCP image, or `loading="lazy"` for a below-the-fold one.';
 
 export const noImgLazyWithHighFetchpriority = defineRule({
+  diffScope: "jsx-element",
   id: "no-img-lazy-with-high-fetchpriority",
   title: "Lazy image with high fetchPriority",
   severity: "warn",

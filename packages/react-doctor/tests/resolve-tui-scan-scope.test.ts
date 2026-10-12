@@ -81,24 +81,30 @@ describe("resolveTuiScanScope", () => {
     expect(plan.scope).toBe("changed");
   });
 
-  it("computes line ranges against HEAD for working tree changes", async () => {
-    const diffInfo = buildDiffInfo({ isCurrentChanges: true });
-    const changedLineRanges: ChangedFileLineRanges[] = [{ file: "src/app.tsx", ranges: [[4, 8]] }];
-    vi.mocked(getDiffInfo).mockResolvedValue(diffInfo);
-    vi.mocked(getChangedLineRanges).mockResolvedValue(changedLineRanges);
+  it.each(["lines", "contextual"])(
+    "computes %s ranges against HEAD for working tree changes",
+    async (scope) => {
+      const diffInfo = buildDiffInfo({ isCurrentChanges: true });
+      const changedLineRanges: ChangedFileLineRanges[] = [
+        { file: "src/app.tsx", ranges: [[4, 8]] },
+      ];
+      vi.mocked(getDiffInfo).mockResolvedValue(diffInfo);
+      vi.mocked(getChangedLineRanges).mockResolvedValue(changedLineRanges);
 
-    const plan = await resolveTuiScanScope({
-      directory: "/repo",
-      flags: { scope: "lines", includeUntracked: true },
-      userConfig: null,
-    });
+      const plan = await resolveTuiScanScope({
+        directory: "/repo",
+        flags: { scope, includeUntracked: true },
+        userConfig: null,
+      });
 
-    expect(getChangedLineRanges).toHaveBeenCalledWith({
-      directory: "/repo",
-      baseRef: "HEAD",
-      files: ["src/app.tsx"],
-      includeUntracked: true,
-    });
-    expect(plan.changedLineRanges).toEqual(changedLineRanges);
-  });
+      expect(getChangedLineRanges).toHaveBeenCalledWith({
+        directory: "/repo",
+        baseRef: "HEAD",
+        files: ["src/app.tsx"],
+        includeUntracked: true,
+        includeDeletions: scope === "contextual",
+      });
+      expect(plan.changedLineRanges).toEqual(changedLineRanges);
+    },
+  );
 });
