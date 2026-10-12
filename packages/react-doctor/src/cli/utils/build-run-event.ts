@@ -489,6 +489,7 @@ const buildScanAttributes = (input: RunEventInput): RunEventAttributes => {
     usedOutputDir: input.usedOutputDir,
     ignoredTagCount: input.ignoredTagCount,
     hasCustomConfig: input.hasCustomConfig,
+    customRulesOnly: input.userConfig?.customRulesOnly ?? false,
     rulesConfigured: ruleKeys.length,
     rulesDisabled: ruleKeys.filter((key) => ruleOverrides[key] === "off").length,
     projectAnalysisRuleCount: countOptInProjectRuleSelections(

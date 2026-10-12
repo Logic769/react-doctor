@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { ProjectInfo } from "../src/index.js";
+import type { ProjectInfo, RuleSeverityOverride } from "../src/index.js";
 import { createOxlintConfig } from "../src/runners/oxlint/config.js";
 
 const buildProject = (overrides: Partial<ProjectInfo> = {}): ProjectInfo => ({
@@ -47,6 +47,128 @@ const tailwindViteWebProject = buildProject({
   framework: "vite",
   hasReactNativeWorkspace: false,
   tailwindVersion: "^4.0.0",
+});
+
+describe("createOxlintConfig customRulesOnly", () => {
+  it.each<[RuleSeverityOverride]>([["warn"], ["error"]])(
+    "enables only explicitly selected ported rules at %s severity",
+    (severity) => {
+      const config = createOxlintConfig({
+        pluginPath: "/tmp/plugin.js",
+        project: viteWebProject,
+        customRulesOnly: true,
+        severityControls: {
+          rules: {
+            "react-doctor/jsx-key": severity,
+            "jsx-a11y/alt-text": severity,
+            "effect/no-derived-state": severity,
+          },
+          categories: { Accessibility: "error", Bugs: "error" },
+        },
+      });
+
+      expect(config.rules["react-doctor/jsx-key"]).toBe(severity);
+      expect(config.rules["react-doctor/alt-text"]).toBe(severity);
+      expect(config.rules["react-doctor/no-derived-state"]).toBe(severity);
+      expect(config.rules).not.toHaveProperty("react-doctor/no-danger");
+      expect(config.rules).not.toHaveProperty("react-doctor/anchor-is-valid");
+      expect(config.rules).not.toHaveProperty("react-doctor/no-chain-state-updates");
+    },
+  );
+
+  it("keeps ported rules off without a rule override", () => {
+    const config = createOxlintConfig({
+      pluginPath: "/tmp/plugin.js",
+      project: viteWebProject,
+      customRulesOnly: true,
+      severityControls: { categories: { Accessibility: "error", Bugs: "error" } },
+    });
+
+    expect(config.rules).not.toHaveProperty("react-doctor/alt-text");
+    expect(config.rules).not.toHaveProperty("react-doctor/jsx-key");
+  });
+
+  it("keeps explicit off settings and canonical rule precedence", () => {
+    const config = createOxlintConfig({
+      pluginPath: "/tmp/plugin.js",
+      project: viteWebProject,
+      customRulesOnly: true,
+      severityControls: {
+        rules: {
+          "react-doctor/alt-text": "off",
+          "jsx-a11y/alt-text": "error",
+          "react/jsx-key": "off",
+        },
+        categories: { Accessibility: "error", Bugs: "error" },
+      },
+    });
+
+    expect(config.rules).not.toHaveProperty("react-doctor/alt-text");
+    expect(config.rules).not.toHaveProperty("react-doctor/jsx-key");
+  });
+
+  it("lets an explicit rule override a disabled category", () => {
+    const config = createOxlintConfig({
+      pluginPath: "/tmp/plugin.js",
+      project: viteWebProject,
+      customRulesOnly: true,
+      severityControls: {
+        rules: { "react/jsx-key": "error" },
+        categories: { Bugs: "off" },
+      },
+    });
+
+    expect(config.rules["react-doctor/jsx-key"]).toBe("error");
+  });
+
+  it("keeps tag exclusions for explicitly selected ported rules", () => {
+    const config = createOxlintConfig({
+      pluginPath: "/tmp/plugin.js",
+      project: viteWebProject,
+      customRulesOnly: true,
+      ignoredTags: new Set(["react-jsx-only"]),
+      severityControls: { rules: { "jsx-a11y/alt-text": "error" } },
+    });
+
+    expect(config.rules).not.toHaveProperty("react-doctor/alt-text");
+  });
+
+  it("keeps project requirements for explicitly selected ported rules", () => {
+    const config = createOxlintConfig({
+      pluginPath: "/tmp/plugin.js",
+      project: buildProject({
+        framework: "unknown",
+        reactVersion: null,
+        reactMajorVersion: null,
+        hasReactNativeWorkspace: false,
+      }),
+      customRulesOnly: true,
+      severityControls: { rules: { "react/jsx-key": "error" } },
+    });
+
+    expect(config.rules).not.toHaveProperty("react-doctor/jsx-key");
+  });
+
+  it("keeps React Compiler disabled when a ported rule is selected", () => {
+    const config = createOxlintConfig({
+      pluginPath: "/tmp/plugin.js",
+      project: buildProject({ hasReactCompiler: true }),
+      customRulesOnly: true,
+      severityControls: {
+        rules: { "react/jsx-key": "error", "react-hooks-js/void-use-memo": "error" },
+      },
+    });
+
+    expect(config.rules["react-doctor/jsx-key"]).toBe("error");
+    expect(Object.keys(config.rules).some((ruleKey) => ruleKey.startsWith("react-hooks-js/"))).toBe(
+      false,
+    );
+    expect(
+      config.jsPlugins.some(
+        (entry) => typeof entry === "object" && entry.name === "react-hooks-js",
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("createOxlintConfig settings", () => {

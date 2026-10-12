@@ -667,7 +667,10 @@ describe("buildRunEventAttributes", () => {
         workerCount: undefined,
         ignoredTagCount: 2,
         hasCustomConfig: true,
-        userConfig: { rules: { "react-doctor/no-foo": "off", "react-doctor/no-bar": "error" } },
+        userConfig: {
+          customRulesOnly: true,
+          rules: { "react-doctor/no-foo": "off", "react-doctor/no-bar": "error" },
+        },
       }),
     );
     expect(attributes["scan.mode"]).toBe("full");
@@ -676,6 +679,7 @@ describe("buildRunEventAttributes", () => {
     expect(attributes["scan.projectAnalysisRuleCount"]).toBe(0);
     expect(attributes["scan.ignoredTagCount"]).toBe(2);
     expect(attributes["scan.hasCustomConfig"]).toBe(true);
+    expect(attributes["scan.customRulesOnly"]).toBe(true);
     expect(attributes["scan.workerCount"]).toBeUndefined();
     expect(attributes["scan.fileCount"]).toBeUndefined();
     expect(attributes["timing.scanMs"]).toBeUndefined();
@@ -695,6 +699,11 @@ describe("buildRunEventAttributes", () => {
       }),
     );
     expect(attributes["scan.projectAnalysisRuleCount"]).toBe(2);
+  });
+
+  it("records customRulesOnly as false when no config is provided", () => {
+    const attributes = buildRunEventAttributes(baseInput({ result: buildResult() }));
+    expect(attributes["scan.customRulesOnly"]).toBe(false);
   });
 
   it("counts analyzed non-JSX source files for partial-scan coverage telemetry", () => {

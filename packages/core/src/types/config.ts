@@ -262,6 +262,12 @@ export interface ReactDoctorConfig {
    * one-time deprecation warning. Prefer `blocking`.
    */
   failOn?: BlockingLevel;
+  /**
+   * Disable ported rules by default. Explicit `rules` settings of `"warn"`
+   * or `"error"` enable selected ported rules, including legacy rule names.
+   * Category settings do not enable them. Project requirements and tag
+   * exclusions still apply, and the React Compiler plugin stays disabled.
+   */
   customRulesOnly?: boolean;
   share?: boolean;
   noScore?: boolean;
