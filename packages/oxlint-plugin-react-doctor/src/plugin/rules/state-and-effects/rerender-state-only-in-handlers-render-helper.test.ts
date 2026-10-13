@@ -9,6 +9,7 @@ describe("rerender-state-only-in-handlers render-invoked helpers", () => {
     "const connect = () => new connection(); connect();",
     "const connect = () => { if (connection) connection.subscribe(); }; connect();",
     "function connect() { if (connection) connection.subscribe(); } connect();",
+    "{ function connect() { connection?.subscribe(); } connect(); }",
     "const connect = () => { if (connection) connection.subscribe(); }; const start = () => connect(); start();",
     "const connect = () => { if (connection) connection.subscribe(); }; const start = connect; start();",
     "(() => { if (connection) connection.subscribe(); })();",
@@ -45,6 +46,11 @@ describe("rerender-state-only-in-handlers render-invoked helpers", () => {
     "const connect = (connection) => { if (connection) connection.subscribe(); }; connect(externalConnection);",
     "let connect = () => { if (connection) connection.subscribe(); }; connect = () => {}; connect();",
     "function* connect() { if (connection) connection.subscribe(); } connect();",
+    "function connect() { connection?.subscribe(); } [connect] = [() => {}]; connect();",
+    "function connect() { connection?.subscribe(); } ({ connect } = { connect: () => {} }); connect();",
+    "function connect() { connection?.subscribe(); } [connect] = [() => {}]; const start = connect; start();",
+    "function connect() { connection?.subscribe(); } [connect] = [() => {}]; [1].forEach(connect);",
+    "function subscribe() { connection?.subscribe(); } function connect() { subscribe(); } [connect] = [() => {}]; connect();",
   ])("retains the existing warning outside the receiver/callee exception: %s", (helper) => {
     const result = runRule(
       rerenderStateOnlyInHandlers,

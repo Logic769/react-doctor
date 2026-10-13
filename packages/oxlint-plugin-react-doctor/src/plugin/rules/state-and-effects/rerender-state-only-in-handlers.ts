@@ -4,6 +4,7 @@ import { BUILTIN_HOOK_NAMES, EFFECT_HOOK_NAMES } from "../../constants/react.js"
 import type { ScopeAnalysis } from "../../semantic/scope-analysis.js";
 import { collectSynchronouslyInvokedLocalFunctions } from "../../utils/collect-effect-invoked-functions.js";
 import { findEnclosingFunction } from "../../utils/find-enclosing-function.js";
+import { isWithinAssignmentTarget } from "../../utils/is-within-assignment-target.js";
 import { defineRule } from "../../utils/define-rule.js";
 import { getRootIdentifierName } from "../../utils/get-root-identifier-name.js";
 import { isComponentAssignment } from "../../utils/is-component-assignment.js";
@@ -314,6 +315,21 @@ export const rerenderStateOnlyInHandlers = defineRule({
         componentBody,
         context.scopes,
         isReachableNode,
+        (functionNode) => {
+          if (!isNodeOfType(functionNode, "FunctionDeclaration") || !functionNode.id) return true;
+          let declarationScope = context.scopes.scopeFor(functionNode);
+          while (true) {
+            const functionSymbol = declarationScope.symbolsByName.get(functionNode.id.name);
+            if (functionSymbol?.declarationNode === functionNode) {
+              return !functionSymbol.references.some(
+                (reference) =>
+                  reference.flag !== "read" || isWithinAssignmentTarget(reference.identifier),
+              );
+            }
+            if (!declarationScope.parent) return false;
+            declarationScope = declarationScope.parent;
+          }
+        },
       );
       for (const binding of bindings) {
         if (renderReachableNames.has(binding.valueName)) continue;
