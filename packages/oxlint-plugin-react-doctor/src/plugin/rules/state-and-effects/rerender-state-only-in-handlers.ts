@@ -1,5 +1,9 @@
+import { isCallReceiverOrCalleeRead } from "../../utils/is-call-receiver-or-callee-read.js";
+import { createReachableNodeChecker } from "../../utils/create-reachable-node-checker.js";
 import { BUILTIN_HOOK_NAMES, EFFECT_HOOK_NAMES } from "../../constants/react.js";
 import type { ScopeAnalysis } from "../../semantic/scope-analysis.js";
+import { collectSynchronouslyInvokedLocalFunctions } from "../../utils/collect-effect-invoked-functions.js";
+import { findEnclosingFunction } from "../../utils/find-enclosing-function.js";
 import { defineRule } from "../../utils/define-rule.js";
 import { getRootIdentifierName } from "../../utils/get-root-identifier-name.js";
 import { isComponentAssignment } from "../../utils/is-component-assignment.js";
@@ -305,8 +309,35 @@ export const rerenderStateOnlyInHandlers = defineRule({
             renderReachableExpressions,
           })
         : () => false;
+      const isReachableNode = createReachableNodeChecker(context.cfg);
+      const renderInvokedFunctions = collectSynchronouslyInvokedLocalFunctions(
+        componentBody,
+        context.scopes,
+        isReachableNode,
+      );
       for (const binding of bindings) {
         if (renderReachableNames.has(binding.valueName)) continue;
+        const valueBindingIdentifier = isNodeOfType(binding.declarator.id, "ArrayPattern")
+          ? binding.declarator.id.elements[0]
+          : null;
+        const valueSymbol = valueBindingIdentifier
+          ? context.scopes.symbolFor(valueBindingIdentifier)
+          : null;
+        if (
+          valueSymbol?.references.some((reference) => {
+            if (
+              reference.flag === "write" ||
+              !isReachableNode(reference.identifier) ||
+              !isCallReceiverOrCalleeRead(reference.identifier)
+            ) {
+              return false;
+            }
+            const enclosingFunction = findEnclosingFunction(reference.identifier);
+            return Boolean(enclosingFunction && renderInvokedFunctions.has(enclosingFunction));
+          })
+        ) {
+          continue;
+        }
         const setterBindingIdentifier = isNodeOfType(binding.declarator.id, "ArrayPattern")
           ? binding.declarator.id.elements?.[1]
           : null;
