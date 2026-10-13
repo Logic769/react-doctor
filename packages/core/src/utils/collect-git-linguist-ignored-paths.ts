@@ -78,6 +78,8 @@ export const collectGitLinguistIgnoredPathsCooperative = (
         );
       },
     );
+    // HACK: Git can close stdin before reading outside a repository; its callback handles the exit.
+    child.stdin?.on("error", () => undefined);
     child.stdin?.end(buildInput(relativePaths));
   });
 };

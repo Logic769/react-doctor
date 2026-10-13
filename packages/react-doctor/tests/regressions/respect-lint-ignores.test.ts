@@ -222,11 +222,16 @@ describe("default behavior: respect additional ignore-file sources", () => {
         userConfig: { rules: buildIsolatedDerivedStateRuleConfig("no-derived-state-effect") },
       });
 
-      expect([...new Set(diagnostics.map((diagnostic) => diagnostic.filePath))].sort()).toEqual(
-        ["src/normal.tsx", "src/unset.tsx", "src/unspecified.tsx"].map((filePath) =>
-          absolutePaths ? path.join(projectDir, filePath) : filePath,
-        ),
+      const diagnosticPaths = diagnostics.map((diagnostic) =>
+        path
+          .relative(projectDir, path.resolve(projectDir, diagnostic.filePath))
+          .replaceAll("\\", "/"),
       );
+      expect([...new Set(diagnosticPaths)].sort()).toEqual([
+        "src/normal.tsx",
+        "src/unset.tsx",
+        "src/unspecified.tsx",
+      ]);
     },
   );
 
