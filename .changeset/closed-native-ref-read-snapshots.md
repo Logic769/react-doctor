@@ -1,0 +1,7 @@
+---
+"oxlint-plugin-react-doctor": patch
+"eslint-plugin-react-doctor": patch
+"react-doctor": patch
+---
+
+Avoid state-after-await warnings for readonly scalar snapshots of a closed native ref counter when a synchronous native effect increments it before any other statement and every callback invocation follows that increment.
