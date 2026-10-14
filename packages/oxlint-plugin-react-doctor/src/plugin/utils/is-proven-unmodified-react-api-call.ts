@@ -6,20 +6,10 @@ import { getRootIdentifier } from "./get-root-identifier.js";
 import { getStaticPropertyName } from "./get-static-property-name.js";
 import { hasPossibleStaticPropertyMutationOrEscape } from "./has-static-property-write-before.js";
 import { isBindingAssignmentTarget } from "./is-binding-assignment-target.js";
+import { isNonEscapingReactApiReference } from "./is-non-escaping-react-api-reference.js";
 import { isNodeOfType } from "./is-node-of-type.js";
 import { isReactApiCall } from "./is-react-api-call.js";
 import { stripParenExpression } from "./strip-paren-expression.js";
-
-const isNonEscapingReactApiReference = (expression: EsTreeNode): boolean => {
-  const referenceRoot = findTransparentExpressionRoot(expression);
-  const parent = referenceRoot.parent;
-  return (
-    (isNodeOfType(parent, "CallExpression") && parent.callee === referenceRoot) ||
-    (isNodeOfType(parent, "MemberExpression") && parent.object === referenceRoot) ||
-    (isNodeOfType(parent, "Property") && parent.computed && parent.key === referenceRoot) ||
-    (isNodeOfType(parent, "AssignmentPattern") && parent.right === referenceRoot)
-  );
-};
 
 export const isProvenUnmodifiedReactApiCall = (
   call: EsTreeNode,

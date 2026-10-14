@@ -3,6 +3,7 @@ import { analyzeScopes } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
 import { findEnclosingFunction } from "./find-enclosing-function.js";
 import { findTransparentExpressionRoot } from "./find-transparent-expression-root.js";
+import { hasCrossFileReactDefaultProviderMutation } from "./has-cross-file-react-default-provider-mutation.js";
 import { isAstDescendant } from "./is-ast-descendant.js";
 import { isBindingAssignmentTarget } from "./is-binding-assignment-target.js";
 import { getFunctionBindingSymbols } from "./get-function-binding-symbols.js";
@@ -25,7 +26,10 @@ interface ImportedCallbackSemantics {
 const CALLBACK_REACHABILITY_OPTIONS = { evaluatePrimitiveLiteralTruthiness: true };
 
 const semanticsByProgram = new WeakMap<EsTreeNode, ImportedCallbackSemantics>();
-const callbackProofByFunction = new WeakMap<EsTreeNode, Map<number, boolean>>();
+const callbackProofByFunction = new WeakMap<
+  EsTreeNode,
+  Map<number, readonly (readonly EsTreeNode[])[]>
+>();
 
 export const isImportedRenderCallback = (callback: EsTreeNode, context: RuleContext): boolean => {
   if (
@@ -81,7 +85,6 @@ export const isImportedRenderCallback = (callback: EsTreeNode, context: RuleCont
   const parameter = helper.params[callbackIndex];
   if (!isNodeOfType(parameter, "Identifier")) return false;
   const cachedProof = callbackProofByFunction.get(helper)?.get(callbackIndex);
-  if (cachedProof !== undefined) return cachedProof;
   let semantics = semanticsByProgram.get(resolved.programNode);
   if (!semantics) {
     semantics = {
@@ -91,6 +94,14 @@ export const isImportedRenderCallback = (callback: EsTreeNode, context: RuleCont
     semanticsByProgram.set(resolved.programNode, semantics);
   }
   const { scopes, cfg } = semantics;
+  const hasSupportedCallerPath = (paths: readonly (readonly EsTreeNode[])[]): boolean =>
+    paths.some((nativeCalls) =>
+      nativeCalls.every(
+        (nativeCall) =>
+          !hasCrossFileReactDefaultProviderMutation(nativeCall, scopes, context.scopes),
+      ),
+    );
+  if (cachedProof !== undefined) return hasSupportedCallerPath(cachedProof);
   if (
     getFunctionBindingSymbols(helper, scopes).some(
       (binding) =>
@@ -122,7 +133,7 @@ export const isImportedRenderCallback = (callback: EsTreeNode, context: RuleCont
     scopes,
     cfg,
   };
-  let hasRenderInvocation = false;
+  const renderInvocationPaths: EsTreeNode[][] = [];
   for (const reference of parameterSymbol.references) {
     const referenceRoot = findTransparentExpressionRoot(reference.identifier);
     const invocation = referenceRoot.parent;
@@ -135,6 +146,7 @@ export const isImportedRenderCallback = (callback: EsTreeNode, context: RuleCont
     ) {
       return false;
     }
+    const nativeCalls: EsTreeNode[] = [];
     let executionNode: EsTreeNode = invocation;
     let owner = findEnclosingFunction(executionNode);
     while (owner && owner !== helper) {
@@ -154,6 +166,9 @@ export const isImportedRenderCallback = (callback: EsTreeNode, context: RuleCont
         break;
       }
       executionNode = findTransparentExpressionRoot(owner).parent ?? owner;
+      if (isNodeOfType(executionNode, "CallExpression")) {
+        nativeCalls.push(executionNode);
+      }
       owner = findEnclosingFunction(owner);
     }
     if (
@@ -162,11 +177,12 @@ export const isImportedRenderCallback = (callback: EsTreeNode, context: RuleCont
       isNodeOnUnconditionalPath(executionNode, helper) &&
       isNodeReachableWithinFunction(executionNode, helperContext, CALLBACK_REACHABILITY_OPTIONS)
     ) {
-      hasRenderInvocation = true;
+      renderInvocationPaths.push(nativeCalls);
     }
   }
-  const proofs = callbackProofByFunction.get(helper) ?? new Map<number, boolean>();
-  proofs.set(callbackIndex, hasRenderInvocation);
+  const proofs =
+    callbackProofByFunction.get(helper) ?? new Map<number, readonly (readonly EsTreeNode[])[]>();
+  proofs.set(callbackIndex, renderInvocationPaths);
   callbackProofByFunction.set(helper, proofs);
-  return hasRenderInvocation;
+  return hasSupportedCallerPath(renderInvocationPaths);
 };

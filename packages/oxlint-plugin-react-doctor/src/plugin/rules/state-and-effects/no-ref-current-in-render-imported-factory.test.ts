@@ -894,3 +894,133 @@ describe("no-ref-current-in-render imported factories", () => {
     expect(result.diagnostics).toHaveLength(expectedDiagnostics);
   });
 });
+
+describe("imported factory caller React providers", () => {
+  it.each([
+    ["assignment", `React.useState = () => [null];`],
+    ["an immutable alias", `const Provider = React; Provider.useState = () => [null];`],
+    ["a mutable alias", `let Provider = React; Provider.useState = () => [null];`],
+    ["an update", `React.useState++;`],
+    ["a pattern target", `[React.useState] = [() => [null]];`],
+    ["a default target", `[React.useState = () => [null]] = [];`],
+    ["deletion", `delete React.useState;`],
+    ["Object.assign", `Object.assign(React, { useState: () => [null] });`],
+    ["Object.defineProperty", `Object.defineProperty(React, "useState", { value: () => [null] });`],
+    ["an unknown computed target", `React[property] = () => [null];`],
+    ["an unknown namespace escape", `mutate(React);`],
+    ["an unknown API value escape", `mutate(React.useState);`],
+    ["another default import", `import Provider from "react"; Provider.useState = () => [null];`],
+    [
+      "a default-as import",
+      `import { default as Provider } from "react"; Provider.useState = () => [null];`,
+    ],
+    [
+      "a namespace default projection",
+      `import * as Provider from "react"; Provider.default.useState = () => [null];`,
+    ],
+    [
+      "an aliased namespace default projection",
+      `import * as Provider from "react"; const Alias = Provider; Alias.default.useState = () => [null];`,
+    ],
+    [
+      "an extracted API before replacement",
+      `const captured = React.useState; React.useState = () => [null];`,
+    ],
+    [
+      "an extracted API after replacement",
+      `React.useState = () => [null]; const captured = React.useState;`,
+    ],
+  ])("rejects an unsupported provider with %s", (_description, setup) => {
+    const result = runFactory(
+      `import React from "react"; export const makeValue = compute => React.useState(() => compute())[0];`,
+      `import React from "react"; import { useRef } from "react"; import { makeValue } from "./factory";
+       ${setup} const Panel = ({ value }) => { const valueRef = useRef();
+         return makeValue(() => { valueRef.current = value; return value; }); };`,
+    );
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it.each([
+    ["metadata", `React.useState.description = "state";`],
+    [
+      "an immutable alias metadata write",
+      `const Provider = React; Provider.useState.description = "state";`,
+    ],
+    ["a computed-key read", `const { [React.useState]: metadata } = values;`],
+    ["a default RHS read", `const [metadata = React.useState] = [];`],
+    ["a shadowed provider", `const setup = React => { React.useState = () => [null]; };`],
+    ["another property", `React.unrelated = "value";`],
+  ])("preserves a genuine provider with %s", (_description, setup) => {
+    const result = runFactory(
+      `import React from "react"; export const makeValue = compute => React.useState(() => compute())[0];`,
+      `import React from "react"; import { useRef } from "react"; import { makeValue } from "./factory";
+       ${setup} const Panel = ({ value }) => { const valueRef = useRef();
+         return makeValue(() => { valueRef.current = value; return value; }); };`,
+    );
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(1);
+  });
+
+  it.each([
+    [
+      "a genuine named import",
+      `import { useState as makeState } from "react"; export const makeValue = compute => makeState(() => compute())[0];`,
+    ],
+    ["a direct call", `export const makeValue = compute => compute();`],
+    ["a direct IIFE", `export const makeValue = compute => (() => compute())();`],
+    [
+      "an alternate direct path",
+      `import React from "react"; export const makeValue = compute => { React.useState(() => compute()); return compute(); };`,
+    ],
+    [
+      "an alternate IIFE path",
+      `import React from "react"; export const makeValue = compute => { React.useState(() => compute()); return (() => compute())(); };`,
+    ],
+  ])("does not replace %s through a default property assignment", (_description, helperSource) => {
+    const result = runFactory(
+      helperSource,
+      `import React from "react"; import { useRef } from "react"; import { makeValue } from "./factory";
+       React.useState = () => [null]; const Panel = ({ value }) => { const valueRef = useRef();
+         return makeValue(() => { valueRef.current = value; return value; }); };`,
+    );
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(1);
+  });
+
+  it.each(["useState", "useMemo", "startTransition"])(
+    "checks a renamed default helper %s provider",
+    (apiName) => {
+      const result = runFactory(
+        `import { default as Provider } from "react"; export const makeValue = compute => Provider.${apiName}(() => compute());`,
+        `import React from "react"; import { useRef } from "react"; import { makeValue } from "./factory";
+       React.${apiName} = () => null; const Panel = ({ value }) => { const valueRef = useRef();
+         return makeValue(() => { valueRef.current = value; return value; }); };`,
+      );
+      expect(result.parseErrors).toEqual([]);
+      expect(result.diagnostics).toEqual([]);
+    },
+  );
+
+  it("rechecks caller providers when the imported proof is cached", () => {
+    fs.writeFileSync(
+      path.join(temporaryDirectory, "factory.ts"),
+      `import React from "react"; export const makeValue = compute => React.useState(() => compute())[0];`,
+    );
+    const caller = (setup: string) => `import React from "react"; import { useRef } from "react";
+      import { makeValue } from "./factory"; ${setup}
+      const Panel = ({ value }) => { const valueRef = useRef();
+        return makeValue(() => { valueRef.current = value; return value; }); };`;
+    const filename = path.join(temporaryDirectory, "panel.tsx");
+    const controls: Array<[string, number]> = [
+      ["", 1],
+      ["React.useState = () => [null];", 0],
+      ["", 1],
+    ];
+    for (const [setup, expected] of controls) {
+      const result = runRule(noRefCurrentInRender, caller(setup), { filename });
+      expect(result.parseErrors).toEqual([]);
+      expect(result.diagnostics).toHaveLength(expected);
+    }
+  });
+});
