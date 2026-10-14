@@ -15,6 +15,7 @@ import { hasClientRenderEvidence } from "../../utils/has-client-render-evidence.
 import { hasDirective } from "../../utils/has-directive.js";
 import { hasEmailTemplateImport } from "../../utils/has-email-template-import.js";
 import { hasSuppressHydrationWarningAttribute } from "../../utils/has-suppress-hydration-warning-attribute.js";
+import { getFunctionBindingSymbols } from "../../utils/get-function-binding-symbols.js";
 import { isAstNode } from "../../utils/is-ast-node.js";
 import { isAfterFalsyServerSnapshotEarlyReturn } from "../../utils/is-after-falsy-server-snapshot-early-return.js";
 import { isGatedByFalsyServerSnapshot } from "../../utils/is-gated-by-falsy-server-snapshot.js";
@@ -30,6 +31,7 @@ import { isNodeReachableWithinFunction } from "../../utils/is-node-reachable-wit
 import { isReactApiCall } from "../../utils/is-react-api-call.js";
 import { classifyReactNativeFileTarget } from "../../utils/is-react-native-file.js";
 import { isTestlikeFilename } from "../../utils/is-testlike-filename.js";
+import { isWithinAssignmentTarget } from "../../utils/is-within-assignment-target.js";
 import { readServerSnapshotBoolean } from "../../utils/read-server-snapshot-boolean.js";
 import { readInitialStateBoolean } from "../../utils/read-initial-state-boolean.js";
 import { resolveExactLocalFunction } from "../../utils/resolve-exact-local-function.js";
@@ -107,6 +109,15 @@ const resolveImportedHydrationFunction = (
   if (!scopes) {
     scopes = analyzeScopes(resolvedExport.programNode);
     importedScopeAnalysisByProgram.set(resolvedExport.programNode, scopes);
+  }
+  if (
+    getFunctionBindingSymbols(resolvedExport.node, scopes).some((bindingSymbol) =>
+      bindingSymbol.references.some(
+        (reference) => reference.flag !== "read" || isWithinAssignmentTarget(reference.identifier),
+      ),
+    )
+  ) {
+    return null;
   }
   let cfg = importedControlFlowByProgram.get(resolvedExport.programNode);
   if (!cfg) {

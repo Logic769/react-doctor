@@ -188,6 +188,19 @@ describe("no-hydration-branch-on-browser-global — imported helper provenance",
 
 describe("proven server snapshot gates", () => {
   it.each([
+    `import { useSyncExternalStore } from 'react'; export function useReady() { return useSyncExternalStore(() => () => {}, () => true, () => false); }`,
+    `import { useSyncExternalStore } from 'react'; const useReady = () => useSyncExternalStore(() => () => {}, () => true, () => false); export { useReady };`,
+  ])("preserves an immutable exported hook: %s", (hook) => {
+    writeFile("src/ready.ts", hook);
+    const result = runConsumer(`
+      import { useReady } from './ready';
+      const Panel = () => { const ready = useReady(); return ready && typeof window !== 'undefined' ? <main /> : <aside />; };
+    `);
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it.each([
     `return ready && available() ? <main /> : <aside />;`,
     `if (!ready) return null; return available() ? <main /> : <aside />;`,
     `const supported = ready ? available() : false; return supported ? <main /> : <aside />;`,
@@ -222,6 +235,9 @@ describe("proven server snapshot gates", () => {
     `import { useSyncExternalStore } from 'react'; let snapshot = () => false; snapshot = () => true; export const useReady = () => useSyncExternalStore(() => () => {}, () => true, snapshot);`,
     `import { useSyncExternalStore } from 'react'; export let useReady = () => useSyncExternalStore(() => () => {}, () => true, () => false); useReady = () => true;`,
     `import { useSyncExternalStore } from 'react'; export function useReady() { return useSyncExternalStore(() => () => {}, () => true, () => false); } useReady = () => true;`,
+    `import { useSyncExternalStore } from 'react'; export function useReady() { return useSyncExternalStore(() => () => {}, () => true, () => false); } [useReady] = [() => true];`,
+    `import { useSyncExternalStore } from 'react'; export function useReady() { return useSyncExternalStore(() => () => {}, () => true, () => false); } ({ value: useReady } = { value: () => true });`,
+    `import { useSyncExternalStore } from 'react'; export const useReady = () => useSyncExternalStore(() => () => {}, () => true, () => false); [useReady] = [() => true];`,
     `import { useSyncExternalStore } from 'react'; export const useReady = (initial = true) => useSyncExternalStore(() => () => {}, () => true, () => initial);`,
     `import { useSyncExternalStore } from 'react'; export const useReady = () => { if (unknown) return true; return useSyncExternalStore(() => () => {}, () => true, () => false); };`,
   ])("retains unsupported snapshot provenance: %s", (hook) => {
