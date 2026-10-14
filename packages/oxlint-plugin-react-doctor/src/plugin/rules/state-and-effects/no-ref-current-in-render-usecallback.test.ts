@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
 import { runRule } from "../../../test-utils/run-rule.js";
+import { defineRule } from "../../utils/define-rule.js";
+import { isNodeOfType } from "../../utils/is-node-of-type.js";
+import { isNodeReachableWithinFunction } from "../../utils/is-node-reachable-within-function.js";
+import { walkAst } from "../../utils/walk-ast.js";
 import { noRefCurrentInRender } from "./no-ref-current-in-render.js";
 
 describe("no-ref-current-in-render directly invoked React callbacks", () => {
@@ -11,6 +15,9 @@ describe("no-ref-current-in-render directly invoked React callbacks", () => {
     "(() => resolveValue())();",
     "if (/pattern/) resolveValue();",
     "if (1n) resolveValue();",
+    "1n ? resolveValue() : null;",
+    "if (((1n))) resolveValue();",
+    "((1n)) ? resolveValue() : null;",
     "(resolveValue as () => unknown)();",
   ])("reports an explicit render call: %s", (invocation) => {
     const result = runRule(
@@ -41,6 +48,10 @@ describe("no-ref-current-in-render directly invoked React callbacks", () => {
     "return null; resolveValue();",
     "if (false) resolveValue();",
     "if (0) resolveValue();",
+    "if (0n) resolveValue();",
+    "0n ? resolveValue() : null;",
+    "if (((0n))) resolveValue();",
+    "((0n)) ? resolveValue() : null;",
     "if (null) resolveValue();",
     "if ('') resolveValue();",
     "0 ? resolveValue() : null;",
@@ -358,5 +369,66 @@ describe("no-ref-current-in-render directly invoked React callbacks", () => {
     );
     expect(result.parseErrors).toEqual([]);
     expect(result.diagnostics).toEqual([]);
+  });
+  it.each(["0n", "((0n))", "0", "((0))"])(
+    "preserves default reachability while opting into literal truthiness: %s",
+    (condition) => {
+      const defaultReachability: boolean[] = [];
+      const optedInReachability: boolean[] = [];
+      const probeRule = defineRule({
+        id: "literal-reachability-probe",
+        title: "Literal reachability probe",
+        severity: "error",
+        recommendation: "Keep opt-in literal reachability separate from default callers.",
+        create: (context) => ({
+          CallExpression: (node) => {
+            if (!isNodeOfType(node.callee, "Identifier") || node.callee.name !== "resolveValue") {
+              return;
+            }
+            defaultReachability.push(isNodeReachableWithinFunction(node, context));
+            optedInReachability.push(
+              isNodeReachableWithinFunction(node, context, {
+                evaluatePrimitiveLiteralTruthiness: true,
+              }),
+            );
+          },
+        }),
+      });
+      const result = runRule(
+        probeRule,
+        `function Panel() { if (${condition}) resolveValue(); return null; }`,
+      );
+      expect(result.parseErrors).toEqual([]);
+      expect(defaultReachability).toEqual([true]);
+      expect(optedInReachability).toEqual([false]);
+    },
+  );
+  it.each(["0", null])("does not coerce unknown BigInt provider values: %s", (providerValue) => {
+    const reachability: boolean[] = [];
+    const probeRule = defineRule({
+      id: "bigint-provider-reachability-probe",
+      title: "BigInt provider reachability probe",
+      severity: "error",
+      recommendation: "Require native BigInt values before coercing tagged literals.",
+      create: (context) => ({
+        Program: (node) => {
+          walkAst(node, (candidate) => {
+            if (isNodeOfType(candidate, "Literal") && "bigint" in candidate) {
+              Object.defineProperty(candidate, "value", { value: providerValue });
+            }
+          });
+        },
+        CallExpression: (node) => {
+          reachability.push(
+            isNodeReachableWithinFunction(node, context, {
+              evaluatePrimitiveLiteralTruthiness: true,
+            }),
+          );
+        },
+      }),
+    });
+    const result = runRule(probeRule, "function Panel() { if (0n) resolveValue(); return null; }");
+    expect(result.parseErrors).toEqual([]);
+    expect(reachability).toEqual([true]);
   });
 });

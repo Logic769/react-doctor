@@ -20,7 +20,7 @@ const isInsideStaticallyUnreachableBranch = (
       const condition =
         options.evaluatePrimitiveLiteralTruthiness &&
         !("regex" in parent.test) &&
-        !("bigint" in parent.test)
+        (!("bigint" in parent.test) || typeof parent.test.value === "bigint")
           ? Boolean(parent.test.value)
           : parent.test.value;
       if (condition === false && parent.consequent === child) return true;
