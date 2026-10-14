@@ -10,11 +10,14 @@ import { findEnclosingFunction } from "../../utils/find-enclosing-function.js";
 import { findRenderPhaseComponentOrHook } from "../../utils/find-render-phase-component-or-hook.js";
 import { findRenderInvokedUseCallbackOwner } from "../../utils/find-render-invoked-usecallback-owner.js";
 import { findTransparentExpressionRoot } from "../../utils/find-transparent-expression-root.js";
+import { getEquivalentSymbols } from "../../utils/get-equivalent-symbols.js";
 import { getRangeStart } from "../../utils/get-range-start.js";
 import { getStaticPropertyName } from "../../utils/get-static-property-name.js";
 import { isFunctionLike } from "../../utils/is-function-like.js";
+import { isBindingAssignmentTarget } from "../../utils/is-binding-assignment-target.js";
 import { isNodeOfType } from "../../utils/is-node-of-type.js";
 import { isOutsideAllFunctions } from "../../utils/is-outside-all-functions.js";
+import { isProvenUnmodifiedReactApiCall } from "../../utils/is-proven-unmodified-react-api-call.js";
 import { resolveReactRefSymbol } from "../../utils/react-ref-origin.js";
 import { resolveConstIdentifierAlias } from "../../utils/resolve-const-identifier-alias.js";
 import { stripParenExpression } from "../../utils/strip-paren-expression.js";
@@ -638,12 +641,24 @@ export const noRefCurrentInRender = defineRule({
     "Move ref writes into an event handler or effect. Render must stay pure because React can replay or discard it. The predictable null-guarded lazy initialization pattern remains supported.",
   create: (context) => {
     const report = (memberExpression: EsTreeNode) => {
-      if (!resolveReactRefSymbol(memberExpression, context.scopes)) return;
-      if (
-        !findRenderPhaseComponentOrHook(memberExpression, context.scopes) &&
-        !findRenderInvokedUseCallbackOwner(memberExpression, context)
-      ) {
-        return;
+      const refSymbol = resolveReactRefSymbol(memberExpression, context.scopes);
+      if (!refSymbol) return;
+      if (!findRenderPhaseComponentOrHook(memberExpression, context.scopes)) {
+        const callbackOwner = findRenderInvokedUseCallbackOwner(memberExpression, context);
+        if (
+          !callbackOwner ||
+          !refSymbol.initializer ||
+          findEnclosingFunction(refSymbol.initializer) !== callbackOwner ||
+          getEquivalentSymbols(refSymbol.bindingIdentifier, context.scopes).some((binding) =>
+            binding.references.some(
+              (reference) =>
+                reference.flag !== "read" || isBindingAssignmentTarget(reference.identifier),
+            ),
+          ) ||
+          !isProvenUnmodifiedReactApiCall(refSymbol.initializer, "useRef", context.scopes)
+        ) {
+          return;
+        }
       }
       context.report({
         node: memberExpression,

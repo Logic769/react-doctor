@@ -1,19 +1,40 @@
 import type { EsTreeNode } from "./es-tree-node.js";
+import {
+  componentOrHookDisplayNameForFunction,
+  findComponentHocExpressionRoot,
+} from "./component-or-hook-display-name.js";
 import { findEnclosingFunction } from "./find-enclosing-function.js";
-import { findRenderPhaseComponentOrHook } from "./find-render-phase-component-or-hook.js";
 import { findTransparentExpressionRoot } from "./find-transparent-expression-root.js";
-import { getRootIdentifier } from "./get-root-identifier.js";
 import { getTransparentReactCallbackWrapperArgument } from "./get-transparent-react-callback-wrapper-argument.js";
-import { hasPossibleStaticPropertyMutationOrEscape } from "./has-static-property-write-before.js";
+import { isAstDescendant } from "./is-ast-descendant.js";
 import { isBindingAssignmentTarget } from "./is-binding-assignment-target.js";
 import { isFunctionLike } from "./is-function-like.js";
 import { isNodeOfType } from "./is-node-of-type.js";
+import { isNodeOnUnconditionalPath } from "./is-node-on-unconditional-path.js";
 import { isNodeReachableWithinFunction } from "./is-node-reachable-within-function.js";
-import { isReactApiCall } from "./is-react-api-call.js";
+import { isProvenSynchronousRenderCallback } from "./is-proven-synchronous-render-callback.js";
+import { isProvenUnmodifiedReactApiCall } from "./is-proven-unmodified-react-api-call.js";
+import { isSupportedUseCallbackExecutionPath } from "./is-supported-usecallback-execution-path.js";
 import type { RuleContext } from "./rule-context.js";
 import { stripParenExpression } from "./strip-paren-expression.js";
+import { walkAst } from "./walk-ast.js";
 
 const CALLBACK_REACHABILITY_OPTIONS = { evaluatePrimitiveLiteralTruthiness: true };
+
+const hasOpaqueCallbackInputs = (callback: EsTreeNode): boolean => {
+  if (!isFunctionLike(callback) || callback.params.length !== 0) return true;
+  let hasOpaqueInputs = false;
+  walkAst(callback.body, (node) => {
+    if (
+      isNodeOfType(node, "ThisExpression") ||
+      (isNodeOfType(node, "Identifier") && node.name === "arguments")
+    ) {
+      hasOpaqueInputs = true;
+      return false;
+    }
+  });
+  return hasOpaqueInputs;
+};
 
 export const findRenderInvokedUseCallbackOwner = (
   node: EsTreeNode,
@@ -27,7 +48,8 @@ export const findRenderInvokedUseCallbackOwner = (
     !isFunctionLike(callbackFunction) ||
     callbackFunction.async ||
     callbackFunction.generator ||
-    callbackFunction.params.length !== 0 ||
+    hasOpaqueCallbackInputs(callbackFunction) ||
+    !isSupportedUseCallbackExecutionPath(node, callbackFunction, context) ||
     visitedFunctions.has(callbackFunction)
   ) {
     return null;
@@ -35,7 +57,16 @@ export const findRenderInvokedUseCallbackOwner = (
   const wrapperCall = findTransparentExpressionRoot(callbackFunction).parent;
   if (
     !isNodeOfType(wrapperCall, "CallExpression") ||
-    !isReactApiCall(wrapperCall, "useCallback", context.scopes)
+    !isProvenUnmodifiedReactApiCall(wrapperCall, "useCallback", context.scopes)
+  ) {
+    return null;
+  }
+  const declarationOwner = findEnclosingFunction(wrapperCall);
+  if (
+    !isFunctionLike(declarationOwner) ||
+    declarationOwner.async ||
+    declarationOwner.generator ||
+    !componentOrHookDisplayNameForFunction(declarationOwner)
   ) {
     return null;
   }
@@ -54,18 +85,11 @@ export const findRenderInvokedUseCallbackOwner = (
     callbackSymbol,
     context.scopes,
   );
-  const hookCallee = stripParenExpression(wrapperCall.callee);
-  const hookIdentifier = getRootIdentifier(hookCallee);
-  const hookSymbol = hookIdentifier ? context.scopes.symbolFor(hookIdentifier) : null;
   if (
     !callbackSymbol ||
-    !hookIdentifier ||
-    !hookSymbol ||
-    [...callbackSymbol.references, ...hookSymbol.references].some(
+    callbackSymbol.references.some(
       (reference) => reference.flag !== "read" || isBindingAssignmentTarget(reference.identifier),
     ) ||
-    (isNodeOfType(hookCallee, "MemberExpression") &&
-      hasPossibleStaticPropertyMutationOrEscape(hookIdentifier, "useCallback", context.scopes)) ||
     !callbackArgument ||
     stripParenExpression(callbackArgument) !== callbackFunction
   ) {
@@ -83,10 +107,43 @@ export const findRenderInvokedUseCallbackOwner = (
     ) {
       continue;
     }
-    const renderOwner =
-      findRenderPhaseComponentOrHook(call, context.scopes) ??
-      findRenderInvokedUseCallbackOwner(call, context, nextVisitedFunctions);
-    if (renderOwner) return renderOwner;
+    let executionNode: EsTreeNode = call;
+    let owner = findEnclosingFunction(executionNode);
+    while (owner) {
+      if (
+        !isFunctionLike(owner) ||
+        owner.async ||
+        owner.generator ||
+        !isAstDescendant(executionNode, owner.body) ||
+        !isNodeReachableWithinFunction(executionNode, context, CALLBACK_REACHABILITY_OPTIONS) ||
+        !isSupportedUseCallbackExecutionPath(executionNode, owner, context, {
+          allowTruthyRegexGuard: owner === declarationOwner,
+        })
+      ) {
+        break;
+      }
+      if (
+        owner === declarationOwner &&
+        componentOrHookDisplayNameForFunction(owner) &&
+        !isNodeOfType(findComponentHocExpressionRoot(owner).parent, "CallExpression")
+      ) {
+        return owner;
+      }
+      if (hasOpaqueCallbackInputs(owner) || !isNodeOnUnconditionalPath(executionNode, owner)) {
+        break;
+      }
+      if (!isProvenSynchronousRenderCallback(owner, context.scopes)) {
+        const renderOwner = findRenderInvokedUseCallbackOwner(
+          executionNode,
+          context,
+          nextVisitedFunctions,
+        );
+        if (renderOwner === declarationOwner) return renderOwner;
+        break;
+      }
+      executionNode = findTransparentExpressionRoot(owner).parent ?? owner;
+      owner = findEnclosingFunction(owner);
+    }
   }
   return null;
 };
