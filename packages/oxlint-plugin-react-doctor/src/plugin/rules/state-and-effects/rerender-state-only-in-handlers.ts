@@ -4,7 +4,7 @@ import { BUILTIN_HOOK_NAMES, EFFECT_HOOK_NAMES } from "../../constants/react.js"
 import type { ScopeAnalysis } from "../../semantic/scope-analysis.js";
 import { collectSynchronouslyInvokedLocalFunctions } from "../../utils/collect-effect-invoked-functions.js";
 import { findEnclosingFunction } from "../../utils/find-enclosing-function.js";
-import { isWithinAssignmentTarget } from "../../utils/is-within-assignment-target.js";
+import { isBindingAssignmentTarget } from "../../utils/is-binding-assignment-target.js";
 import { defineRule } from "../../utils/define-rule.js";
 import { getRootIdentifierName } from "../../utils/get-root-identifier-name.js";
 import { isComponentAssignment } from "../../utils/is-component-assignment.js";
@@ -323,7 +323,7 @@ export const rerenderStateOnlyInHandlers = defineRule({
             if (functionSymbol?.declarationNode === functionNode) {
               return !functionSymbol.references.some(
                 (reference) =>
-                  reference.flag !== "read" || isWithinAssignmentTarget(reference.identifier),
+                  reference.flag !== "read" || isBindingAssignmentTarget(reference.identifier),
               );
             }
             if (!declarationScope.parent) return false;
