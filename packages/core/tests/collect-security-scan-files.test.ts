@@ -30,13 +30,21 @@ describe("collectSecurityScanFiles", () => {
     const openNextDir = path.join(projectRoot, ".open-next");
     const sourceDir = path.join(projectRoot, "src");
 
-    fs.mkdirSync(path.join(openNextDir, "assets", "_next", "static", "chunks"), { recursive: true });
+    fs.mkdirSync(path.join(openNextDir, "assets", "_next", "static", "chunks"), {
+      recursive: true,
+    });
     fs.mkdirSync(path.join(openNextDir, "server-functions", "default"), { recursive: true });
     fs.mkdirSync(sourceDir, { recursive: true });
 
     fs.writeFileSync(path.join(projectRoot, ".env"), "ROOT_SECRET=value\n");
-    fs.writeFileSync(path.join(openNextDir, "assets", "_next", "static", "chunks", "bundle.js"), "crypto\n");
-    fs.writeFileSync(path.join(openNextDir, "server-functions", "default", "handler.mjs"), "crypto\n");
+    fs.writeFileSync(
+      path.join(openNextDir, "assets", "_next", "static", "chunks", "bundle.js"),
+      "crypto\n",
+    );
+    fs.writeFileSync(
+      path.join(openNextDir, "server-functions", "default", "handler.mjs"),
+      "crypto\n",
+    );
     fs.writeFileSync(path.join(sourceDir, "App.tsx"), "export const App = () => null;\n");
 
     const files = [...collectSecurityScanFiles(projectRoot, new Set())];

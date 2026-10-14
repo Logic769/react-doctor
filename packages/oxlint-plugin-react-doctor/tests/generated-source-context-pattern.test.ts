@@ -9,8 +9,12 @@ describe("GENERATED_SOURCE_CONTEXT_PATTERN", () => {
   });
 
   it("matches .open-next build output paths", () => {
-    expect(GENERATED_SOURCE_CONTEXT_PATTERN.test(".open-next/assets/_next/static/chunks/bundle.js")).toBe(true);
-    expect(GENERATED_SOURCE_CONTEXT_PATTERN.test(".open-next/server-functions/default/handler.mjs")).toBe(true);
+    expect(
+      GENERATED_SOURCE_CONTEXT_PATTERN.test(".open-next/assets/_next/static/chunks/bundle.js"),
+    ).toBe(true);
+    expect(
+      GENERATED_SOURCE_CONTEXT_PATTERN.test(".open-next/server-functions/default/handler.mjs"),
+    ).toBe(true);
     expect(GENERATED_SOURCE_CONTEXT_PATTERN.test("app/.open-next/assets/chunks/app.js")).toBe(true);
   });
 
