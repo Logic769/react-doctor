@@ -31,7 +31,7 @@ import { isNodeReachableWithinFunction } from "../../utils/is-node-reachable-wit
 import { isReactApiCall } from "../../utils/is-react-api-call.js";
 import { classifyReactNativeFileTarget } from "../../utils/is-react-native-file.js";
 import { isTestlikeFilename } from "../../utils/is-testlike-filename.js";
-import { isWithinAssignmentTarget } from "../../utils/is-within-assignment-target.js";
+import { isBindingAssignmentTarget } from "../../utils/is-binding-assignment-target.js";
 import { readServerSnapshotBoolean } from "../../utils/read-server-snapshot-boolean.js";
 import { readInitialStateBoolean } from "../../utils/read-initial-state-boolean.js";
 import { resolveExactLocalFunction } from "../../utils/resolve-exact-local-function.js";
@@ -113,7 +113,7 @@ const resolveImportedHydrationFunction = (
   if (
     getFunctionBindingSymbols(resolvedExport.node, scopes).some((bindingSymbol) =>
       bindingSymbol.references.some(
-        (reference) => reference.flag !== "read" || isWithinAssignmentTarget(reference.identifier),
+        (reference) => reference.flag !== "read" || isBindingAssignmentTarget(reference.identifier),
       ),
     )
   ) {

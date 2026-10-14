@@ -14,7 +14,7 @@ import { isFunctionLike } from "./is-function-like.js";
 import { isNodeOfType } from "./is-node-of-type.js";
 import { isReactApiCall } from "./is-react-api-call.js";
 import { isReactHookName } from "./is-react-hook-name.js";
-import { isWithinAssignmentTarget } from "./is-within-assignment-target.js";
+import { isBindingAssignmentTarget } from "./is-binding-assignment-target.js";
 import { resolveConstIdentifierAlias } from "./resolve-const-identifier-alias.js";
 import { resolveCrossFileFunctionExportWithFilePath } from "./resolve-cross-file-function-export.js";
 import { resolveExactLocalFunction } from "./resolve-exact-local-function.js";
@@ -43,7 +43,7 @@ const getCrossFileScopes = (programNode: EsTreeNode): ScopeAnalysis => {
 const symbolIsImmutable = (symbol: SymbolDescriptor): boolean =>
   (symbol.kind === "const" || symbol.kind === "function") &&
   symbol.references.every(
-    (reference) => reference.flag === "read" && !isWithinAssignmentTarget(reference.identifier),
+    (reference) => reference.flag === "read" && !isBindingAssignmentTarget(reference.identifier),
   );
 
 const identifierAliasChainIsImmutable = (
