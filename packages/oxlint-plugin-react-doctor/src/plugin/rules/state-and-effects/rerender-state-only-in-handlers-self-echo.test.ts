@@ -8,6 +8,10 @@ describe("rerender-state-only-in-handlers rendered state after self-echo", () =>
     "useLayoutEffect(() => { setVisible(request.length); }, [request]);",
     "useEffect(() => { const current = request; switch (current.length) { case 1: setVisible(1); break; default: setVisible(0); } }, [request]);",
     "useEffect(() => { setVisible(() => request.length); }, [request]);",
+    "setVisible.description = 'visible'; useEffect(() => { setVisible(request.length); }, [request]);",
+    "[setVisible.description] = ['visible']; useEffect(() => { setVisible(request.length); }, [request]);",
+    "let value; ({ [setVisible]: value } = {}); useEffect(() => { setVisible(request.length); }, [request]);",
+    "let value; [value = setVisible] = []; useEffect(() => { setVisible(request.length); }, [request]);",
   ])("preserves a dependency that updates rendered state: %s", (consumer) => {
     const result = runRule(
       rerenderStateOnlyInHandlers,
@@ -65,6 +69,8 @@ describe("rerender-state-only-in-handlers rendered state after self-echo", () =>
     "[setVisible] = [publish];",
     "({ setVisible } = { setVisible: publish });",
     "setVisible ||= publish;",
+    "[setVisible = publish] = [];",
+    "for (setVisible of [publish]) {}",
   ])("retains the warning when the visible setter binding is replaced: %s", (replacement) => {
     const result = runRule(
       rerenderStateOnlyInHandlers,

@@ -1,7 +1,7 @@
 import { BUILTIN_HOOK_NAMES, EFFECT_HOOK_NAMES } from "../../constants/react.js";
 import type { ScopeAnalysis, SymbolDescriptor } from "../../semantic/scope-analysis.js";
 import { createReachableNodeChecker } from "../../utils/create-reachable-node-checker.js";
-import { isWithinAssignmentTarget } from "../../utils/is-within-assignment-target.js";
+import { isBindingAssignmentTarget } from "../../utils/is-binding-assignment-target.js";
 import { defineRule } from "../../utils/define-rule.js";
 import { getRootIdentifier } from "../../utils/get-root-identifier.js";
 import { isComponentAssignment } from "../../utils/is-component-assignment.js";
@@ -318,7 +318,7 @@ export const rerenderStateOnlyInHandlers = defineRule({
           setterSymbol &&
           !setterSymbol.references.some(
             (reference) =>
-              reference.flag !== "read" || isWithinAssignmentTarget(reference.identifier),
+              reference.flag !== "read" || isBindingAssignmentTarget(reference.identifier),
           )
         ) {
           renderedStateSetterSymbols.add(setterSymbol);
