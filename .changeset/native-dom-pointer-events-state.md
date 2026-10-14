@@ -1,0 +1,7 @@
+---
+"react-doctor": patch
+"eslint-plugin-react-doctor": patch
+"oxlint-plugin-react-doctor": patch
+---
+
+Avoid state-mutation warnings for string pointer-events writes on closed native DOM lookup handles passed through readonly local aliases. Keep warnings for unknown or mixed feeds and unsupported handle uses.
