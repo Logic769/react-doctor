@@ -957,8 +957,8 @@ const signature = crypto.createHash('md5').update(secret).digest('hex');
     const diagnosticsInOpenNext = diagnostics.filter((diagnostic: any) =>
       diagnostic.filePath.includes(".open-next"),
     );
-    const diagnosticsInAppCode = diagnostics.filter(
-      (diagnostic: any) => diagnostic.filePath.includes("src/auth.ts"),
+    const diagnosticsInAppCode = diagnostics.filter((diagnostic: any) =>
+      diagnostic.filePath.includes("src/auth.ts"),
     );
 
     expect(diagnosticsInOpenNext).toHaveLength(0);
