@@ -544,9 +544,12 @@ export const ${componentName} = () => (
 
   it("reports actual scanned node count in jsx-node-limit incomplete reason", () => {
     const simpleSource = "export const Simple = () => <div><span>text</span></div>;";
-    const result = detectDuplicateJsxSubtrees([{ path: "src/simple.tsx", sourceText: simpleSource }], {
-      budget: { maxJsxNodes: 1 },
-    });
+    const result = detectDuplicateJsxSubtrees(
+      [{ path: "src/simple.tsx", sourceText: simpleSource }],
+      {
+        budget: { maxJsxNodes: 1 },
+      },
+    );
 
     expect(result.incomplete).toBe(true);
     expect(result.incompleteReasons).toHaveLength(1);
