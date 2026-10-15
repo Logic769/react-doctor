@@ -153,6 +153,7 @@ export const EFFECT_SNIPPET_POOL = [
 // State — lazy initializers (incl. SSR-hazardous localStorage/matchMedia),
 // toggles, loading triples, prop mirrors, reducers, ref-sync.
 export const STATE_SNIPPET_POOL = [
+  `const FuzzExclusiveCounter = () => { const [fuzzCount, setFuzzCount] = useState(0); const handleFuzzKey = (event) => { if (event.key === "Home") setFuzzCount(0); else setFuzzCount(fuzzCount + 1); }; return <input onKeyDown={handleFuzzKey} value={fuzzCount} />; }; const fuzzExclusiveCounter = <FuzzExclusiveCounter />;`,
   `const fuzzValtioState = fuzzValtioProxy({ count: 0 }); const fuzzValtioSnapshot = useFuzzValtioSnapshot(fuzzValtioState); const handleFuzzValtioRead = () => console.log(fuzzValtioSnapshot.count); const fuzzValtioButton = <button onClick={handleFuzzValtioRead}>Read</button>;`,
   `const FuzzArrayConsumer = memo(() => null); const FuzzArrayHost = () => <FuzzArrayConsumer payload={[value]} />;`,
   `const FuzzEffectEventHost = ({ delay, onSearch }) => { useEffect(() => { const timeoutId = setTimeout(() => onSearch("done"), delay); return () => clearTimeout(timeoutId); }, [delay, onSearch]); return null; }; function FuzzTransitionHost() { const [isLoading, setIsLoading] = useState(false); const toggleLoading = () => setIsLoading(true); return <button onClick={toggleLoading}>{isLoading ? "Loading" : "Go"}</button>; } function FuzzMemoEarlyReturnHost({ loading }) { const content = useMemo(() => <Heavy />, []); if (loading) return null; return <div>{content}</div>; }`,
