@@ -293,6 +293,7 @@ export const GUARD_SNIPPET_POOL = [
 
 // Library idioms — tanstack, mobx, styled-components, next/dynamic, redux.
 export const LIBRARY_SNIPPET_POOL = [
+  `import FuzzCountMarkdown from "react-markdown"; import { useState as useFuzzCountState } from "react"; export const FuzzCountPreview = () => <FuzzCountMarkdown components={{ "count-item": () => { const [count] = useFuzzCountState(0); return <span>{count}</span>; } }}>{"count"}</FuzzCountMarkdown>;`,
   `const fuzzValtioSnapshot = useFuzzValtioSnapshot(fuzzValtioState); const fuzzValtioCount = fuzzValtioState.count;`,
   `const zodSchema = z.object({ value: z.string() }).strict();`,
   `const subscribeStore = useCallback((onStoreChange) => { store.on("change", onStoreChange); return () => store.off("change", onStoreChange); }, [store]); const snapshot = useSyncExternalStore(subscribeStore, getSnapshot);`,
