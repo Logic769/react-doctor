@@ -19,6 +19,9 @@
  *          exports — older plugin versions can lack newer compiler rules,
  *          so React Compiler users would otherwise hit
  *          "Rule 'void-use-memo' not found in plugin 'react-hooks-js'".
+ *   #2018 — JSX node budget must scale with project size to avoid marking
+ *           large repos incomplete, and duplicate jsx-node-limit reasons
+ *           must collapse into one summary instead of one per exhausted file.
  */
 
 import { spawnSync } from "node:child_process";
@@ -1014,5 +1017,59 @@ export const preferencesStore = createStore<PreferencesState>()((set, get) => ({
         includePaths: [path.join(projectDir, "src/stores/preferences/preferences-store.ts")],
       }),
     ).resolves.toEqual(expect.any(Array));
+  });
+});
+
+describe("issue #2018: JSX node budget scales with project size", () => {
+  it("completes maintainability analysis on large repos without hitting global budget", async () => {
+    const projectRoot = buildTestProject("large-jsx-project");
+    await setupReactProject(projectRoot);
+
+    for (let fileIndex = 0; fileIndex < 100; fileIndex++) {
+      writeFile(
+        path.join(projectRoot, "src", `component-${fileIndex}.tsx`),
+        `export const Component${fileIndex} = () => (<div><span>Content ${fileIndex}</span></div>);`,
+      );
+    }
+
+    const result = spawnSync("node", [path.join(__dirname, "../../dist/main.mjs"), "--json"], {
+      cwd: projectRoot,
+      encoding: "utf8",
+      env: { ...process.env, FORCE_COLOR: "0" },
+    });
+
+    const report = JSON.parse(result.stdout);
+    expect(report.skippedCheckReasons).not.toHaveProperty("dead-code");
+    expect(report.summary.score).not.toBeNull();
+  });
+
+  it("collapses jsx-node-limit reasons when budget is exceeded", async () => {
+    const projectRoot = buildTestProject("jsx-budget-exceeded");
+    await setupReactProject(projectRoot);
+    writeJson(path.join(projectRoot, "doctor.config.json"), {
+      jsx: {
+        budget: {
+          maxJsxNodes: 100,
+        },
+      },
+    });
+
+    for (let fileIndex = 0; fileIndex < 50; fileIndex++) {
+      writeFile(
+        path.join(projectRoot, "src", `large-${fileIndex}.tsx`),
+        `export const Large${fileIndex} = () => (${"<div>".repeat(20)}content${"</div>".repeat(20)});`,
+      );
+    }
+
+    const result = spawnSync("node", [path.join(__dirname, "../../dist/main.mjs"), "--json"], {
+      cwd: projectRoot,
+      encoding: "utf8",
+      env: { ...process.env, FORCE_COLOR: "0" },
+    });
+
+    const report = JSON.parse(result.stdout);
+    const deadCodeReason = report.skippedCheckReasons?.["dead-code"] ?? "";
+    const jsxNodeLimitMatches = deadCodeReason.match(/jsx-node-limit/g) || [];
+    expect(jsxNodeLimitMatches.length).toBe(1);
   });
 });
