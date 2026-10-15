@@ -917,7 +917,7 @@ describe("issue #921: non-string `projects` config entry crashes selectProjects"
 });
 
 describe("issue #1982: security scan reports findings from .open-next build output", () => {
-  it("does not report security findings from .open-next directory", async () => {
+  it("does not report security findings from .open-next directory", () => {
     const projectDir = setupReactProject(tempRoot, "issue-1982-opennext", {
       packageJsonExtras: {
         dependencies: {
@@ -928,6 +928,11 @@ describe("issue #1982: security scan reports findings from .open-next build outp
       },
       files: {
         "src/app/page.tsx": `export default function Page() { return <div>Hello</div>; }`,
+        "src/utils.ts": `
+// Application code with actual insecure crypto usage
+const crypto = require('crypto');
+const hash = crypto.createHash('md5');
+        `,
         ".open-next/assets/_next/static/chunks/bundle.js": `
 // This is bundled library code that uses crypto (intentionally insecure for bundle size)
 const hash = require('crypto').createHash('md5');
@@ -941,58 +946,43 @@ const html = '<script>var data = ' + JSON.stringify(userInput) + ';</script>';
       },
     });
 
-    const project = discoverProject(projectDir);
+    const { checkSecurityScan } = require("@react-doctor/core");
+    const diagnostics = checkSecurityScan(projectDir);
 
-    const result = await runOxlint({
-      rootDirectory: projectDir,
-      project,
-      includePaths: [
-        path.join(projectDir, "src/app/page.tsx"),
-        path.join(projectDir, ".open-next/assets/_next/static/chunks/bundle.js"),
-        path.join(projectDir, ".open-next/server-functions/default/handler.mjs"),
-      ],
-    });
-
-    const diagnosticsInOpenNext = result.filter((diagnostic) =>
-      diagnostic.path.includes(".open-next"),
+    const diagnosticsInOpenNext = diagnostics.filter((diagnostic: any) =>
+      diagnostic.filePath.includes(".open-next"),
+    );
+    const diagnosticsInAppCode = diagnostics.filter(
+      (diagnostic: any) => diagnostic.filePath.includes("src/utils.ts"),
     );
 
     expect(diagnosticsInOpenNext).toHaveLength(0);
+    expect(diagnosticsInAppCode.length).toBeGreaterThan(0);
   });
 
-  it("treats .open-next like .next and .vercel for build output exclusion", async () => {
+  it("treats .open-next like .next and .vercel for build output exclusion", () => {
     const projectDir = setupReactProject(tempRoot, "issue-1982-build-dirs", {
       files: {
         "src/app.tsx": `export const App = () => <div>Clean</div>;`,
+        "src/unsafe.ts": `const hash = require('crypto').createHash('md5');`,
         ".next/static/chunks/bundle.js": `const hash = require('crypto').createHash('md5');`,
         ".open-next/assets/bundle.js": `const hash = require('crypto').createHash('md5');`,
         ".vercel/output/bundle.js": `const hash = require('crypto').createHash('md5');`,
       },
     });
 
-    const project = discoverProject(projectDir);
+    const { checkSecurityScan } = require("@react-doctor/core");
+    const diagnostics = checkSecurityScan(projectDir);
 
-    const nextResult = await runOxlint({
-      rootDirectory: projectDir,
-      project,
-      includePaths: [path.join(projectDir, ".next/static/chunks/bundle.js")],
-    });
+    const inNext = diagnostics.filter((d: any) => d.filePath.includes(".next"));
+    const inOpenNext = diagnostics.filter((d: any) => d.filePath.includes(".open-next"));
+    const inVercel = diagnostics.filter((d: any) => d.filePath.includes(".vercel"));
+    const inSrc = diagnostics.filter((d: any) => d.filePath.includes("src/unsafe.ts"));
 
-    const openNextResult = await runOxlint({
-      rootDirectory: projectDir,
-      project,
-      includePaths: [path.join(projectDir, ".open-next/assets/bundle.js")],
-    });
-
-    const vercelResult = await runOxlint({
-      rootDirectory: projectDir,
-      project,
-      includePaths: [path.join(projectDir, ".vercel/output/bundle.js")],
-    });
-
-    expect(nextResult.filter((d) => d.path.includes(".next"))).toHaveLength(0);
-    expect(openNextResult.filter((d) => d.path.includes(".open-next"))).toHaveLength(0);
-    expect(vercelResult.filter((d) => d.path.includes(".vercel"))).toHaveLength(0);
+    expect(inNext).toHaveLength(0);
+    expect(inOpenNext).toHaveLength(0);
+    expect(inVercel).toHaveLength(0);
+    expect(inSrc.length).toBeGreaterThan(0);
   });
 });
 
