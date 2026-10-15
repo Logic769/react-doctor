@@ -285,3 +285,41 @@ describe("proven server snapshot gates", () => {
     expect(result.diagnostics.length).toBeGreaterThan(0);
   });
 });
+
+describe("native server snapshot return completion", () => {
+  it.each([
+    "if (!ready) return null;",
+    "if (!ready) { return null; }",
+    "if (ready) {} else return null;",
+    "if (ready) {} else { return null; }",
+  ])("preserves a direct initial return: %s", (guard) => {
+    const result = runConsumer(`
+      import { useSyncExternalStore } from 'react';
+      const subscribe = () => () => {};
+      const Panel = () => {
+        const ready = useSyncExternalStore(subscribe, () => true, () => false);
+        ${guard}
+        return typeof window === 'undefined' ? <aside /> : <main />;
+      };
+    `);
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it.each([
+    "do { try { return null; } finally { break; } } while (false);",
+    "do { break; return null; } while (false);",
+  ])("retains a browser branch after a normally completed loop: %s", (body) => {
+    const result = runConsumer(`
+      import { useSyncExternalStore } from 'react';
+      const subscribe = () => () => {};
+      const Panel = () => {
+        const ready = useSyncExternalStore(subscribe, () => true, () => false);
+        if (!ready) { ${body} }
+        return typeof window === 'undefined' ? <aside /> : <main />;
+      };
+    `);
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(1);
+  });
+});
