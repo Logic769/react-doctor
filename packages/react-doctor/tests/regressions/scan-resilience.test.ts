@@ -29,6 +29,7 @@ import { afterAll, describe, expect, it } from "vite-plus/test";
 
 import {
   batchIncludePaths,
+  checkSecurityScan,
   createOxlintConfig,
   OXLINT_MAX_FILES_PER_BATCH,
   runOxlint,
@@ -917,82 +918,30 @@ describe("issue #921: non-string `projects` config entry crashes selectProjects"
 });
 
 describe("issue #1982: security scan reports findings from .open-next build output", () => {
-  it("does not report security findings from .open-next directory", async () => {
-    const projectDir = setupReactProject(tempRoot, "issue-1982-opennext", {
-      packageJsonExtras: {
-        dependencies: {
-          next: "16.3.8",
-          react: "19.2.4",
-          "react-dom": "19.2.4",
-        },
-      },
+  it("skips build output while retaining findings in application source", () => {
+    const insecureSource = `import { createHash } from "node:crypto";
+export const hashPassword = (password) => createHash("md5").update(password).digest("hex");`;
+    const projectDirectory = setupReactProject(tempRoot, "issue-1982-opennext", {
       files: {
-        "src/app/page.tsx": `export default function Page() { return <div>Hello</div>; }`,
-        ".open-next/assets/_next/static/chunks/bundle.js": `
-// This is bundled library code that uses crypto (intentionally insecure for bundle size)
-const hash = require('crypto').createHash('md5');
-        `,
-        ".open-next/server-functions/default/handler.mjs": `
-// Server bundle with potentially unsafe patterns
-const crypto = require('crypto');
-const hash = crypto.createHash('md5');
-const html = '<script>var data = ' + JSON.stringify(userInput) + ';</script>';
-        `,
+        "src/app/page.tsx": "export const Page = () => <div>Hello</div>;",
+        "src/server/auth.ts": insecureSource,
+        "src/open-next-handler.ts": insecureSource,
+        ".next/static/chunks/bundle.js": insecureSource,
+        ".open-next/assets/_next/static/chunks/bundle.js": insecureSource,
+        ".open-next/server-functions/default/handler.mjs": insecureSource,
+        ".vercel/output/bundle.js": insecureSource,
       },
     });
 
-    const project = discoverProject(projectDir);
+    const diagnostics = checkSecurityScan(projectDirectory);
 
-    const result = await runOxlint({
-      rootDirectory: projectDir,
-      project,
-      includePaths: [
-        path.join(projectDir, "src/app/page.tsx"),
-        path.join(projectDir, ".open-next/assets/_next/static/chunks/bundle.js"),
-        path.join(projectDir, ".open-next/server-functions/default/handler.mjs"),
-      ],
-    });
-
-    const diagnosticsInOpenNext = result.filter((diagnostic) =>
-      diagnostic.path.includes(".open-next"),
+    expect(diagnostics.map((diagnostic) => diagnostic.filePath).sort()).toEqual([
+      "src/open-next-handler.ts",
+      "src/server/auth.ts",
+    ]);
+    expect(diagnostics.every((diagnostic) => diagnostic.rule === "insecure-crypto-risk")).toBe(
+      true,
     );
-
-    expect(diagnosticsInOpenNext).toHaveLength(0);
-  });
-
-  it("treats .open-next like .next and .vercel for build output exclusion", async () => {
-    const projectDir = setupReactProject(tempRoot, "issue-1982-build-dirs", {
-      files: {
-        "src/app.tsx": `export const App = () => <div>Clean</div>;`,
-        ".next/static/chunks/bundle.js": `const hash = require('crypto').createHash('md5');`,
-        ".open-next/assets/bundle.js": `const hash = require('crypto').createHash('md5');`,
-        ".vercel/output/bundle.js": `const hash = require('crypto').createHash('md5');`,
-      },
-    });
-
-    const project = discoverProject(projectDir);
-
-    const nextResult = await runOxlint({
-      rootDirectory: projectDir,
-      project,
-      includePaths: [path.join(projectDir, ".next/static/chunks/bundle.js")],
-    });
-
-    const openNextResult = await runOxlint({
-      rootDirectory: projectDir,
-      project,
-      includePaths: [path.join(projectDir, ".open-next/assets/bundle.js")],
-    });
-
-    const vercelResult = await runOxlint({
-      rootDirectory: projectDir,
-      project,
-      includePaths: [path.join(projectDir, ".vercel/output/bundle.js")],
-    });
-
-    expect(nextResult.filter((d) => d.path.includes(".next"))).toHaveLength(0);
-    expect(openNextResult.filter((d) => d.path.includes(".open-next"))).toHaveLength(0);
-    expect(vercelResult.filter((d) => d.path.includes(".vercel"))).toHaveLength(0);
   });
 });
 

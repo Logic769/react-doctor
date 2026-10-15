@@ -27,34 +27,35 @@ describe("collectSecurityScanFiles", () => {
 
   it("skips .open-next build output directory during walk", () => {
     const projectRoot = path.join(temporaryRoot, "opennext-project");
-    const openNextDir = path.join(projectRoot, ".open-next");
-    const sourceDir = path.join(projectRoot, "src");
+    const openNextDirectory = path.join(projectRoot, ".open-next");
+    const sourceDirectory = path.join(projectRoot, "src");
 
-    fs.mkdirSync(path.join(openNextDir, "assets", "_next", "static", "chunks"), {
+    fs.mkdirSync(path.join(openNextDirectory, "assets", "_next", "static", "chunks"), {
       recursive: true,
     });
-    fs.mkdirSync(path.join(openNextDir, "server-functions", "default"), { recursive: true });
-    fs.mkdirSync(sourceDir, { recursive: true });
+    fs.mkdirSync(path.join(openNextDirectory, "server-functions", "default"), { recursive: true });
+    fs.mkdirSync(sourceDirectory, { recursive: true });
 
     fs.writeFileSync(path.join(projectRoot, ".env"), "ROOT_SECRET=value\n");
     fs.writeFileSync(
-      path.join(openNextDir, "assets", "_next", "static", "chunks", "bundle.js"),
+      path.join(openNextDirectory, "assets", "_next", "static", "chunks", "bundle.js"),
       "crypto\n",
     );
     fs.writeFileSync(
-      path.join(openNextDir, "server-functions", "default", "handler.mjs"),
+      path.join(openNextDirectory, "server-functions", "default", "handler.mjs"),
       "crypto\n",
     );
-    fs.writeFileSync(path.join(sourceDir, "App.tsx"), "export const App = () => null;\n");
+    fs.writeFileSync(path.join(sourceDirectory, "App.tsx"), "export const App = () => null;\n");
 
-    const files = [...collectSecurityScanFiles(projectRoot, new Set())];
-    const relativePaths = files
-      .filter((file): file is Exclude<typeof file, null> => file !== null)
-      .map((file) => file.relativePath);
+    const relativePaths = [...collectSecurityScanFiles(projectRoot)].flatMap((file) =>
+      file === null ? [] : [file.relativePath],
+    );
 
     expect(relativePaths).toContain(".env");
     expect(relativePaths).toContain("src/App.tsx");
-    expect(relativePaths.some((p) => p.includes(".open-next"))).toBe(false);
+    expect(relativePaths.some((relativePath) => relativePath.startsWith(".open-next/"))).toBe(
+      false,
+    );
   });
 
   it("skips other build output directories like .vercel during walk", () => {
@@ -65,12 +66,11 @@ describe("collectSecurityScanFiles", () => {
     fs.writeFileSync(path.join(projectRoot, ".vercel", "output", "bundle.js"), "crypto\n");
     fs.writeFileSync(path.join(projectRoot, "src", "App.tsx"), "export const App = () => null;\n");
 
-    const files = [...collectSecurityScanFiles(projectRoot, new Set())];
-    const relativePaths = files
-      .filter((file): file is Exclude<typeof file, null> => file !== null)
-      .map((file) => file.relativePath);
+    const relativePaths = [...collectSecurityScanFiles(projectRoot)].flatMap((file) =>
+      file === null ? [] : [file.relativePath],
+    );
 
     expect(relativePaths).toContain("src/App.tsx");
-    expect(relativePaths.some((p) => p.includes(".vercel"))).toBe(false);
+    expect(relativePaths.some((relativePath) => relativePath.startsWith(".vercel/"))).toBe(false);
   });
 });
