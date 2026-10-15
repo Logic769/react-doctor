@@ -928,20 +928,25 @@ describe("issue #1982: security scan reports findings from .open-next build outp
       },
       files: {
         "src/app/page.tsx": `export default function Page() { return <div>Hello</div>; }`,
-        "src/utils.ts": `
-// Application code with actual insecure crypto usage
+        "src/auth.ts": `
+// Application code with insecure crypto in security context
 const crypto = require('crypto');
-const hash = crypto.createHash('md5');
+function hashPassword(password: string) {
+  return crypto.createHash('md5').update(password).digest('hex');
+}
         `,
         ".open-next/assets/_next/static/chunks/bundle.js": `
-// This is bundled library code that uses crypto (intentionally insecure for bundle size)
-const hash = require('crypto').createHash('md5');
+// Bundled library code with MD5 hash (intentionally weak for bundle size)
+const crypto = require('crypto');
+function hashToken(token) {
+  return crypto.createHash('md5').update(token).digest('hex');
+}
         `,
         ".open-next/server-functions/default/handler.mjs": `
-// Server bundle with potentially unsafe patterns
+// Server bundle with weak crypto
 const crypto = require('crypto');
-const hash = crypto.createHash('md5');
-const html = '<script>var data = ' + JSON.stringify(userInput) + ';</script>';
+const secret = "key";
+const signature = crypto.createHash('md5').update(secret).digest('hex');
         `,
       },
     });
@@ -953,7 +958,7 @@ const html = '<script>var data = ' + JSON.stringify(userInput) + ';</script>';
       diagnostic.filePath.includes(".open-next"),
     );
     const diagnosticsInAppCode = diagnostics.filter(
-      (diagnostic: any) => diagnostic.filePath.includes("src/utils.ts"),
+      (diagnostic: any) => diagnostic.filePath.includes("src/auth.ts"),
     );
 
     expect(diagnosticsInOpenNext).toHaveLength(0);
@@ -964,10 +969,28 @@ const html = '<script>var data = ' + JSON.stringify(userInput) + ';</script>';
     const projectDir = setupReactProject(tempRoot, "issue-1982-build-dirs", {
       files: {
         "src/app.tsx": `export const App = () => <div>Clean</div>;`,
-        "src/unsafe.ts": `const hash = require('crypto').createHash('md5');`,
-        ".next/static/chunks/bundle.js": `const hash = require('crypto').createHash('md5');`,
-        ".open-next/assets/bundle.js": `const hash = require('crypto').createHash('md5');`,
-        ".vercel/output/bundle.js": `const hash = require('crypto').createHash('md5');`,
+        "src/auth.ts": `
+// Application code with insecure crypto
+const crypto = require('crypto');
+function hashPassword(password: string) {
+  return crypto.createHash('md5').update(password).digest('hex');
+}
+        `,
+        ".next/static/chunks/bundle.js": `
+// MD5 in security context (should be skipped)
+const crypto = require('crypto');
+function hashToken(token) { return crypto.createHash('md5').update(token).digest('hex'); }
+        `,
+        ".open-next/assets/bundle.js": `
+// MD5 in security context (should be skipped)
+const crypto = require('crypto');
+function hashSecret(secret) { return crypto.createHash('md5').update(secret).digest('hex'); }
+        `,
+        ".vercel/output/bundle.js": `
+// MD5 in security context (should be skipped)
+const crypto = require('crypto');
+function hashPassword(password) { return crypto.createHash('md5').update(password).digest('hex'); }
+        `,
       },
     });
 
@@ -977,7 +1000,7 @@ const html = '<script>var data = ' + JSON.stringify(userInput) + ';</script>';
     const inNext = diagnostics.filter((d: any) => d.filePath.includes(".next"));
     const inOpenNext = diagnostics.filter((d: any) => d.filePath.includes(".open-next"));
     const inVercel = diagnostics.filter((d: any) => d.filePath.includes(".vercel"));
-    const inSrc = diagnostics.filter((d: any) => d.filePath.includes("src/unsafe.ts"));
+    const inSrc = diagnostics.filter((d: any) => d.filePath.includes("src/auth.ts"));
 
     expect(inNext).toHaveLength(0);
     expect(inOpenNext).toHaveLength(0);
