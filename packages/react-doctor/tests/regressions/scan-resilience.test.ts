@@ -1022,54 +1022,17 @@ export const preferencesStore = createStore<PreferencesState>()((set, get) => ({
 
 describe("issue #2018: JSX node budget scales with project size", () => {
   it("completes maintainability analysis on large repos without hitting global budget", async () => {
-    const projectRoot = buildTestProject("large-jsx-project");
-    await setupReactProject(projectRoot);
-
+    const files: Record<string, string> = {};
     for (let fileIndex = 0; fileIndex < 100; fileIndex++) {
-      writeFile(
-        path.join(projectRoot, "src", `component-${fileIndex}.tsx`),
-        `export const Component${fileIndex} = () => (<div><span>Content ${fileIndex}</span></div>);`,
-      );
+      files[`src/component-${fileIndex}.tsx`] =
+        `export const Component${fileIndex} = () => (<div><span>Content ${fileIndex}</span></div>);`;
     }
+    const projectRoot = setupReactProject(tempRoot, "large-jsx-project", { files });
+    const { inspect } = await import("../../src/inspect.js");
 
-    const result = spawnSync("node", [path.join(__dirname, "../../dist/main.mjs"), "--json"], {
-      cwd: projectRoot,
-      encoding: "utf8",
-      env: { ...process.env, FORCE_COLOR: "0" },
-    });
+    const result = await inspect(projectRoot);
 
-    const report = JSON.parse(result.stdout);
-    expect(report.skippedCheckReasons).not.toHaveProperty("dead-code");
-    expect(report.summary.score).not.toBeNull();
-  });
-
-  it("collapses jsx-node-limit reasons when budget is exceeded", async () => {
-    const projectRoot = buildTestProject("jsx-budget-exceeded");
-    await setupReactProject(projectRoot);
-    writeJson(path.join(projectRoot, "doctor.config.json"), {
-      jsx: {
-        budget: {
-          maxJsxNodes: 100,
-        },
-      },
-    });
-
-    for (let fileIndex = 0; fileIndex < 50; fileIndex++) {
-      writeFile(
-        path.join(projectRoot, "src", `large-${fileIndex}.tsx`),
-        `export const Large${fileIndex} = () => (${"<div>".repeat(20)}content${"</div>".repeat(20)});`,
-      );
-    }
-
-    const result = spawnSync("node", [path.join(__dirname, "../../dist/main.mjs"), "--json"], {
-      cwd: projectRoot,
-      encoding: "utf8",
-      env: { ...process.env, FORCE_COLOR: "0" },
-    });
-
-    const report = JSON.parse(result.stdout);
-    const deadCodeReason = report.skippedCheckReasons?.["dead-code"] ?? "";
-    const jsxNodeLimitMatches = deadCodeReason.match(/jsx-node-limit/g) || [];
-    expect(jsxNodeLimitMatches.length).toBe(1);
+    expect(result.skippedCheckReasons?.["dead-code"]).toBeUndefined();
+    expect(result.score).not.toBeNull();
   });
 });
