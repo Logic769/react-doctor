@@ -1,0 +1,31 @@
+import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
+import { getStaticPropertyKeyName } from "../../../utils/get-static-property-key-name.js";
+import { getStaticPropertyName } from "../../../utils/get-static-property-name.js";
+import { isNodeOfType } from "../../../utils/is-node-of-type.js";
+import { isProvenGlobalNamespaceReference } from "../../../utils/is-proven-global-namespace-reference.js";
+import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
+import { walkAst } from "../../../utils/walk-ast.js";
+import { STRING_STATE_TUPLE_PROVIDER_NAMES } from "./constants.js";
+
+const closedTupleProvidersByAnalysis = new WeakMap<ScopeAnalysis, boolean>();
+
+export const hasClosedStateTupleProvider = (scopes: ScopeAnalysis): boolean => {
+  const cached = closedTupleProvidersByAnalysis.get(scopes);
+  if (cached !== undefined) return cached;
+  let closed = true;
+  walkAst(scopes.rootScope.node, (node) => {
+    if (isTypeScriptTypePosition(node)) return false;
+    if (
+      STRING_STATE_TUPLE_PROVIDER_NAMES.some((name) =>
+        isProvenGlobalNamespaceReference(node, name, scopes),
+      ) ||
+      (isNodeOfType(node, "MemberExpression") && getStaticPropertyName(node) === "__proto__") ||
+      (isNodeOfType(node, "Property") &&
+        isNodeOfType(node.parent, "ObjectPattern") &&
+        getStaticPropertyKeyName(node, { allowComputedString: true }) === "__proto__")
+    )
+      closed = false;
+  });
+  closedTupleProvidersByAnalysis.set(scopes, closed);
+  return closed;
+};
