@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { basename } from "node:path";
 
-const [targetPath, scenarioJson] = process.argv.slice(2);
+const [targetUrl, scenarioJson] = process.argv.slice(2);
 const { exhaustRetries, expiredDeadline } = JSON.parse(scenarioJson);
 const originalRemoveDirectory = fs.rmdir;
 const busyError = Object.assign(new Error("injected busy cleanup directory"), { code: "EBUSY" });
@@ -23,7 +23,7 @@ fs.rmdir = (directoryPath, callback) => {
 };
 
 const { tsImport } = await import("tsx/esm/api");
-const { verifyMatrixImpactManifests } = await tsImport(targetPath, import.meta.url);
+const { verifyMatrixImpactManifests } = await tsImport(targetUrl, import.meta.url);
 const { MATRIX_IMPACT_MANIFEST_OPERATION_TIMEOUT_MS, TEMPORARY_DIRECTORY_REMOVE_MAX_RETRIES } =
   await tsImport(new URL("../../src/constants.ts", import.meta.url).href, import.meta.url);
 expectedBusyFailures = exhaustRetries ? TEMPORARY_DIRECTORY_REMOVE_MAX_RETRIES + 1 : 1;

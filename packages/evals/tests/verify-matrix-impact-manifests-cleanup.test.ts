@@ -23,9 +23,7 @@ const executeFile = promisify(execFile);
 const fixturePath = fileURLToPath(
   new URL("./fixtures/matrix-impact-cleanup-fault.mjs", import.meta.url),
 );
-const targetPath = fileURLToPath(
-  new URL("../src/verify-matrix-impact-manifests.ts", import.meta.url),
-);
+const targetUrl = new URL("../src/verify-matrix-impact-manifests.ts", import.meta.url).href;
 const scenarios: CleanupFaultScenario[] = [
   { name: "retries a transient busy directory", exhaustRetries: false, expiredDeadline: false },
   {
@@ -52,7 +50,7 @@ describe(
     it.each(scenarios)("$name", async ({ exhaustRetries, expiredDeadline }) => {
       const { stdout, stderr } = await executeFile(
         process.execPath,
-        [fixturePath, targetPath, JSON.stringify({ exhaustRetries, expiredDeadline })],
+        [fixturePath, targetUrl, JSON.stringify({ exhaustRetries, expiredDeadline })],
         {
           env: { ...process.env, NODE_OPTIONS: "" },
           timeout: MATRIX_IMPACT_MANIFEST_OPERATION_TIMEOUT_MS,
