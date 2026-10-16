@@ -141,6 +141,10 @@ export const hasUnresetNativeComponentState = ({
   const effectStatementIndex = componentFunction.body.body.findIndex(
     (statement) => statement === effectCall.parent,
   );
+  if (effectStatementIndex < 0) return false;
+  const precedingComponentStatements = new Set<EsTreeNode>(
+    componentFunction.body.body.slice(0, effectStatementIndex),
+  );
   const resetDeclarations = new Set<EsTreeNode>();
   for (const reference of resetSetterReferences) {
     const declaration = getUseStateDecl(analysis, reference);
@@ -167,12 +171,7 @@ export const hasUnresetNativeComponentState = ({
     ) {
       continue;
     }
-    const declarationStatementIndex = componentFunction.body.body.findIndex(
-      (bodyStatement) => bodyStatement === statement,
-    );
-    if (declarationStatementIndex >= 0 && declarationStatementIndex < effectStatementIndex) {
-      return true;
-    }
+    if (precedingComponentStatements.has(statement)) return true;
   }
   return false;
 };
