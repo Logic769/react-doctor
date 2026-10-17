@@ -1,3 +1,4 @@
+import { getEffectCallback } from "../../../utils/get-effect-callback.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { RuleContext } from "../../../utils/rule-context.js";
 import { enclosingComponentOrHookScope } from "../../../utils/enclosing-component-or-hook-scope.js";
@@ -70,9 +71,9 @@ export const resolveEffectInvokedNativeCallback = (
   ) {
     return null;
   }
-  const [suppliedEffectCallback, effectDependencies] = effectCall.arguments;
+  const [, effectDependencies] = effectCall.arguments;
   if (
-    suppliedEffectCallback !== effectCallback ||
+    getEffectCallback(effectCall, context.scopes) !== effectCallback ||
     !isNodeOfType(effectDependencies, "ArrayExpression") ||
     effectDependencies.elements.some((element) => isNodeOfType(element, "SpreadElement"))
   ) {

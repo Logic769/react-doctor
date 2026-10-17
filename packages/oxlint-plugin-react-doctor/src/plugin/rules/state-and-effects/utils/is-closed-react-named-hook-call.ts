@@ -1,3 +1,4 @@
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
 import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
@@ -46,7 +47,8 @@ const hasClosedReactNamedHookProvider = (scopes: ScopeAnalysis): boolean => {
         [...NATIVE_REACT_PROVIDER_HAZARD_NAMES, "globalThis", "window", "self", "global"].includes(
           node.name,
         ) &&
-        isErasedTypeScriptBinding(binding)
+        isErasedTypeScriptBinding(binding) &&
+        !hasRuntimeValueBinding(binding)
       ) {
         closed = false;
         return false;

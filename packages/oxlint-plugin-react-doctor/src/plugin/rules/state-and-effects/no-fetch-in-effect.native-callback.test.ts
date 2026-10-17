@@ -24,6 +24,37 @@ const nativeCallbackRuleOptions: RunRuleOptions = {
 
 const cases: NativeCallbackCase[] = [
   {
+    name: "readonly-effect-callback",
+    code: 'import {useCallback,useEffect} from "react"; export const SearchPanel=({query})=>{const load=useCallback(async(value)=>{await fetch(value)},[]); const effect=()=>{load(query)}; useEffect(effect,[query,load]);return null;};',
+    expectedCount: 1,
+  },
+  {
+    name: "readonly-effect-callback-alias-chain",
+    code: 'import {useCallback,useEffect} from "react"; export const SearchPanel=({query})=>{const load=useCallback(async(value)=>{await fetch(value)},[]); const effect=()=>{load(query)}; const alias=effect; useEffect(alias,[query,load]);return null;};',
+    expectedCount: 1,
+  },
+  {
+    name: "reassigned-effect-callback",
+    code: 'import {useCallback,useEffect} from "react"; export const SearchPanel=({query})=>{const load=useCallback(async(value)=>{await fetch(value)},[]); let effect=()=>{load(query)}; effect=()=>{}; useEffect(effect,[query,load]);return null;};',
+    expectedCount: 0,
+  },
+  {
+    name: "opaque-effect-callback",
+    code: 'import {useCallback,useEffect} from "react"; export const SearchPanel=({query})=>{const load=useCallback(async(value)=>{await fetch(value)},[]); const effect=opaqueFactory(()=>{load(query)}); useEffect(effect,[query,load]);return null;};',
+    expectedCount: 0,
+  },
+  {
+    name: "deferred-aliased-effect-callback",
+    code: 'import {useCallback,useEffect} from "react"; export const SearchPanel=({query})=>{const load=useCallback(async(value)=>{await fetch(value)},[]); const effect=()=>{setTimeout(()=>load(query),0)}; useEffect(effect,[query,load]);return null;};',
+    expectedCount: 0,
+  },
+  {
+    name: "async-aliased-effect-callback",
+    code: 'import {useCallback,useEffect} from "react"; export const SearchPanel=({query})=>{const load=useCallback(async(value)=>{await fetch(value)},[]); const effect=async()=>{await load(query)}; useEffect(effect,[query,load]);return null;};',
+    expectedCount: 0,
+  },
+
+  {
     name: "native-async-arrow-parameter",
     code: `import { useCallback, useEffect, useState } from "react";
 const SearchPanel = ({ query }) => {
