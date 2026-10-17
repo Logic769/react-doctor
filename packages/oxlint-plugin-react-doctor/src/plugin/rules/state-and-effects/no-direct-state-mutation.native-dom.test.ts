@@ -10,6 +10,16 @@ interface NativeDomWriteCase {
 
 const cases: ReadonlyArray<NativeDomWriteCase> = [
   {
+    name: "type-import-equals-provider",
+    code: 'import type Document = require("./types");Document.prototype.getElementById=customLookup;\nimport {useEffect,useState} from "react";export const Panel=()=>{const[host,setHost]=useState(null);useEffect(()=>{const node=document.getElementById("host");if(node)setHost(node);},[]);useEffect(()=>{if(!host)return;host.style.pointerEvents="none";},[host]);return <div/>;};',
+    expected: 1,
+  },
+  {
+    name: "local-interface-provider",
+    code: 'class Document {getElementById(){}}interface Document {}Document.prototype.getElementById=customLookup;\nimport {useEffect,useState} from "react";export const Panel=()=>{const[host,setHost]=useState(null);useEffect(()=>{const node=document.getElementById("host");if(node)setHost(node);},[]);useEffect(()=>{if(!host)return;host.style.pointerEvents="none";},[host]);return <div/>;};',
+    expected: 0,
+  },
+  {
     name: "erased-interface-provider",
     code: 'import {useEffect,useState} from "react";interface Document {} Document.prototype.getElementById=customLookup;export const Panel=()=>{const[host,setHost]=useState(null);useEffect(()=>{const node=document.getElementById("host");if(node)setHost(node);},[]);useEffect(()=>{if(!host)return;host.style.pointerEvents="none";},[host]);return <div/>;};',
     expected: 1,

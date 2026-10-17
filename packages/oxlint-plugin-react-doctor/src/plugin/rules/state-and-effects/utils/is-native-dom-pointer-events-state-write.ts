@@ -7,6 +7,7 @@ import { getResolvedStaticPropertyName } from "../../../utils/get-resolved-stati
 import { getRootIdentifier } from "../../../utils/get-root-identifier.js";
 import { getUninterruptedConstInitializer } from "../../../utils/get-uninterrupted-const-initializer.js";
 import { hasReactDefaultProviderMutation } from "../../../utils/has-react-default-provider-mutation.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
 import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import { isBindingAssignmentTarget } from "../../../utils/is-binding-assignment-target.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
@@ -134,7 +135,10 @@ const hasClosedDocumentProvider = (
           (isNodeOfType(node, "Identifier") &&
             node.name === namespaceName &&
             Boolean(
-              binding && context.scopes.referenceFor(node) && isErasedTypeScriptBinding(binding),
+              binding &&
+              context.scopes.referenceFor(node) &&
+              isErasedTypeScriptBinding(binding) &&
+              !hasRuntimeValueBinding(binding),
             )),
       ) ||
       ((isNodeOfType(node, "MemberExpression") ||
