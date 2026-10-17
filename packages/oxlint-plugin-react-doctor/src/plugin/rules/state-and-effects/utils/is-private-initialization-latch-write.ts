@@ -1,4 +1,4 @@
-import type { SymbolDescriptor } from "../../../semantic/scope-analysis.js";
+import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import { findEnclosingFunction } from "../../../utils/find-enclosing-function.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
@@ -28,6 +28,9 @@ import {
   PRIVATE_LATCH_UNSUPPORTED_PROGRAM_NODE_TYPES,
   PRIVATE_LATCH_UNSUPPORTED_PROPERTY_NAMES,
 } from "./private-initialization-latch/constants.js";
+
+const supportedProgramsByScopes = new WeakMap<ScopeAnalysis, boolean>();
+const closedOwners = new WeakMap<EsTreeNode, boolean>();
 
 const isDirectReactValueCall = (
   node: EsTreeNode,
@@ -81,10 +84,16 @@ const hasClosedReactProvider = (symbol: SymbolDescriptor): boolean => {
   });
 };
 
-const hasSupportedLatchProgram = (
-  protectedNames: ReadonlySet<string>,
-  context: RuleContext,
-): boolean => {
+const hasSupportedLatchProgram = (context: RuleContext): boolean => {
+  const cached = supportedProgramsByScopes.get(context.scopes);
+  if (cached !== undefined) return cached;
+  for (const symbol of context.scopes.rootScope.symbols) {
+    if (getValueImportSource(symbol) !== "react") continue;
+    if (!hasClosedReactProvider(symbol)) {
+      supportedProgramsByScopes.set(context.scopes, false);
+      return false;
+    }
+  }
   let supported = true;
   walkAst(context.scopes.rootScope.node, (node) => {
     if (!supported) return false;
@@ -94,25 +103,6 @@ const hasSupportedLatchProgram = (
     ) {
       supported = false;
       return false;
-    }
-    if (
-      (isNodeOfType(node, "TSInterfaceDeclaration") ||
-        isNodeOfType(node, "TSTypeAliasDeclaration")) &&
-      isNodeOfType(node.id, "Identifier") &&
-      protectedNames.has(node.id.name)
-    ) {
-      supported = false;
-      return false;
-    }
-    if (isNodeOfType(node, "ImportDeclaration")) {
-      for (const specifier of node.specifiers) {
-        if (
-          (node.importKind === "type" ||
-            (isNodeOfType(specifier, "ImportSpecifier") && specifier.importKind === "type")) &&
-          protectedNames.has(specifier.local.name)
-        )
-          supported = false;
-      }
     }
     if (isTypeScriptTypePosition(node)) return false;
     if (
@@ -150,6 +140,7 @@ const hasSupportedLatchProgram = (
         supported = false;
     }
   });
+  supportedProgramsByScopes.set(context.scopes, supported);
   return supported;
 };
 
@@ -233,10 +224,14 @@ export const isPrivateInitializationLatchWrite = (
     findEnclosingFunction(effect) !== owner
   )
     return false;
-  let closedOwner = true;
-  walkOwnFunctionScope(owner, (node) => {
-    if (isNodeOfType(node, "ReturnStatement") && node.argument) closedOwner = false;
-  });
+  let closedOwner = closedOwners.get(owner);
+  if (closedOwner === undefined) {
+    closedOwner = true;
+    walkOwnFunctionScope(owner, (node) => {
+      if (isNodeOfType(node, "ReturnStatement") && node.argument) closedOwner = false;
+    });
+    closedOwners.set(owner, closedOwner);
+  }
   let closedBranch = true;
   walkAst(guard.consequent, (node) => {
     if (
@@ -261,11 +256,5 @@ export const isPrivateInitializationLatchWrite = (
     }
   });
   if (!closedOwner || !closedBranch) return false;
-  const protectedNames = new Set([state.name, setter.name]);
-  for (const symbol of context.scopes.rootScope.symbols) {
-    if (getValueImportSource(symbol) !== "react") continue;
-    protectedNames.add(symbol.name);
-    if (!hasClosedReactProvider(symbol)) return false;
-  }
-  return hasSupportedLatchProgram(protectedNames, context);
+  return hasSupportedLatchProgram(context);
 };

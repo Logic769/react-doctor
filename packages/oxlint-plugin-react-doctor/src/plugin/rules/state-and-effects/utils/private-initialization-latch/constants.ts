@@ -30,6 +30,8 @@ export const PRIVATE_LATCH_UNSUPPORTED_PROPERTY_NAMES: ReadonlySet<string> = new
   "constructor",
   "prototype",
   "__proto__",
+  "__defineGetter__",
+  "__defineSetter__",
   "defineProperty",
   "defineProperties",
   "setPrototypeOf",
