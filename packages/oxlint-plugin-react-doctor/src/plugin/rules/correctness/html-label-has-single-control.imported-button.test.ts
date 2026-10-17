@@ -43,6 +43,35 @@ afterEach(() => {
 });
 const cases: ImportedButtonCase[] = [
   {
+    name: "runtime-binding-unmasked",
+    code: 'import {Button} from "./button";import {mutate} from "./external";function expose(){mutate(Button);}expose();export const View=()=> <label><input/><Button><span>Pick</span></Button></label>;',
+    expectedCount: 0,
+    buttonCode:
+      'import {Slot} from "@radix-ui/react-slot";export const Button=({asChild=false,...props})=>{const Host=asChild?Slot:"button";return <Host {...props}/>;};',
+  },
+  {
+    name: "runtime-binding-interface",
+    code: 'import {Button} from "./button";import {mutate} from "./external";function expose(){interface Button {}mutate(Button);}expose();export const View=()=> <label><input/><Button><span>Pick</span></Button></label>;',
+    expectedCount: 0,
+    buttonCode:
+      'import {Slot} from "@radix-ui/react-slot";export const Button=({asChild=false,...props})=>{const Host=asChild?Slot:"button";return <Host {...props}/>;};',
+  },
+  {
+    name: "runtime-binding-type-alias",
+    code: 'import {Button} from "./button";import {mutate} from "./external";function expose(){type Button=unknown;mutate(Button);}expose();export const View=()=> <label><input/><Button><span>Pick</span></Button></label>;',
+    expectedCount: 0,
+    buttonCode:
+      'import {Slot} from "@radix-ui/react-slot";export const Button=({asChild=false,...props})=>{const Host=asChild?Slot:"button";return <Host {...props}/>;};',
+  },
+  {
+    name: "runtime-binding-real-local-interface",
+    code: 'import {Button} from "./button";import {mutate} from "./external";function expose(){const Button=()=>null;interface Button {}mutate(Button);}expose();export const View=()=> <label><input/><Button><span>Pick</span></Button></label>;',
+    expectedCount: 1,
+    buttonCode:
+      'import {Slot} from "@radix-ui/react-slot";export const Button=({asChild=false,...props})=>{const Host=asChild?Slot:"button";return <Host {...props}/>;};',
+  },
+
+  {
     name: "consumer-require-provider-escape",
     code: 'import { Button } from "./button"; const controls = require("./button"); controls.Button.defaultProps = { asChild: true }; export const Example = () => <label><input /><Button><span>Pick</span></Button></label>;',
     buttonCode:
