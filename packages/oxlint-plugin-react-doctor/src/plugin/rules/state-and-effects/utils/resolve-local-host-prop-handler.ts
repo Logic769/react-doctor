@@ -12,6 +12,7 @@ import { isNodeReachableWithinFunction } from "../../../utils/is-node-reachable-
 import { isWithinAssignmentTarget } from "../../../utils/is-within-assignment-target.js";
 import { resolveExactLocalFunction } from "../../../utils/resolve-exact-local-function.js";
 import type { RuleContext } from "../../../utils/rule-context.js";
+import { TRANSPARENT_EXPRESSION_WRAPPER_TYPES } from "../../../utils/strip-paren-expression.js";
 import { walkAst } from "../../../utils/walk-ast.js";
 import { isClosedReactCommandHookCall } from "./is-closed-react-command-hook-call.js";
 
@@ -30,8 +31,16 @@ const hasSupportedProgram = (scopes: ScopeAnalysis): boolean => {
   if (cached !== undefined) return cached;
   let supported = true;
   walkAst(scopes.rootScope.node, (node) => {
+    const parent = node.parent;
     if (
-      node.type.startsWith("TS") ||
+      parent &&
+      TRANSPARENT_EXPRESSION_WRAPPER_TYPES.has(parent.type) &&
+      "expression" in parent &&
+      parent.expression !== node
+    )
+      return false;
+    if (
+      (node.type.startsWith("TS") && !TRANSPARENT_EXPRESSION_WRAPPER_TYPES.has(node.type)) ||
       ((isNodeOfType(node, "ImportDeclaration") || isNodeOfType(node, "ImportSpecifier")) &&
         node.importKind === "type")
     )
