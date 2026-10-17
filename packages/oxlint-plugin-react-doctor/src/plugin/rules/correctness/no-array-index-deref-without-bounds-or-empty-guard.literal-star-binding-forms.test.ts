@@ -33,6 +33,21 @@ const scenarios = [
     code: 'import type RegExp = require("provider-types");RegExp.prototype.exec = () => null;export const readPrefix = (input: string) => /^x*/.exec(input)![0].length;',
     expected: 1,
   },
+  {
+    name: "erased namespace cannot mask mutation: namespace RegExp {}",
+    code: "namespace RegExp {}RegExp.prototype.exec = () => null;export const readPrefix = (input: string) => /^x*/.exec(input)![0].length;",
+    expected: 1,
+  },
+  {
+    name: "erased namespace cannot mask mutation: namespace RegExp { export interface Marker {} }",
+    code: "namespace RegExp { export interface Marker {} }RegExp.prototype.exec = () => null;export const readPrefix = (input: string) => /^x*/.exec(input)![0].length;",
+    expected: 1,
+  },
+  {
+    name: "erased namespace cannot mask mutation: namespace RegExp { export namespace Nested { export interface Marker {} } }",
+    code: "namespace RegExp { export namespace Nested { export interface Marker {} } }RegExp.prototype.exec = () => null;export const readPrefix = (input: string) => /^x*/.exec(input)![0].length;",
+    expected: 1,
+  },
 ];
 const options = {
   filename: "src/binding-forms.tsx",
