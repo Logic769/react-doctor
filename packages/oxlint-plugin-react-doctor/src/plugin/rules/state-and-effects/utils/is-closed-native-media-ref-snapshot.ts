@@ -1,4 +1,4 @@
-import type { SymbolDescriptor } from "../../../semantic/scope-analysis.js";
+import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { RuleContext } from "../../../utils/rule-context.js";
 import { findEnclosingFunction } from "../../../utils/find-enclosing-function.js";
@@ -19,6 +19,7 @@ import {
   isProvenGlobalObjectReference,
   isProvenGlobalNamespaceReference,
 } from "../../../utils/is-proven-global-namespace-reference.js";
+import { isReactApiCall } from "../../../utils/is-react-api-call.js";
 import { isProvenUnmodifiedReactApiCall } from "../../../utils/is-proven-unmodified-react-api-call.js";
 import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
 import { resolveReactRefSymbol } from "../../../utils/react-ref-origin.js";
@@ -45,64 +46,63 @@ interface ClosedNativeMediaRefSnapshotInput {
   context: RuleContext;
 }
 
-export const isClosedNativeMediaRefSnapshot = ({
-  expression,
-  effectFunction,
-  context,
-}: ClosedNativeMediaRefSnapshotInput): boolean => {
-  const node = stripParenExpression(expression);
-  if (!isNodeOfType(node, "Identifier")) return false;
-  const snapshot = context.scopes.symbolFor(node);
-  const declaration = snapshot?.declarationNode;
-  const current = snapshot?.initializer ? stripParenExpression(snapshot.initializer) : null;
-  const owner = findEnclosingFunction(effectFunction);
-  const isReadonly = (symbol: SymbolDescriptor): boolean =>
+const readonlyNativeMediaBindings = new WeakMap<SymbolDescriptor, boolean>();
+const closedNativeMediaPrograms = new WeakMap<ScopeAnalysis, boolean>();
+const nativeMediaReactApiProofs = new WeakMap<
+  ScopeAnalysis,
+  WeakMap<SymbolDescriptor, Map<string, boolean>>
+>();
+const nativeMediaSnapshotProofs = new WeakMap<
+  ScopeAnalysis,
+  WeakMap<SymbolDescriptor, WeakMap<EsTreeNode, boolean>>
+>();
+
+const isReadonlyNativeMediaBinding = (symbol: SymbolDescriptor): boolean => {
+  const cached = readonlyNativeMediaBindings.get(symbol);
+  if (cached !== undefined) return cached;
+  const readonly =
     symbol.kind === "const" &&
     symbol.references.every(
       (reference) => reference.flag === "read" && !isBindingAssignmentTarget(reference.identifier),
     );
-  if (
-    !snapshot ||
-    !isReadonly(snapshot) ||
-    !owner ||
-    !isNodeOfType(declaration, "VariableDeclarator") ||
-    declaration.id !== snapshot.bindingIdentifier ||
-    findEnclosingFunction(declaration) !== effectFunction ||
-    !isNodeOfType(current, "MemberExpression") ||
-    current.optional ||
-    current.computed ||
-    getStaticPropertyName(current) !== "current" ||
-    declaration.range[1] > node.range[0]
-  )
-    return false;
-  const ref = resolveReactRefSymbol(current, context.scopes, { allowUnboundBareCalls: false });
-  const refCall = ref?.initializer ? stripParenExpression(ref.initializer) : null;
-  const refReceiver = stripParenExpression(current.object);
-  const providerIdentifier = isNodeOfType(refCall, "CallExpression")
-    ? getRootIdentifier(refCall.callee)
-    : null;
-  const provider = providerIdentifier ? context.scopes.symbolFor(providerIdentifier) : null;
-  const providerImport = provider ? getImportDeclarationForSymbol(provider) : null;
-  if (
-    !ref ||
-    !isReadonly(ref) ||
-    !isNodeOfType(refReceiver, "Identifier") ||
-    context.scopes.symbolFor(refReceiver) !== ref ||
-    !isNodeOfType(ref.declarationNode, "VariableDeclarator") ||
-    ref.declarationNode.id !== ref.bindingIdentifier ||
-    findEnclosingFunction(ref.declarationNode) !== owner ||
-    !isNodeOfType(refCall, "CallExpression") ||
-    refCall.optional ||
-    refCall.arguments.length !== NATIVE_MEDIA_CALL_ARGUMENT_COUNT ||
-    !isNodeOfType(refCall.arguments[FIRST_ARGUMENT_INDEX], "Literal") ||
-    refCall.arguments[FIRST_ARGUMENT_INDEX].value !== null ||
-    ref.declarationNode.range[1] > declaration.range[0] ||
-    providerImport?.source.value !== "react" ||
-    !isProvenUnmodifiedReactApiCall(refCall, "useRef", context.scopes) ||
-    hasReactDefaultProviderMutation("useRef", context.scopes)
-  )
-    return false;
+  readonlyNativeMediaBindings.set(symbol, readonly);
+  return readonly;
+};
 
+const isClosedNativeMediaReactApiCall = (
+  call: EsTreeNode,
+  api: string,
+  context: RuleContext,
+): boolean => {
+  if (!isNodeOfType(call, "CallExpression") || !isReactApiCall(call, api, context.scopes))
+    return false;
+  const identifier = getRootIdentifier(stripParenExpression(call.callee));
+  const symbol = identifier ? context.scopes.symbolFor(identifier) : null;
+  if (symbol?.kind !== "import") return false;
+  let bindings = nativeMediaReactApiProofs.get(context.scopes);
+  if (!bindings) {
+    bindings = new WeakMap();
+    nativeMediaReactApiProofs.set(context.scopes, bindings);
+  }
+  let proofs = bindings.get(symbol);
+  if (!proofs) {
+    proofs = new Map();
+    bindings.set(symbol, proofs);
+  }
+  const cached = proofs.get(api);
+  if (cached !== undefined) return cached;
+  const closed = isProvenUnmodifiedReactApiCall(call, api, context.scopes);
+  proofs.set(api, closed);
+  return closed;
+};
+
+const hasClosedNativeMediaRefProgram = (context: RuleContext): boolean => {
+  const cached = closedNativeMediaPrograms.get(context.scopes);
+  if (cached !== undefined) return cached;
+  if (hasReactDefaultProviderMutation("useRef", context.scopes)) {
+    closedNativeMediaPrograms.set(context.scopes, false);
+    return false;
+  }
   let hasProgramHazard = false;
   walkAst(context.scopes.rootScope.node, (candidate) => {
     if (hasProgramHazard) return false;
@@ -153,7 +153,10 @@ export const isClosedNativeMediaRefSnapshot = ({
         hasProgramHazard = true;
     }
   });
-  if (hasProgramHazard) return false;
+  if (hasProgramHazard) {
+    closedNativeMediaPrograms.set(context.scopes, false);
+    return false;
+  }
   for (const symbol of context.scopes.rootScope.symbols) {
     const imported = getImportDeclarationForSymbol(symbol);
     if (
@@ -186,12 +189,71 @@ export const isClosedNativeMediaRefSnapshot = ({
           isNodeOfType(invocation, "CallExpression") &&
           !invocation.optional &&
           stripParenExpression(invocation.callee) === (isNamespace ? parent : root) &&
-          isProvenUnmodifiedReactApiCall(invocation, api, context.scopes),
+          isClosedNativeMediaReactApiCall(invocation, api, context),
         );
       })
-    )
+    ) {
+      closedNativeMediaPrograms.set(context.scopes, false);
       return false;
+    }
   }
+
+  closedNativeMediaPrograms.set(context.scopes, true);
+  return true;
+};
+
+const hasClosedNativeMediaRefSnapshot = ({
+  expression,
+  effectFunction,
+  context,
+}: ClosedNativeMediaRefSnapshotInput): boolean => {
+  const node = stripParenExpression(expression);
+  if (!isNodeOfType(node, "Identifier")) return false;
+  const snapshot = context.scopes.symbolFor(node);
+  const declaration = snapshot?.declarationNode;
+  const current = snapshot?.initializer ? stripParenExpression(snapshot.initializer) : null;
+  const owner = findEnclosingFunction(effectFunction);
+  if (
+    !snapshot ||
+    !isReadonlyNativeMediaBinding(snapshot) ||
+    !owner ||
+    !isNodeOfType(declaration, "VariableDeclarator") ||
+    declaration.id !== snapshot.bindingIdentifier ||
+    findEnclosingFunction(declaration) !== effectFunction ||
+    !isNodeOfType(current, "MemberExpression") ||
+    current.optional ||
+    current.computed ||
+    getStaticPropertyName(current) !== "current"
+  )
+    return false;
+  const ref = resolveReactRefSymbol(current, context.scopes, { allowUnboundBareCalls: false });
+  const refCall = ref?.initializer ? stripParenExpression(ref.initializer) : null;
+  const refReceiver = stripParenExpression(current.object);
+  const providerIdentifier = isNodeOfType(refCall, "CallExpression")
+    ? getRootIdentifier(refCall.callee)
+    : null;
+  const provider = providerIdentifier ? context.scopes.symbolFor(providerIdentifier) : null;
+  const providerImport = provider ? getImportDeclarationForSymbol(provider) : null;
+  if (
+    !ref ||
+    !isReadonlyNativeMediaBinding(ref) ||
+    !isNodeOfType(refReceiver, "Identifier") ||
+    context.scopes.symbolFor(refReceiver) !== ref ||
+    !isNodeOfType(ref.declarationNode, "VariableDeclarator") ||
+    ref.declarationNode.id !== ref.bindingIdentifier ||
+    findEnclosingFunction(ref.declarationNode) !== owner ||
+    !isNodeOfType(refCall, "CallExpression") ||
+    refCall.optional ||
+    refCall.arguments.length !== NATIVE_MEDIA_CALL_ARGUMENT_COUNT ||
+    !isNodeOfType(refCall.arguments[FIRST_ARGUMENT_INDEX], "Literal") ||
+    refCall.arguments[FIRST_ARGUMENT_INDEX].value !== null ||
+    ref.declarationNode.range[1] > declaration.range[0] ||
+    providerImport?.source.value !== "react" ||
+    !isClosedNativeMediaReactApiCall(refCall, "useRef", context)
+  )
+    return false;
+
+  if (!hasClosedNativeMediaRefProgram(context)) return false;
 
   let attachmentCount = 0;
   for (const reference of ref.references) {
@@ -215,7 +277,7 @@ export const isClosedNativeMediaRefSnapshot = ({
             isNodeOfType(attribute, "JSXSpreadAttribute") ||
             (isNodeOfType(attribute, "JSXAttribute") &&
               isNodeOfType(attribute.name, "JSXIdentifier") &&
-              attribute.name.name.startsWith("on")),
+              (attribute.name.name === "is" || attribute.name.name.startsWith("on"))),
         ) ||
         opening.attributes.filter(
           (attribute) =>
@@ -292,7 +354,7 @@ export const isClosedNativeMediaRefSnapshot = ({
     const initializer = handler?.initializer ? stripParenExpression(handler.initializer) : null;
     return Boolean(
       handler &&
-      isReadonly(handler) &&
+      isReadonlyNativeMediaBinding(handler) &&
       findEnclosingFunction(handler.declarationNode) === effectFunction &&
       isNodeOfType(initializer, "ArrowFunctionExpression") &&
       !initializer.async &&
@@ -358,4 +420,34 @@ export const isClosedNativeMediaRefSnapshot = ({
       callback && handler && isLocalHandler(callback) && isListenerCall(call, handler),
     );
   });
+};
+
+export const isClosedNativeMediaRefSnapshot = (
+  input: ClosedNativeMediaRefSnapshotInput,
+): boolean => {
+  const node = stripParenExpression(input.expression);
+  if (!isNodeOfType(node, "Identifier")) return false;
+  const snapshot = input.context.scopes.symbolFor(node);
+  const declaration = snapshot?.declarationNode;
+  if (
+    !snapshot ||
+    !isNodeOfType(declaration, "VariableDeclarator") ||
+    declaration.range[1] > node.range[0]
+  )
+    return false;
+  let bindings = nativeMediaSnapshotProofs.get(input.context.scopes);
+  if (!bindings) {
+    bindings = new WeakMap();
+    nativeMediaSnapshotProofs.set(input.context.scopes, bindings);
+  }
+  let proofs = bindings.get(snapshot);
+  if (!proofs) {
+    proofs = new WeakMap();
+    bindings.set(snapshot, proofs);
+  }
+  const cached = proofs.get(input.effectFunction);
+  if (cached !== undefined) return cached;
+  const closed = hasClosedNativeMediaRefSnapshot(input);
+  proofs.set(input.effectFunction, closed);
+  return closed;
 };
