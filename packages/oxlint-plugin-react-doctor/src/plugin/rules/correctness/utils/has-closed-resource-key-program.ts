@@ -1,4 +1,5 @@
 import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
 import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import { getImportDeclarationForSymbol } from "../../../utils/get-import-declaration-for-symbol.js";
@@ -30,7 +31,8 @@ export const hasClosedResourceKeyProgram = (scopes: ScopeAnalysis): boolean => {
         binding &&
         binding.bindingIdentifier !== node &&
         RESOURCE_KEY_UNSUPPORTED_GLOBAL_NAMES.has(node.name) &&
-        isErasedTypeScriptBinding(binding)
+        isErasedTypeScriptBinding(binding) &&
+        !hasRuntimeValueBinding(binding)
       ) {
         supported = false;
         return false;
