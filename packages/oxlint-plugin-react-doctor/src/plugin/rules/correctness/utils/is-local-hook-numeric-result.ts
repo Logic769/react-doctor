@@ -14,6 +14,7 @@ import { getImportDeclarationForSymbol } from "../../../utils/get-import-declara
 import { getStaticPropertyKeyName } from "../../../utils/get-static-property-key-name.js";
 import { getStaticPropertyName } from "../../../utils/get-static-property-name.js";
 import { getValueImportDeclaration } from "../../../utils/get-value-import-declaration.js";
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import { isFunctionLike } from "../../../utils/is-function-like.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { isProvenGlobalObjectReference } from "../../../utils/is-proven-global-namespace-reference.js";
@@ -47,6 +48,14 @@ const NUMERIC_RESULT_GLOBAL_EXPOSURE_NAMES = new Set([
   "eval",
   "Function",
   "React",
+]);
+const NUMERIC_RESULT_ERASED_PROVIDER_NAMES = new Set([
+  ...NUMERIC_RESULT_GLOBAL_EXPOSURE_NAMES,
+  "Array",
+  "globalThis",
+  "window",
+  "self",
+  "global",
 ]);
 const closedNumericProgramByRoot = new WeakMap<EsTreeNode, boolean>();
 
@@ -92,9 +101,9 @@ const hasClosedNumericProgram = (scopes: ScopeAnalysis): boolean => {
   const root = scopes.rootScope.node;
   const cached = closedNumericProgramByRoot.get(root);
   if (cached !== undefined) return cached;
-  let closed = true;
+  let isClosed = true;
   walkAst(root, (node) => {
-    if (!closed) return false;
+    if (!isClosed) return false;
     if (isNodeOfType(node, "ImportDeclaration")) {
       for (const specifier of node.specifiers) {
         const symbol = scopes.symbolFor(specifier.local);
@@ -104,10 +113,10 @@ const hasClosedNumericProgram = (scopes: ScopeAnalysis): boolean => {
           !getValueImportDeclaration(symbol) &&
           symbol.references.some((reference) => !isTypeScriptTypePosition(reference.identifier))
         )
-          closed = false;
+          isClosed = false;
       }
       if (isTypeOnlyImport(node)) return false;
-      if (node.source.value === "module" || node.source.value === "node:module") closed = false;
+      if (node.source.value === "module" || node.source.value === "node:module") isClosed = false;
       if (
         node.source.value === "react" &&
         node.specifiers.some(
@@ -116,7 +125,7 @@ const hasClosedNumericProgram = (scopes: ScopeAnalysis): boolean => {
             isNodeOfType(specifier, "ImportNamespaceSpecifier"),
         )
       )
-        closed = false;
+        isClosed = false;
       return false;
     }
     if (
@@ -128,7 +137,7 @@ const hasClosedNumericProgram = (scopes: ScopeAnalysis): boolean => {
       node.type === "TSParameterProperty" ||
       node.type === "WithStatement"
     ) {
-      closed = false;
+      isClosed = false;
       return false;
     }
     if (isTypeScriptTypePosition(node)) return false;
@@ -141,7 +150,7 @@ const hasClosedNumericProgram = (scopes: ScopeAnalysis): boolean => {
         (getStaticPropertyKeyName(node) === "constructor" ||
           getStaticPropertyKeyName(node) === "__proto__"))
     ) {
-      closed = false;
+      isClosed = false;
       return false;
     }
     if (!isNodeOfType(node, "Identifier") || !scopes.referenceFor(node)) return;
@@ -149,10 +158,18 @@ const hasClosedNumericProgram = (scopes: ScopeAnalysis): boolean => {
       isProvenGlobalObjectReference(node, scopes) ||
       (NUMERIC_RESULT_GLOBAL_EXPOSURE_NAMES.has(node.name) && scopes.isGlobalReference(node))
     ) {
-      closed = false;
+      isClosed = false;
       return false;
     }
     const symbol = scopes.symbolFor(node);
+    if (
+      symbol &&
+      NUMERIC_RESULT_ERASED_PROVIDER_NAMES.has(node.name) &&
+      isErasedTypeScriptBinding(symbol)
+    ) {
+      isClosed = false;
+      return false;
+    }
     const imported = symbol ? getValueImportDeclaration(symbol) : null;
     if (isNodeOfType(imported, "ImportDeclaration") && imported.source.value === "react") {
       const parent = node.parent;
@@ -162,7 +179,7 @@ const hasClosedNumericProgram = (scopes: ScopeAnalysis): boolean => {
         parent.callee !== node ||
         parent.optional
       )
-        closed = false;
+        isClosed = false;
     }
     if (node.name !== "Array" || !scopes.isGlobalReference(node)) return;
     const member = node.parent;
@@ -178,10 +195,10 @@ const hasClosedNumericProgram = (scopes: ScopeAnalysis): boolean => {
       call.optional ||
       isWithinAssignmentTarget(member)
     )
-      closed = false;
+      isClosed = false;
   });
-  closedNumericProgramByRoot.set(root, closed);
-  return closed;
+  closedNumericProgramByRoot.set(root, isClosed);
+  return isClosed;
 };
 
 const isNonCallableStateSeed = (
