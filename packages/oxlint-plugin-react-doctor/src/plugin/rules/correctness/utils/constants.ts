@@ -6,3 +6,13 @@ export const GUARDED_MAP_EMPTY_ARGUMENT_COUNT = 0;
 export const GUARDED_MAP_METHOD_NAMES = new Set(["get", "set", "has", "forEach"]);
 
 export const GUARDED_MAP_DYNAMIC_PROVIDER_NAMES = new Set(["eval", "Function"]);
+
+export const GUARDED_MAP_ERASED_PROVIDER_NAMES = new Set([
+  ...GUARDED_MAP_DYNAMIC_PROVIDER_NAMES,
+  "Map",
+  "Array",
+  "globalThis",
+  "window",
+  "self",
+  "global",
+]);

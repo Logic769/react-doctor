@@ -14,6 +14,49 @@ interface GuardedMapCase {
 
 const guardedMapCases: GuardedMapCase[] = [
   {
+    name: "ambient-global-native-map-mutation",
+    source:
+      'declare const globalThis: any; Object.defineProperty(globalThis.Map.prototype, "get", { value: () => undefined }); const groups = new Map(); const selected = groups.get("group") ? groups.get("group")!.value : null;',
+    expected: 1,
+    proofExpected: 0,
+  },
+  {
+    name: "erased-interface-native-map-mutation",
+    source:
+      'interface globalThis {} Object.defineProperty(globalThis.Map.prototype, "get", { value: () => undefined }); const groups = new Map(); const selected = groups.get("group") ? groups.get("group")!.value : null;',
+    expected: 1,
+    proofExpected: 0,
+  },
+  {
+    name: "erased-type-import-native-map-mutation",
+    source:
+      'import type { globalThis } from "types"; Object.defineProperty(globalThis.Map.prototype, "get", { value: () => undefined }); const groups = new Map(); const selected = groups.get("group") ? groups.get("group")!.value : null;',
+    expected: 1,
+    proofExpected: 0,
+  },
+  {
+    name: "ambient-function-native-map-mutation",
+    source:
+      'declare const Function: any; Function("Map.prototype.get = () => undefined")(); const groups = new Map(); const selected = groups.get("group") ? groups.get("group")!.value : null;',
+    expected: 1,
+    proofExpected: 0,
+  },
+  {
+    name: "inert-ambient-global-keeps-map-proof",
+    source:
+      'declare const globalThis: any; const groups = new Map(); const selected = groups.get("group") ? groups.get("group")!.value : null;',
+    expected: 0,
+    proofExpected: 1,
+  },
+  {
+    name: "genuine-local-global-keeps-map-proof",
+    source:
+      'const globalThis = { Map: class {} }; Object.defineProperty(globalThis.Map.prototype, "get", { value: () => undefined }); const groups = new Map(); const selected = groups.get("group") ? groups.get("group")!.value : null;',
+    expected: 0,
+    proofExpected: 1,
+  },
+
+  {
     name: "string literal key",
     source: `const groups = new Map(); const selected = groups.get('group') ? groups.get('group')!.value : null;`,
     expected: 0,

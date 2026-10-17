@@ -5,6 +5,7 @@ import { findProgramRoot } from "../../../utils/find-program-root.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
 import { getDirectConstInitializer } from "../../../utils/get-direct-const-initializer.js";
 import { getResolvedStaticPropertyName } from "../../../utils/get-resolved-static-property-name.js";
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { isProvenGlobalObjectReference } from "../../../utils/is-proven-global-namespace-reference.js";
 import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
@@ -14,6 +15,7 @@ import {
   GUARDED_MAP_CALLBACK_PARAMETER_LIMIT,
   GUARDED_MAP_DYNAMIC_PROVIDER_NAMES,
   GUARDED_MAP_EMPTY_ARGUMENT_COUNT,
+  GUARDED_MAP_ERASED_PROVIDER_NAMES,
   GUARDED_MAP_GET_ARGUMENT_COUNT,
   GUARDED_MAP_KEY_ARGUMENT_INDEX,
   GUARDED_MAP_METHOD_NAMES,
@@ -115,6 +117,16 @@ const hasClosedLocalMapReferences = (
       return false;
     }
     if (!isNodeOfType(node, "Identifier") || !context.scopes.referenceFor(node)) return;
+    const providerSymbol = context.scopes.symbolFor(node);
+    if (
+      GUARDED_MAP_ERASED_PROVIDER_NAMES.has(node.name) &&
+      providerSymbol &&
+      providerSymbol.bindingIdentifier !== node &&
+      isErasedTypeScriptBinding(providerSymbol)
+    ) {
+      hasProviderExposure = true;
+      return false;
+    }
     if (
       GUARDED_MAP_DYNAMIC_PROVIDER_NAMES.has(node.name) &&
       context.scopes.isGlobalReference(node)
