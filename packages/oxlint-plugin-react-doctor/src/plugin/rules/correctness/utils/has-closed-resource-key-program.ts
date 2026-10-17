@@ -1,3 +1,4 @@
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import { getImportDeclarationForSymbol } from "../../../utils/get-import-declaration-for-symbol.js";
@@ -23,6 +24,18 @@ export const hasClosedResourceKeyProgram = (scopes: ScopeAnalysis): boolean => {
   const canonicalBindings = new Set<string>();
   walkAst(scopes.rootScope.node, (node: EsTreeNode) => {
     if (!supported) return false;
+    if (isNodeOfType(node, "Identifier") && !isTypeScriptTypePosition(node)) {
+      const binding = scopes.symbolFor(node);
+      if (
+        binding &&
+        binding.bindingIdentifier !== node &&
+        RESOURCE_KEY_UNSUPPORTED_GLOBAL_NAMES.has(node.name) &&
+        isErasedTypeScriptBinding(binding)
+      ) {
+        supported = false;
+        return false;
+      }
+    }
     if (
       isNodeOfType(node, "ImportExpression") ||
       node.type === "WithStatement" ||
