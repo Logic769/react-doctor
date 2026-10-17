@@ -1,4 +1,4 @@
-import type { SymbolDescriptor } from "../semantic/scope-analysis.js";
+import type { ScopeAnalysis, SymbolDescriptor } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
 import type { EsTreeNodeOfType } from "./es-tree-node-of-type.js";
 import { findEnclosingFunction } from "./find-enclosing-function.js";
@@ -9,6 +9,10 @@ import { getResolvedStaticPropertyName } from "./get-resolved-static-property-na
 import { getStaticPropertyName } from "./get-static-property-name.js";
 import { getValueImportSource } from "./get-value-import-declaration.js";
 import { isAstDescendant } from "./is-ast-descendant.js";
+import { hasRuntimeValueBinding } from "./has-runtime-value-binding.js";
+import { isErasedTypeScriptBinding } from "./is-erased-typescript-binding.js";
+import { isMemberMutationTarget } from "./is-member-mutation-target.js";
+import { isProvenGlobalNamespaceReference } from "./is-proven-global-namespace-reference.js";
 import { isFunctionLike } from "./is-function-like.js";
 import { isNodeOfType } from "./is-node-of-type.js";
 import { isNodeOnUnconditionalPath } from "./is-node-on-unconditional-path.js";
@@ -42,6 +46,162 @@ interface OwnerGuard {
   exitBranch: EsTreeNode | null;
 }
 
+interface OwnerCallbackRegion {
+  supported: boolean;
+  suspensions: EsTreeNode[];
+  suspensionEnds: number[];
+  windowNodes: EsTreeNode[];
+}
+
+interface OwnerSnapshotAnalysis {
+  readonlySymbols: WeakMap<SymbolDescriptor, boolean>;
+  closedSetters: WeakMap<SymbolDescriptor, boolean>;
+  closedRefs: WeakMap<
+    EsTreeNode,
+    WeakMap<SymbolDescriptor, WeakMap<SymbolDescriptor, Map<number, boolean>>>
+  >;
+  callbackRegions: WeakMap<EsTreeNode, OwnerCallbackRegion>;
+  loadedProviders: WeakMap<EsTreeNode, boolean>;
+  supportedProgram?: boolean;
+  runtimeScopes: ScopeAnalysis;
+}
+
+const ownerSnapshotAnalyses = new WeakMap<ScopeAnalysis, OwnerSnapshotAnalysis>();
+
+const getOwnerSnapshotAnalysis = (context: RuleContext): OwnerSnapshotAnalysis => {
+  const cached = ownerSnapshotAnalyses.get(context.scopes);
+  if (cached) return cached;
+  const analysis: OwnerSnapshotAnalysis = {
+    readonlySymbols: new WeakMap(),
+    closedSetters: new WeakMap(),
+    closedRefs: new WeakMap(),
+    callbackRegions: new WeakMap(),
+    loadedProviders: new WeakMap(),
+    runtimeScopes: {
+      ...context.scopes,
+      isGlobalReference: (identifier) => {
+        const reference = context.scopes.referenceFor(identifier);
+        const symbol = reference?.resolvedSymbol;
+        return Boolean(
+          reference &&
+          (!symbol || (isErasedTypeScriptBinding(symbol) && !hasRuntimeValueBinding(symbol))),
+        );
+      },
+    },
+  };
+  ownerSnapshotAnalyses.set(context.scopes, analysis);
+  return analysis;
+};
+
+const getFirstNodeAtOrAfter = (nodes: readonly EsTreeNode[], offset: number): number => {
+  let lowerIndex = 0;
+  let upperIndex = nodes.length;
+  while (lowerIndex < upperIndex) {
+    const middleIndex = Math.floor((lowerIndex + upperIndex) / 2);
+    if (nodes[middleIndex].range[0] < offset) lowerIndex = middleIndex + 1;
+    else upperIndex = middleIndex;
+  }
+  return lowerIndex;
+};
+
+const getOwnerCallbackRegion = (
+  callback: EsTreeNode,
+  context: RuleContext,
+): OwnerCallbackRegion => {
+  const regions = getOwnerSnapshotAnalysis(context).callbackRegions;
+  const cached = regions.get(callback);
+  if (cached) return cached;
+  const region: OwnerCallbackRegion = {
+    supported: true,
+    suspensions: [],
+    suspensionEnds: [],
+    windowNodes: [],
+  };
+  walkOwnFunctionScope(callback, (node) => {
+    if (
+      UNSUPPORTED_OWNER_REGION_NODE_TYPES.has(node.type) ||
+      (isNodeOfType(node, "TryStatement") && node.finalizer)
+    )
+      region.supported = false;
+    if (isNodeOfType(node, "AwaitExpression")) region.suspensions.push(node);
+    if (
+      UNSUPPORTED_OWNER_WINDOW_NODE_TYPES.has(node.type) ||
+      UNSUPPORTED_OWNER_REGION_NODE_TYPES.has(node.type) ||
+      (isNodeOfType(node, "UnaryExpression") && node.operator === "delete")
+    )
+      region.windowNodes.push(node);
+  });
+  region.suspensions.sort((left, right) => left.range[0] - right.range[0]);
+  region.windowNodes.sort((left, right) => left.range[0] - right.range[0]);
+  let lastSuspensionEnd = -Infinity;
+  for (const suspension of region.suspensions) {
+    lastSuspensionEnd = Math.max(lastSuspensionEnd, suspension.range[1]);
+    region.suspensionEnds.push(lastSuspensionEnd);
+  }
+  regions.set(callback, region);
+  return region;
+};
+
+const isLoadedOwnerReactProvider = (node: EsTreeNode, context: RuleContext): boolean => {
+  const expression = stripParenExpression(node);
+  const analysis = getOwnerSnapshotAnalysis(context);
+  const cached = analysis.loadedProviders.get(expression);
+  if (cached !== undefined) return cached;
+  analysis.loadedProviders.set(expression, false);
+  let loaded = false;
+  if (isNodeOfType(expression, "Identifier")) {
+    const symbol = context.scopes.symbolFor(expression);
+    const initializer = symbol && getDirectConstInitializer(symbol);
+    loaded = Boolean(initializer && isLoadedOwnerReactProvider(initializer, context));
+  } else if (
+    isNodeOfType(expression, "MemberExpression") &&
+    getStaticPropertyName(expression) === "default"
+  ) {
+    loaded = isLoadedOwnerReactProvider(expression.object, context);
+  } else if (
+    isNodeOfType(expression, "CallExpression") &&
+    !expression.optional &&
+    expression.arguments.length === DIRECT_HOOK_ARGUMENT_COUNT &&
+    isNodeOfType(expression.callee, "MemberExpression") &&
+    !expression.callee.optional &&
+    getStaticPropertyName(expression.callee) === "require" &&
+    isProvenGlobalNamespaceReference(expression.callee.object, "module", analysis.runtimeScopes)
+  ) {
+    const [moduleSource] = expression.arguments;
+    loaded = isNodeOfType(moduleSource, "Literal") && moduleSource.value === "react";
+  }
+  analysis.loadedProviders.set(expression, loaded);
+  return loaded;
+};
+
+const hasClosedLoadedOwnerProviderUse = (node: EsTreeNode, context: RuleContext): boolean => {
+  if (
+    (!isNodeOfType(node, "Identifier") || context.scopes.referenceFor(node)) &&
+    isLoadedOwnerReactProvider(node, context)
+  ) {
+    const expression = findTransparentExpressionRoot(node);
+    const parent = expression.parent;
+    if (isNodeOfType(parent, "MemberExpression") && parent.object === expression) {
+      const property = getStaticPropertyName(parent);
+      return (
+        property !== null &&
+        ((!REACT_OWNER_API_NAMES.has(property) && property !== "default") ||
+          !isMemberMutationTarget(parent))
+      );
+    }
+    if (
+      isNodeOfType(parent, "VariableDeclarator") &&
+      parent.init === expression &&
+      isNodeOfType(parent.id, "Identifier") &&
+      isNodeOfType(parent.parent, "VariableDeclaration") &&
+      parent.parent.kind === "const"
+    )
+      return true;
+    return isNodeOfType(parent, "UnaryExpression") && parent.operator === "void";
+  }
+  return true;
+};
+
 const isPlainNullLiteral = (node: EsTreeNode): boolean => {
   const expression = stripParenExpression(node);
   return (
@@ -52,8 +212,16 @@ const isPlainNullLiteral = (node: EsTreeNode): boolean => {
   );
 };
 
-const isReadonlySymbol = (symbol: SymbolDescriptor): boolean =>
-  symbol.references.every((reference) => reference.flag === "read");
+const isReadonlySymbol = (symbol: SymbolDescriptor, context: RuleContext): boolean => {
+  const proofs = getOwnerSnapshotAnalysis(context).readonlySymbols;
+  const cached = proofs.get(symbol);
+  if (cached !== undefined) return cached;
+  const readonly = symbol.references.every(
+    (reference) => reference.flag === "read" && !isMemberMutationTarget(reference.identifier),
+  );
+  proofs.set(symbol, readonly);
+  return readonly;
+};
 
 const isDirectCall = (node: EsTreeNode): boolean =>
   isNodeOfType(node.parent, "CallExpression") &&
@@ -77,7 +245,9 @@ const isActualOwnerHook = (call: EsTreeNode, apiName: string, context: RuleConte
   )
     provider = callee.object;
   const symbol = provider ? context.scopes.symbolFor(provider) : null;
-  return Boolean(symbol && getValueImportSource(symbol) === "react" && isReadonlySymbol(symbol));
+  return Boolean(
+    symbol && getValueImportSource(symbol) === "react" && isReadonlySymbol(symbol, context),
+  );
 };
 
 const getOwnerSnapshot = (
@@ -92,7 +262,7 @@ const getOwnerSnapshot = (
   let current: EsTreeNode = stripParenExpression(node);
   while (isNodeOfType(current, "Identifier")) {
     const symbol = context.scopes.symbolFor(current);
-    if (!symbol || !isReadonlySymbol(symbol) || seen.has(symbol)) return null;
+    if (!symbol || !isReadonlySymbol(symbol, context) || seen.has(symbol)) return null;
     seen.add(symbol);
     if (symbol.kind === "parameter") {
       return aliases.length > 0 &&
@@ -172,9 +342,28 @@ const hasClosedOwnerRef = (
   if (
     !isNodeOfType(initialInput, "Identifier") ||
     context.scopes.symbolFor(initialInput) !== snapshot.input ||
-    !isReadonlySymbol(ref)
+    !isReadonlySymbol(ref, context)
   )
     return false;
+  const analysis = getOwnerSnapshotAnalysis(context);
+  let callbackProofs = analysis.closedRefs.get(callback);
+  if (!callbackProofs) {
+    callbackProofs = new WeakMap();
+    analysis.closedRefs.set(callback, callbackProofs);
+  }
+  let inputProofs = callbackProofs.get(ref);
+  if (!inputProofs) {
+    inputProofs = new WeakMap();
+    callbackProofs.set(ref, inputProofs);
+  }
+  let suspensionProofs = inputProofs.get(snapshot.input);
+  if (!suspensionProofs) {
+    suspensionProofs = new Map();
+    inputProofs.set(snapshot.input, suspensionProofs);
+  }
+  const cached = suspensionProofs.get(firstSuspensionStart);
+  if (cached !== undefined) return cached;
+  suspensionProofs.set(firstSuspensionStart, false);
   let refreshCount = 0;
   for (const reference of ref.references) {
     const root = findTransparentExpressionRoot(reference.identifier);
@@ -214,10 +403,14 @@ const hasClosedOwnerRef = (
     )
       return false;
   }
-  return refreshCount === OWNER_RENDER_REFRESH_COUNT;
+  const closed = refreshCount === OWNER_RENDER_REFRESH_COUNT;
+  suspensionProofs.set(firstSuspensionStart, closed);
+  return closed;
 };
 
-const hasSupportedOwnerProgram = (names: ReadonlySet<string>, context: RuleContext): boolean => {
+const hasSupportedOwnerProgram = (context: RuleContext): boolean => {
+  const analysis = getOwnerSnapshotAnalysis(context);
+  if (analysis.supportedProgram !== undefined) return analysis.supportedProgram;
   let supported = true;
   walkAst(context.scopes.rootScope.node, (node) => {
     if (!supported) return false;
@@ -228,26 +421,7 @@ const hasSupportedOwnerProgram = (names: ReadonlySet<string>, context: RuleConte
       supported = false;
       return false;
     }
-    if (
-      (isNodeOfType(node, "TSInterfaceDeclaration") ||
-        isNodeOfType(node, "TSTypeAliasDeclaration")) &&
-      names.has(node.id.name)
-    ) {
-      supported = false;
-      return false;
-    }
-    if (isNodeOfType(node, "ImportDeclaration") && node.importKind === "type") {
-      if (node.specifiers.some((specifier) => names.has(specifier.local.name))) supported = false;
-      return false;
-    }
-    if (
-      isNodeOfType(node, "ImportSpecifier") &&
-      node.importKind === "type" &&
-      names.has(node.local.name)
-    ) {
-      supported = false;
-      return false;
-    }
+    if (isNodeOfType(node, "ImportDeclaration") && node.importKind === "type") return false;
     if (
       (isNodeOfType(node, "ExportNamedDeclaration") &&
         node.exportKind === "type" &&
@@ -274,6 +448,10 @@ const hasSupportedOwnerProgram = (names: ReadonlySet<string>, context: RuleConte
       supported = false;
       return false;
     }
+    if (!hasClosedLoadedOwnerProviderUse(node, context)) {
+      supported = false;
+      return false;
+    }
     if (!isNodeOfType(node, "Identifier")) return;
     const reference = context.scopes.referenceFor(node);
     if (!reference) return;
@@ -286,8 +464,11 @@ const hasSupportedOwnerProgram = (names: ReadonlySet<string>, context: RuleConte
     )
       supported = false;
   });
-  if (!supported) return false;
-  return context.scopes.rootScope.symbols.every((symbol) => {
+  if (!supported) {
+    analysis.supportedProgram = false;
+    return false;
+  }
+  analysis.supportedProgram = context.scopes.rootScope.symbols.every((symbol) => {
     if (getValueImportSource(symbol) !== "react") return true;
     const named =
       isNodeOfType(symbol.declarationNode, "ImportSpecifier") &&
@@ -305,6 +486,7 @@ const hasSupportedOwnerProgram = (names: ReadonlySet<string>, context: RuleConte
       );
     });
   });
+  return analysis.supportedProgram;
 };
 
 const hasClosedStateSetter = (
@@ -313,6 +495,11 @@ const hasClosedStateSetter = (
   context: RuleContext,
 ): boolean => {
   const declaration = setter.declarationNode;
+  if (findEnclosingFunction(declaration) !== owner) return false;
+  const proofs = getOwnerSnapshotAnalysis(context).closedSetters;
+  const cached = proofs.get(setter);
+  if (cached !== undefined) return cached;
+  proofs.set(setter, false);
   if (
     setter.kind !== "const" ||
     !isNodeOfType(declaration, "VariableDeclarator") ||
@@ -328,7 +515,7 @@ const hasClosedStateSetter = (
     return false;
   const [initial] = declaration.init.arguments;
   if (!isPlainNullLiteral(initial)) return false;
-  return setter.references.every((reference) => {
+  const closed = setter.references.every((reference) => {
     const call = reference.identifier.parent;
     return (
       reference.flag === "read" &&
@@ -339,6 +526,8 @@ const hasClosedStateSetter = (
       !isFunctionLike(stripParenExpression(call.arguments[0]))
     );
   });
+  proofs.set(setter, closed);
+  return closed;
 };
 
 const isSupportedCallbackCarrier = (
@@ -359,7 +548,9 @@ const isSupportedCallbackCarrier = (
     const binding = isNodeOfType(parent.id, "Identifier")
       ? context.scopes.symbolFor(parent.id)
       : null;
-    return parent.init === callback && binding?.kind === "const" && isReadonlySymbol(binding);
+    return (
+      parent.init === callback && binding?.kind === "const" && isReadonlySymbol(binding, context)
+    );
   }
   if (
     !isNodeOfType(parent, "CallExpression") ||
@@ -375,7 +566,7 @@ const isSupportedCallbackCarrier = (
       const input = context.scopes.symbolFor(element);
       return (
         input?.kind === "parameter" &&
-        isReadonlySymbol(input) &&
+        isReadonlySymbol(input, context) &&
         isFunctionLike(owner) &&
         owner.params.some((parameter) => parameter === input.bindingIdentifier)
       );
@@ -390,7 +581,7 @@ const isSupportedCallbackCarrier = (
   )
     return false;
   const binding = context.scopes.symbolFor(declaration.id);
-  return binding?.kind === "const" && isReadonlySymbol(binding);
+  return binding?.kind === "const" && isReadonlySymbol(binding, context);
 };
 
 const isDirectOwnerExit = (node: EsTreeNode, callback: EsTreeNode): boolean => {
@@ -414,21 +605,17 @@ const isDirectOwnerExit = (node: EsTreeNode, callback: EsTreeNode): boolean => {
 const isUninterruptedOwnerWindow = (
   guard: OwnerGuard,
   call: EsTreeNode,
-  callback: EsTreeNode,
+  region: OwnerCallbackRegion,
 ): boolean => {
-  let supported = true;
-  walkOwnFunctionScope(callback, (node) => {
-    if (!supported) return false;
-    if (node === guard.exitBranch) return false;
-    if (node.range[0] < guard.comparison.range[1] || node.range[0] >= call.range[0]) return;
-    if (
-      UNSUPPORTED_OWNER_WINDOW_NODE_TYPES.has(node.type) ||
-      UNSUPPORTED_OWNER_REGION_NODE_TYPES.has(node.type) ||
-      (isNodeOfType(node, "UnaryExpression") && node.operator === "delete")
-    )
-      supported = false;
-  });
-  return supported;
+  const startIndex = getFirstNodeAtOrAfter(region.windowNodes, guard.comparison.range[1]);
+  for (let nodeIndex = startIndex; nodeIndex < region.windowNodes.length; nodeIndex++) {
+    const node = region.windowNodes[nodeIndex];
+    if (node.range[0] >= call.range[0]) return true;
+    if (guard.exitBranch && (node === guard.exitBranch || isAstDescendant(node, guard.exitBranch)))
+      continue;
+    return false;
+  }
+  return true;
 };
 
 export const isReadonlyOwnerSnapshotGuardedClear = (
@@ -449,21 +636,11 @@ export const isReadonlyOwnerSnapshotGuardedClear = (
     !hasClosedStateSetter(setter, owner, context)
   )
     return false;
-  let firstSuspensionStart = Infinity;
-  let lastSuspensionEnd = -Infinity;
-  let supportedRegion = true;
-  walkOwnFunctionScope(callback, (node) => {
-    if (
-      UNSUPPORTED_OWNER_REGION_NODE_TYPES.has(node.type) ||
-      (isNodeOfType(node, "TryStatement") && node.finalizer)
-    )
-      supportedRegion = false;
-    if (isNodeOfType(node, "AwaitExpression") && node.range[0] < call.range[0]) {
-      firstSuspensionStart = Math.min(firstSuspensionStart, node.range[0]);
-      lastSuspensionEnd = Math.max(lastSuspensionEnd, node.range[1]);
-    }
-  });
-  if (!supportedRegion || !Number.isFinite(firstSuspensionStart)) return false;
+  const region = getOwnerCallbackRegion(callback, context);
+  const suspensionCount = getFirstNodeAtOrAfter(region.suspensions, call.range[0]);
+  if (!region.supported || suspensionCount === 0) return false;
+  const firstSuspensionStart = region.suspensions[0].range[0];
+  const lastSuspensionEnd = region.suspensionEnds[suspensionCount - 1];
   const getGuard = (
     condition: EsTreeNode,
     equality: boolean,
@@ -505,15 +682,9 @@ export const isReadonlyOwnerSnapshotGuardedClear = (
         !hasClosedOwnerRef(ref, snapshot, callback, owner, firstSuspensionStart, context)
       )
         continue;
-      const names = new Set([
-        ref.name,
-        snapshot.input.name,
-        setter.name,
-        ...snapshot.aliases.map((alias) => alias.name),
-      ]);
-      if (!hasSupportedOwnerProgram(names, context)) continue;
+      if (!hasSupportedOwnerProgram(context)) continue;
       const guard = { comparison: expression, exitBranch };
-      if (isUninterruptedOwnerWindow(guard, call, callback)) return guard;
+      if (isUninterruptedOwnerWindow(guard, call, region)) return guard;
     }
     return null;
   };
