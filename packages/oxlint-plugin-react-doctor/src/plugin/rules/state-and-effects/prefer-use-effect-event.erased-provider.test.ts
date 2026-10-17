@@ -33,6 +33,21 @@ const cases = [
     code: 'declare const globalThis:any;const world=globalThis;world.require("react").useCallback = () => () => undefined;import { useCallback, useEffect } from "react"; export const Example = ({ active, value }) => { const leaf = useCallback(() => "ready", []); const callback = useCallback(() => leaf(), [leaf]); useEffect(() => { const timer = setTimeout(() => callback(), 0); return () => clearTimeout(timer); }, [callback, active]); return null; };',
     expected: 1,
   },
+  {
+    name: "rejects type-only import-equals provider rewrites",
+    code: 'import type require = require("provider-types");require("react").useCallback = () => () => undefined;import { useCallback, useEffect } from "react"; export const Example = ({ active, value }) => { const leaf = useCallback(() => "ready", []); const callback = useCallback(() => leaf(), [leaf]); useEffect(() => { const timer = setTimeout(() => callback(), 0); return () => clearTimeout(timer); }, [callback, active]); return null; };',
+    expected: 1,
+  },
+  {
+    name: "preserves genuine import-equals value binding",
+    code: 'import require = require("provider-values");require("react").useCallback = () => () => undefined;import { useCallback, useEffect } from "react"; export const Example = ({ active, value }) => { const leaf = useCallback(() => "ready", []); const callback = useCallback(() => leaf(), [leaf]); useEffect(() => { const timer = setTimeout(() => callback(), 0); return () => clearTimeout(timer); }, [callback, active]); return null; };',
+    expected: 0,
+  },
+  {
+    name: "preserves genuine value binding with merged interface",
+    code: 'const require = () => ({}); interface require {}require("react").useCallback = () => () => undefined;import { useCallback, useEffect } from "react"; export const Example = ({ active, value }) => { const leaf = useCallback(() => "ready", []); const callback = useCallback(() => leaf(), [leaf]); useEffect(() => { const timer = setTimeout(() => callback(), 0); return () => clearTimeout(timer); }, [callback, active]); return null; };',
+    expected: 0,
+  },
 ];
 
 describe("erased runtime provider admission", () => {

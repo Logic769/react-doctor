@@ -48,6 +48,21 @@ const cases = [
     code: 'import type require from "provider-types";require("react").useRef = () => ({current:0});import {useEffect,useRef,useState,useCallback} from "react";\nexport const Example=({value,other,enabled})=>{const [count,writeCount]=useState(0);const current=useRef(count);useEffect(()=>{writeCount(value);current.current=value},[value]);return <output>{count}</output>};',
     expected: 1,
   },
+  {
+    name: "rejects type-only import-equals provider rewrites",
+    code: 'import type require = require("provider-types");require("react").useRef = () => ({current:0});import {useEffect,useRef,useState,useCallback} from "react";\nexport const Example=({value,other,enabled})=>{const [count,writeCount]=useState(0);const current=useRef(count);useEffect(()=>{writeCount(value);current.current=value},[value]);return <output>{count}</output>};',
+    expected: 1,
+  },
+  {
+    name: "preserves genuine import-equals value binding",
+    code: 'import require = require("provider-values");require("react").useRef = () => ({current:0});import {useEffect,useRef,useState,useCallback} from "react";\nexport const Example=({value,other,enabled})=>{const [count,writeCount]=useState(0);const current=useRef(count);useEffect(()=>{writeCount(value);current.current=value},[value]);return <output>{count}</output>};',
+    expected: 0,
+  },
+  {
+    name: "preserves genuine value binding with merged interface",
+    code: 'const require = () => ({}); interface require {}require("react").useRef = () => ({current:0});import {useEffect,useRef,useState,useCallback} from "react";\nexport const Example=({value,other,enabled})=>{const [count,writeCount]=useState(0);const current=useRef(count);useEffect(()=>{writeCount(value);current.current=value},[value]);return <output>{count}</output>};',
+    expected: 0,
+  },
 ];
 
 describe("erased runtime provider admission", () => {
