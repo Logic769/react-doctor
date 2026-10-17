@@ -11,6 +11,16 @@ const options: RunRuleOptions = {
 
 const cases = [
   {
+    name: "ambient-string-provider-mutation-retains-warning",
+    code: 'declare const String: any; String.prototype.split = () => []; export const read = (input: string) => { const text = input; const position = text.indexOf("."); return position !== -1 ? text.split(".")[1].length : 0; };',
+    count: 1,
+  },
+  {
+    name: "ambient-global-provider-mutation-retains-warning",
+    code: 'declare const globalThis: any; globalThis.String.prototype.split = () => []; export const read = (input: string) => { const text = input; const position = text.indexOf("."); return position !== -1 ? text.split(".")[1].length : 0; };',
+    count: 1,
+  },
+  {
     name: "reflected-string-prototype-mutation-retains-warning",
     code: 'Object.getPrototypeOf("").split = () => []; export const read = (input: string) => { const text = input; const position = text.indexOf("."); return position !== -1 ? text.split(".")[1].length : 0; };',
     count: 1,

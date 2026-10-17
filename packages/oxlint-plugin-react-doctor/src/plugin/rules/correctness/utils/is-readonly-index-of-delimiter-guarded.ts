@@ -9,9 +9,9 @@ import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import { findEnclosingFunction } from "../../../utils/find-enclosing-function.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
 import { getDirectConstInitializer } from "../../../utils/get-direct-const-initializer.js";
-import { getImportDeclarationForSymbol } from "../../../utils/get-import-declaration-for-symbol.js";
 import { getStaticPropertyName } from "../../../utils/get-static-property-name.js";
 import { getSymbolTypeAnnotation } from "../../../utils/get-symbol-type-annotation.js";
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { isNativePrototypeExposure } from "../../../utils/is-native-prototype-exposure.js";
 import { isPresenceProvenBeforeNode } from "../../../utils/is-presence-proven-before-node.js";
@@ -19,7 +19,6 @@ import {
   isProvenGlobalNamespaceReference,
   isProvenGlobalObjectReference,
 } from "../../../utils/is-proven-global-namespace-reference.js";
-import { isTypeOnlyImport } from "../../../utils/is-type-only-import.js";
 import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
 import { isWithinAssignmentTarget } from "../../../utils/is-within-assignment-target.js";
 import { walkAst } from "../../../utils/walk-ast.js";
@@ -111,15 +110,10 @@ export const isReadonlyIndexOfDelimiterGuarded = (
     }
     if (isNodeOfType(candidate, "Identifier")) {
       const symbol = scopes.symbolFor(candidate);
-      const importDeclaration = symbol ? getImportDeclarationForSymbol(symbol) : null;
       if (
         symbol &&
         symbol.bindingIdentifier !== candidate &&
-        (symbol.kind === "ts-interface" ||
-          symbol.kind === "ts-type-alias" ||
-          (importDeclaration !== null && isTypeOnlyImport(importDeclaration)) ||
-          (isNodeOfType(symbol.declarationNode, "ImportSpecifier") &&
-            symbol.declarationNode.importKind === "type")) &&
+        isErasedTypeScriptBinding(symbol) &&
         (candidate.name === "String" ||
           candidate.name === "Number" ||
           candidate.name === "globalThis" ||
