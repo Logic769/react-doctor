@@ -1,3 +1,4 @@
+import { isMemberMutationTarget } from "./is-member-mutation-target.js";
 import type { ScopeAnalysis, SymbolDescriptor } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
 import { findEnclosingFunction } from "./find-enclosing-function.js";
@@ -255,41 +256,6 @@ const isFunctionSynchronouslyInvokedBefore = (
     synchronousNode,
   ).length > 0;
 
-const isMemberWriteTarget = (memberExpression: EsTreeNode): boolean => {
-  let currentNode = findTransparentExpressionRoot(memberExpression);
-  while (currentNode.parent) {
-    const parentNode = currentNode.parent;
-    if (isNodeOfType(parentNode, "AssignmentExpression")) {
-      return parentNode.left === currentNode;
-    }
-    if (
-      isNodeOfType(parentNode, "UpdateExpression") ||
-      (isNodeOfType(parentNode, "UnaryExpression") && parentNode.operator === "delete")
-    ) {
-      return parentNode.argument === currentNode;
-    }
-    if (isNodeOfType(parentNode, "ForInStatement") || isNodeOfType(parentNode, "ForOfStatement")) {
-      return parentNode.left === currentNode;
-    }
-    if (isNodeOfType(parentNode, "Property")) {
-      if (parentNode.value !== currentNode || !isNodeOfType(parentNode.parent, "ObjectPattern")) {
-        return false;
-      }
-    } else if (isNodeOfType(parentNode, "AssignmentPattern")) {
-      if (parentNode.left !== currentNode) return false;
-    } else if (isNodeOfType(parentNode, "RestElement")) {
-      if (parentNode.argument !== currentNode) return false;
-    } else if (
-      !isNodeOfType(parentNode, "ArrayPattern") &&
-      !isNodeOfType(parentNode, "ObjectPattern")
-    ) {
-      return false;
-    }
-    currentNode = findTransparentExpressionRoot(parentNode);
-  }
-  return false;
-};
-
 const getMemberWriteTarget = (identifier: EsTreeNode): EsTreeNode | null => {
   let parent = identifier.parent;
   while (parent && stripParenExpression(parent) === identifier) {
@@ -299,7 +265,7 @@ const getMemberWriteTarget = (identifier: EsTreeNode): EsTreeNode | null => {
     !parent ||
     !isNodeOfType(parent, "MemberExpression") ||
     stripParenExpression(parent.object) !== identifier ||
-    !isMemberWriteTarget(parent)
+    !isMemberMutationTarget(parent)
   ) {
     return null;
   }
