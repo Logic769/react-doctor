@@ -6,6 +6,7 @@ import { getDirectConstInitializer } from "../../../utils/get-direct-const-initi
 import { getStaticPropertyName } from "../../../utils/get-static-property-name.js";
 import { getSymbolTypeAnnotation } from "../../../utils/get-symbol-type-annotation.js";
 import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { isNativePrototypeExposure } from "../../../utils/is-native-prototype-exposure.js";
 import {
@@ -49,7 +50,12 @@ export const hasClosedLiteralStarRegexProviders = (
     }
     if (isNodeOfType(node, "Identifier") && REGEX_GLOBAL_EXPOSED_PROPERTY_NAMES.has(node.name)) {
       const symbol = scopes.symbolFor(node);
-      if (symbol && symbol.bindingIdentifier !== node && isErasedTypeScriptBinding(symbol)) {
+      if (
+        symbol &&
+        symbol.bindingIdentifier !== node &&
+        isErasedTypeScriptBinding(symbol) &&
+        !hasRuntimeValueBinding(symbol)
+      ) {
         isClosed = false;
         return false;
       }
