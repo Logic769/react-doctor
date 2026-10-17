@@ -38,6 +38,31 @@ const cases = [
     code: 'const Object = {defineProperty: () => null, getPrototypeOf: () => ({})}; interface Object {}import { useEffect } from "react";\nconst Panel = () => {\n  useEffect(() => {\n    const targets = Array.from(document.querySelectorAll(".item"));\n    const observers = targets.map((target) => {\n      const observer = new IntersectionObserver(() => {Object.defineProperty(Object.getPrototypeOf([]), "map", {value: () => []});}, { threshold: 0.2 });\n      observer.observe(target);\n      return observer;\n    });\n    return () => {\n      targets.map((target, index) => observers[index]?.unobserve(target));\n    };\n  }, []);\n  return null;\n};',
     expected: 0,
   },
+  {
+    name: "rejects empty namespace provider masking",
+    code: 'namespace Object {}import { useEffect } from "react";\nconst Panel = () => {\n  useEffect(() => {\n    const targets = Array.from(document.querySelectorAll(".item"));\n    const observers = targets.map((target) => {\n      const observer = new IntersectionObserver(() => {Object.defineProperty(Object.getPrototypeOf([]), "map", {value: () => []});}, { threshold: 0.2 });\n      observer.observe(target);\n      return observer;\n    });\n    return () => {\n      targets.map((target, index) => observers[index]?.unobserve(target));\n    };\n  }, []);\n  return null;\n};',
+    expected: 1,
+  },
+  {
+    name: "rejects type-only namespace provider masking",
+    code: 'namespace Object { export interface Marker {} }import { useEffect } from "react";\nconst Panel = () => {\n  useEffect(() => {\n    const targets = Array.from(document.querySelectorAll(".item"));\n    const observers = targets.map((target) => {\n      const observer = new IntersectionObserver(() => {Object.defineProperty(Object.getPrototypeOf([]), "map", {value: () => []});}, { threshold: 0.2 });\n      observer.observe(target);\n      return observer;\n    });\n    return () => {\n      targets.map((target, index) => observers[index]?.unobserve(target));\n    };\n  }, []);\n  return null;\n};',
+    expected: 1,
+  },
+  {
+    name: "rejects nested type-only namespace provider masking",
+    code: 'namespace Object { export namespace Nested { export type Marker = unknown; } }import { useEffect } from "react";\nconst Panel = () => {\n  useEffect(() => {\n    const targets = Array.from(document.querySelectorAll(".item"));\n    const observers = targets.map((target) => {\n      const observer = new IntersectionObserver(() => {Object.defineProperty(Object.getPrototypeOf([]), "map", {value: () => []});}, { threshold: 0.2 });\n      observer.observe(target);\n      return observer;\n    });\n    return () => {\n      targets.map((target, index) => observers[index]?.unobserve(target));\n    };\n  }, []);\n  return null;\n};',
+    expected: 1,
+  },
+  {
+    name: "preserves an inert empty namespace",
+    code: 'namespace Object {}import { useEffect } from "react";\nconst Panel = () => {\n  useEffect(() => {\n    const targets = Array.from(document.querySelectorAll(".item"));\n    const observers = targets.map((target) => {\n      const observer = new IntersectionObserver(() => {}, { threshold: 0.2 });\n      observer.observe(target);\n      return observer;\n    });\n    return () => {\n      targets.map((target, index) => observers[index]?.unobserve(target));\n    };\n  }, []);\n  return null;\n};',
+    expected: 0,
+  },
+  {
+    name: "preserves a genuine runtime namespace",
+    code: 'namespace Object { export const marker = 1; } void Object;import { useEffect } from "react";\nconst Panel = () => {\n  useEffect(() => {\n    const targets = Array.from(document.querySelectorAll(".item"));\n    const observers = targets.map((target) => {\n      const observer = new IntersectionObserver(() => {}, { threshold: 0.2 });\n      observer.observe(target);\n      return observer;\n    });\n    return () => {\n      targets.map((target, index) => observers[index]?.unobserve(target));\n    };\n  }, []);\n  return null;\n};',
+    expected: 0,
+  },
 ];
 
 describe("erased runtime provider admission", () => {
