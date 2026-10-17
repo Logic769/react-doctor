@@ -1,5 +1,6 @@
 import type { SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
 import { getImportedName } from "../../../utils/get-imported-name.js";
 import { isAstNode } from "../../../utils/is-ast-node.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
@@ -39,6 +40,7 @@ export const isNodeFileUrlConfigurationModule = (
 
   let hasUnsupportedSyntax = false;
   const providers: SymbolDescriptor[] = [];
+  const typeOnlyProviderNames = new Set<string>();
   walkAst(program, (node) => {
     if (hasUnsupportedSyntax) return false;
     if (NODE_FILE_URL_ERASED_TYPES.has(node.type)) return false;
@@ -74,12 +76,7 @@ export const isNodeFileUrlConfigurationModule = (
         node.importKind === "type" ||
         (isNodeOfType(specifier, "ImportSpecifier") && specifier.importKind === "type");
       if (isTypeOnly) {
-        if (
-          symbol.references.some((reference) => !isTypeScriptTypePosition(reference.identifier))
-        ) {
-          hasUnsupportedSyntax = true;
-          return false;
-        }
+        typeOnlyProviderNames.add(symbol.name);
         continue;
       }
       if (!isNodeOfType(specifier, "ImportSpecifier") || getImportedName(specifier) === "default") {
@@ -96,6 +93,27 @@ export const isNodeFileUrlConfigurationModule = (
   });
   const provider = providers[0];
   if (hasUnsupportedSyntax || !provider) return false;
+  if (typeOnlyProviderNames.size) {
+    const pendingScopes = [context.scopes.rootScope];
+    let currentScope = pendingScopes.pop();
+    while (currentScope) {
+      pendingScopes.push(...currentScope.children);
+      for (const reference of currentScope.references) {
+        const identifier = reference.identifier;
+        if (
+          !isNodeOfType(identifier, "Identifier") ||
+          !typeOnlyProviderNames.has(identifier.name) ||
+          isTypeScriptTypePosition(identifier)
+        ) {
+          continue;
+        }
+        if (!reference.resolvedSymbol || !hasRuntimeValueBinding(reference.resolvedSymbol)) {
+          return false;
+        }
+      }
+      currentScope = pendingScopes.pop();
+    }
+  }
   const references = provider.references.filter(
     (reference) => !isTypeScriptTypePosition(reference.identifier),
   );

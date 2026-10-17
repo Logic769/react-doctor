@@ -705,6 +705,96 @@ const cases: NodeConfigurationLoaderCase[] = [
     fixturePackage: { main: "index.js", engines: { node: ">=20" } },
     expectedCount: 1,
   },
+  {
+    name: "type-only alias: existing type-only runtime write",
+    code: 'import { pathToFileURL } from "url";\nimport type * as urlApi from "url";\nurlApi.pathToFileURL = replacement;\nexport const load = (file) => import(pathToFileURL(file).href);\n',
+    fixturePackage: { main: "index.js", engines: { node: ">=20" } },
+    expectedCount: 1,
+  },
+  {
+    name: "type-only alias: inner interface hides erased runtime write",
+    code: 'import { pathToFileURL } from "url";\nimport type * as urlApi from "url";\nfunction change(){interface urlApi{};urlApi.pathToFileURL = replacement;}change();\nexport const load = (file) => import(pathToFileURL(file).href);\n',
+    fixturePackage: { main: "index.js", engines: { node: ">=20" } },
+    expectedCount: 1,
+  },
+  {
+    name: "type-only alias: inner typealias hides erased runtime write",
+    code: 'import { pathToFileURL } from "url";\nimport type * as urlApi from "url";\nfunction change(){type urlApi=unknown;urlApi.pathToFileURL = replacement;}change();\nexport const load = (file) => import(pathToFileURL(file).href);\n',
+    fixturePackage: { main: "index.js", engines: { node: ">=20" } },
+    expectedCount: 1,
+  },
+  {
+    name: "type-only alias: nearest real local shadow",
+    code: 'import {pathToFileURL}from"url";import type*as urlApi from"url";function change(){const urlApi={pathToFileURL:()=>null};interface urlApi{};urlApi.pathToFileURL=()=>null;}change();export const load=(file)=>import(pathToFileURL(file).href);',
+    fixturePackage: { main: "index.js", engines: { node: ">=20" } },
+    expectedCount: 0,
+  },
+  {
+    name: "type-only alias: outer real local shadow",
+    code: 'import {pathToFileURL}from"url";import type*as urlApi from"url";function change(){const urlApi={pathToFileURL:()=>null};function nested(){interface urlApi{};urlApi.pathToFileURL=()=>null;}nested();}change();export const load=(file)=>import(pathToFileURL(file).href);',
+    fixturePackage: { main: "index.js", engines: { node: ">=20" } },
+    expectedCount: 0,
+  },
+  {
+    name: "type-only alias: inert type-only alias",
+    code: 'import {pathToFileURL}from"url";import type*as urlApi from"url";export const load=(file)=>import(pathToFileURL(file).href);',
+    fixturePackage: { main: "index.js", engines: { node: ">=20" } },
+    expectedCount: 0,
+  },
+  {
+    name: "type-only alias: unrelated property name",
+    code: 'import {pathToFileURL}from"url";import type*as urlApi from"url";const object={urlApi:1};void object.urlApi;export const load=(file)=>import(pathToFileURL(file).href);',
+    fixturePackage: { main: "index.js", engines: { node: ">=20" } },
+    expectedCount: 0,
+  },
+  {
+    name: "type-only alias: real parameter shadow",
+    code: 'import {pathToFileURL}from"url";import type*as urlApi from"url";function change(urlApi){interface urlApi{};urlApi.pathToFileURL=()=>null;}export const load=(file)=>import(pathToFileURL(file).href);',
+    fixturePackage: { main: "index.js", engines: { node: ">=20" } },
+    expectedCount: 0,
+  },
+  {
+    name: "type-only alias: masked shorthand runtime exposure",
+    code: 'import {pathToFileURL}from"url";import type*as urlApi from"url";function change(){interface urlApi{};consume({urlApi});}change();export const load=(file)=>import(pathToFileURL(file).href);',
+    fixturePackage: { main: "index.js", engines: { node: ">=20" } },
+    expectedCount: 1,
+  },
+  {
+    name: "type-only alias: masked computed runtime key",
+    code: 'import {pathToFileURL}from"url";import type*as urlApi from"url";function change(){interface urlApi{};void object[urlApi];}change();export const load=(file)=>import(pathToFileURL(file).href);',
+    fixturePackage: { main: "index.js", engines: { node: ">=20" } },
+    expectedCount: 1,
+  },
+  {
+    name: "type-only alias: erased alias in type positions",
+    code: 'import {pathToFileURL}from"url";import type*as urlApi from"url";interface urlApi{};type Carrier=typeof urlApi;export const load=(file)=>import(pathToFileURL(file).href);',
+    fixturePackage: { main: "index.js", engines: { node: ">=20" } },
+    expectedCount: 0,
+  },
+  {
+    name: "type-only alias: erased alias declaration only",
+    code: 'import {pathToFileURL}from"url";import type*as urlApi from"url";interface urlApi{};export const load=(file)=>import(pathToFileURL(file).href);',
+    fixturePackage: { main: "index.js", engines: { node: ">=20" } },
+    expectedCount: 0,
+  },
+  {
+    name: "type-only alias: named type-only alias masked runtime",
+    code: 'import {pathToFileURL,type parse as parser} from"url";function change(){interface parser{};consume(parser);}change();export const load=(file)=>import(pathToFileURL(file).href);',
+    fixturePackage: { main: "index.js", engines: { node: ">=20" } },
+    expectedCount: 1,
+  },
+  {
+    name: "type-only alias: default type-only alias masked runtime",
+    code: 'import{pathToFileURL}from"url";import type urlApi from"url";function change(){interface urlApi{};consume(urlApi);}change();export const load=(file)=>import(pathToFileURL(file).href);',
+    fixturePackage: { main: "index.js", engines: { node: ">=20" } },
+    expectedCount: 1,
+  },
+  {
+    name: "type-only alias: noncomputed property and method keys",
+    code: 'import {pathToFileURL}from"url";import type*as urlApi from"url";const object={urlApi(){return 1}};void object.urlApi;export const load=(file)=>import(pathToFileURL(file).href);',
+    fixturePackage: { main: "index.js", engines: { node: ">=20" } },
+    expectedCount: 0,
+  },
 ];
 
 describe("Node file URL configuration loader", () => {
