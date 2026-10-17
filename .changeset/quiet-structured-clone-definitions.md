@@ -5,3 +5,5 @@
 ---
 
 Avoid recommending structuredClone inside a directly installed implementation of the same global API, including a narrowly recognized Jest mock implementation. Ordinary application cloning and unsupported provider or binding shapes remain reportable.
+
+Keep self-definition provider checks conservative for erased TypeScript declarations while retaining genuine lexical values beside same-name types.

@@ -3,11 +3,11 @@ import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
 import { findEnclosingFunction } from "../../../utils/find-enclosing-function.js";
 import { findProgramRoot } from "../../../utils/find-program-root.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
-import { getImportDeclarationForSymbol } from "../../../utils/get-import-declaration-for-symbol.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import { hasVisibleBindingNamed } from "../../../utils/has-visible-binding-named.js";
 import { isFunctionLike } from "../../../utils/is-function-like.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
-import { isTypeOnlyImport } from "../../../utils/is-type-only-import.js";
 import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
 import { isWithinAssignmentTarget } from "../../../utils/is-within-assignment-target.js";
 import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
@@ -113,16 +113,7 @@ export const isStructuredCloneSelfDefinition = (
     )
       return;
     const symbol = scopes.symbolFor(node);
-    const importDeclaration = symbol && getImportDeclarationForSymbol(symbol);
-    if (
-      symbol &&
-      (symbol.kind === "ts-interface" ||
-        symbol.kind === "ts-type-alias" ||
-        (importDeclaration &&
-          (isTypeOnlyImport(importDeclaration) ||
-            (isNodeOfType(symbol.declarationNode, "ImportSpecifier") &&
-              symbol.declarationNode.importKind === "type"))))
-    ) {
+    if (symbol && isErasedTypeScriptBinding(symbol) && !hasRuntimeValueBinding(symbol)) {
       isClosed = false;
       return false;
     }
