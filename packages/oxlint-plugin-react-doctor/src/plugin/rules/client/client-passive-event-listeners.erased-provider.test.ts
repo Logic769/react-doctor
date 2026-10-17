@@ -73,6 +73,31 @@ const cases = [
     code: 'namespace require { export const marker = 1; } void require;import React from "react";\n\nconst Panel = () => {\n  const handleWheel = React.useCallback((event: WheelEvent) => { event.preventDefault(); }, []);\n  React.useEffect(() => {\n    document.addEventListener("wheel", handleWheel);\n    return () => document.removeEventListener("wheel", handleWheel);\n  }, [handleWheel]);\n  return null;\n};\n',
     expected: 0,
   },
+  {
+    name: "rejects opaque runtime imported provider exposure",
+    code: 'function rewrite(){mutate(React);}rewrite();declare const require: any;import React from "react";\n\nconst Panel = () => {\n  const handleWheel = React.useCallback((event: WheelEvent) => { event.preventDefault(); }, []);\n  React.useEffect(() => {\n    document.addEventListener("wheel", handleWheel);\n    return () => document.removeEventListener("wheel", handleWheel);\n  }, [handleWheel]);\n  return null;\n};\n',
+    expected: 1,
+  },
+  {
+    name: "rejects imported provider exposure beneath inner interface",
+    code: 'function rewrite(){interface React{}mutate(React);}rewrite();declare const require: any;import React from "react";\n\nconst Panel = () => {\n  const handleWheel = React.useCallback((event: WheelEvent) => { event.preventDefault(); }, []);\n  React.useEffect(() => {\n    document.addEventListener("wheel", handleWheel);\n    return () => document.removeEventListener("wheel", handleWheel);\n  }, [handleWheel]);\n  return null;\n};\n',
+    expected: 1,
+  },
+  {
+    name: "rejects imported provider exposure beneath inner type alias",
+    code: 'function rewrite(){type React=unknown;mutate(React);}rewrite();declare const require: any;import React from "react";\n\nconst Panel = () => {\n  const handleWheel = React.useCallback((event: WheelEvent) => { event.preventDefault(); }, []);\n  React.useEffect(() => {\n    document.addEventListener("wheel", handleWheel);\n    return () => document.removeEventListener("wheel", handleWheel);\n  }, [handleWheel]);\n  return null;\n};\n',
+    expected: 1,
+  },
+  {
+    name: "rejects imported provider exposure beneath erased namespace",
+    code: 'namespace ProofScope{namespace React{}mutate(React);}declare const require: any;import React from "react";\n\nconst Panel = () => {\n  const handleWheel = React.useCallback((event: WheelEvent) => { event.preventDefault(); }, []);\n  React.useEffect(() => {\n    document.addEventListener("wheel", handleWheel);\n    return () => document.removeEventListener("wheel", handleWheel);\n  }, [handleWheel]);\n  return null;\n};\n',
+    expected: 1,
+  },
+  {
+    name: "preserves genuine inner runtime provider shadow",
+    code: 'function rewrite(){const React={};interface React{}mutate(React);}rewrite();declare const require: any;import React from "react";\n\nconst Panel = () => {\n  const handleWheel = React.useCallback((event: WheelEvent) => { event.preventDefault(); }, []);\n  React.useEffect(() => {\n    document.addEventListener("wheel", handleWheel);\n    return () => document.removeEventListener("wheel", handleWheel);\n  }, [handleWheel]);\n  return null;\n};\n',
+    expected: 0,
+  },
 ];
 
 describe("erased runtime provider admission", () => {
