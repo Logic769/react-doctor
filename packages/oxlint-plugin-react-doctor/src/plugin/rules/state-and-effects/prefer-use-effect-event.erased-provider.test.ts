@@ -48,6 +48,31 @@ const cases = [
     code: 'const require = () => ({}); interface require {}require("react").useCallback = () => () => undefined;import { useCallback, useEffect } from "react"; export const Example = ({ active, value }) => { const leaf = useCallback(() => "ready", []); const callback = useCallback(() => leaf(), [leaf]); useEffect(() => { const timer = setTimeout(() => callback(), 0); return () => clearTimeout(timer); }, [callback, active]); return null; };',
     expected: 0,
   },
+  {
+    name: "rejects empty namespace provider masking",
+    code: 'namespace require {}require("react").useCallback = () => () => undefined;import { useCallback, useEffect } from "react"; export const Example = ({ active, value }) => { const leaf = useCallback(() => "ready", []); const callback = useCallback(() => leaf(), [leaf]); useEffect(() => { const timer = setTimeout(() => callback(), 0); return () => clearTimeout(timer); }, [callback, active]); return null; };',
+    expected: 1,
+  },
+  {
+    name: "rejects type-only namespace provider masking",
+    code: 'namespace require { export interface Marker {} }require("react").useCallback = () => () => undefined;import { useCallback, useEffect } from "react"; export const Example = ({ active, value }) => { const leaf = useCallback(() => "ready", []); const callback = useCallback(() => leaf(), [leaf]); useEffect(() => { const timer = setTimeout(() => callback(), 0); return () => clearTimeout(timer); }, [callback, active]); return null; };',
+    expected: 1,
+  },
+  {
+    name: "rejects nested type-only namespace provider masking",
+    code: 'namespace require { export namespace Nested { export type Marker = unknown; } }require("react").useCallback = () => () => undefined;import { useCallback, useEffect } from "react"; export const Example = ({ active, value }) => { const leaf = useCallback(() => "ready", []); const callback = useCallback(() => leaf(), [leaf]); useEffect(() => { const timer = setTimeout(() => callback(), 0); return () => clearTimeout(timer); }, [callback, active]); return null; };',
+    expected: 1,
+  },
+  {
+    name: "preserves an inert empty namespace",
+    code: 'namespace require {}import { useCallback, useEffect } from "react"; export const Example = ({ active, value }) => { const leaf = useCallback(() => "ready", []); const callback = useCallback(() => leaf(), [leaf]); useEffect(() => { const timer = setTimeout(() => callback(), 0); return () => clearTimeout(timer); }, [callback, active]); return null; };',
+    expected: 0,
+  },
+  {
+    name: "preserves a genuine runtime namespace",
+    code: 'namespace require { export const marker = 1; } void require;import { useCallback, useEffect } from "react"; export const Example = ({ active, value }) => { const leaf = useCallback(() => "ready", []); const callback = useCallback(() => leaf(), [leaf]); useEffect(() => { const timer = setTimeout(() => callback(), 0); return () => clearTimeout(timer); }, [callback, active]); return null; };',
+    expected: 0,
+  },
 ];
 
 describe("erased runtime provider admission", () => {
