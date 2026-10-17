@@ -7,14 +7,14 @@ import {
 } from "../../../constants/json-parse-local-result.js";
 import { findProgramRoot } from "../../../utils/find-program-root.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
-import { getImportDeclarationForSymbol } from "../../../utils/get-import-declaration-for-symbol.js";
 import { getStaticPropertyName } from "../../../utils/get-static-property-name.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import {
   isProvenGlobalNamespaceReference,
   isProvenGlobalObjectReference,
 } from "../../../utils/is-proven-global-namespace-reference.js";
-import { isTypeOnlyImport } from "../../../utils/is-type-only-import.js";
 import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
 import { walkAst } from "../../../utils/walk-ast.js";
 
@@ -35,19 +35,14 @@ export const hasClosedJsonParseProvider = (node: EsTreeNode, scopes: ScopeAnalys
     if (isNodeOfType(candidate, "Identifier")) {
       const symbol = scopes.symbolFor(candidate);
       if (symbol?.bindingIdentifier === candidate) return;
-      if (JSON_PARSE_LOCAL_RESULT_PROVIDER_NAMES.has(candidate.name) && symbol) {
-        const declaration = getImportDeclarationForSymbol(symbol);
-        if (
-          symbol.kind === "ts-interface" ||
-          symbol.kind === "ts-type-alias" ||
-          (declaration &&
-            (isTypeOnlyImport(declaration) ||
-              (isNodeOfType(symbol.declarationNode, "ImportSpecifier") &&
-                symbol.declarationNode.importKind === "type")))
-        ) {
-          isClosed = false;
-          return false;
-        }
+      if (
+        JSON_PARSE_LOCAL_RESULT_PROVIDER_NAMES.has(candidate.name) &&
+        symbol &&
+        isErasedTypeScriptBinding(symbol) &&
+        !hasRuntimeValueBinding(symbol)
+      ) {
+        isClosed = false;
+        return false;
       }
       if (candidate.name === "eval" && scopes.isGlobalReference(candidate)) {
         isClosed = false;

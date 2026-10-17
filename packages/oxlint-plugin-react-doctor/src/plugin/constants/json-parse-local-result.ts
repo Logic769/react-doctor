@@ -20,6 +20,7 @@ export const JSON_PARSE_LOCAL_RESULT_PROVIDER_NAMES = new Set([
 ]);
 
 export const JSON_PARSE_LOCAL_RESULT_CARRIER_PROPERTIES = new Set([
+  "eval",
   "JSON",
   "globalThis",
   "window",
