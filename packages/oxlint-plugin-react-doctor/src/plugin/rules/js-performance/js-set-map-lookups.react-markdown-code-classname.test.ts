@@ -366,10 +366,10 @@ const cases: ReadonlyArray<ReactMarkdownLookupCase> = [
     expectedDiagnosticCount: 1,
   },
   {
-    name: "typeonly-selected-name-collision-is-unsupported",
+    name: "typeonly-outer-name-does-not-hide-readonly-parameter",
     code: 'import Markdown from "react-markdown";\nimport type { className } from "example-types";\nexport const Example = ({blocks}) => <section>{blocks.map(block => <Markdown  components={{code({className}) { return <code>{className?.includes("language-sample")}</code>; }}}>{block}</Markdown>)}</section>;\n',
     options: { forceJsx: true, includeLocations: true },
-    expectedDiagnosticCount: 1,
+    expectedDiagnosticCount: 0,
   },
   {
     name: "nested-ordinary-reset-erased-selected-write",
@@ -382,6 +382,206 @@ const cases: ReadonlyArray<ReactMarkdownLookupCase> = [
     code: 'import Markdown from "react-markdown";\nfunction exposeProvider() { interface Markdown {} configure(Markdown); }\nexposeProvider();\nexport const Example = ({blocks}) => <section>{blocks.map(block => <Markdown  components={{code({className}) { return <code>{className?.includes("language-sample")}</code>; }}}>{block}</Markdown>)}</section>;\n',
     options: { forceJsx: true, includeLocations: true },
     expectedDiagnosticCount: 1,
+  },
+  {
+    name: "inert-eval-property",
+    code: 'import Markdown from "react-markdown";\nconst metadata={eval:"label"};\nexport const Example = ({blocks}) => <section>{blocks.map(block => <Markdown  components={{code({className}) { return <code>{className?.includes("language-sample")}</code>; }}}>{block}</Markdown>)}</section>;\n',
+    expectedDiagnosticCount: 0,
+    options: {
+      forceJsx: true,
+    },
+  },
+  {
+    name: "inert-eval-member",
+    code: 'import Markdown from "react-markdown";\nconst metadata={}; void metadata.eval;\nexport const Example = ({blocks}) => <section>{blocks.map(block => <Markdown  components={{code({className}) { return <code>{className?.includes("language-sample")}</code>; }}}>{block}</Markdown>)}</section>;\n',
+    expectedDiagnosticCount: 0,
+    options: {
+      forceJsx: true,
+    },
+  },
+  {
+    name: "require-provider-replacement",
+    code: 'import Markdown from "react-markdown";\nrequire("react-markdown").default=replacement;\nexport const Example = ({blocks}) => <section>{blocks.map(block => <Markdown  components={{code({className}) { return <code>{className?.includes("language-sample")}</code>; }}}>{block}</Markdown>)}</section>;\n',
+    expectedDiagnosticCount: 1,
+    options: {
+      forceJsx: true,
+    },
+  },
+  {
+    name: "dynamic-provider-exposure",
+    code: 'import Markdown from "react-markdown";\nimport("react-markdown").then(configure);\nexport const Example = ({blocks}) => <section>{blocks.map(block => <Markdown  components={{code({className}) { return <code>{className?.includes("language-sample")}</code>; }}}>{block}</Markdown>)}</section>;\n',
+    expectedDiagnosticCount: 1,
+    options: {
+      forceJsx: true,
+    },
+  },
+  {
+    name: "local-require-control",
+    code: 'import Markdown from "react-markdown";\nconst require=()=>({default:null});require("react-markdown").default=replacement;\nexport const Example = ({blocks}) => <section>{blocks.map(block => <Markdown  components={{code({className}) { return <code>{className?.includes("language-sample")}</code>; }}}>{block}</Markdown>)}</section>;\n',
+    expectedDiagnosticCount: 0,
+    options: {
+      forceJsx: true,
+    },
+  },
+  {
+    name: "readonly-classname-inert-inner-interface",
+    code: 'import Markdown from "react-markdown";\nexport const Example = ({blocks}) => <section>{blocks.map(block => <Markdown  components={{code({className}) { {interface className{}} return <code>{className?.includes("language-sample")}</code>; }}}>{block}</Markdown>)}</section>;\n',
+    expectedDiagnosticCount: 0,
+    options: {
+      forceJsx: true,
+    },
+  },
+  {
+    name: "readonly-provider-inert-inner-interface",
+    code: 'import Markdown from "react-markdown";\n{interface Markdown{}}\nexport const Example = ({blocks}) => <section>{blocks.map(block => <Markdown  components={{code({className}) { return <code>{className?.includes("language-sample")}</code>; }}}>{block}</Markdown>)}</section>;\n',
+    expectedDiagnosticCount: 0,
+    options: {
+      forceJsx: true,
+    },
+  },
+  {
+    name: "unknown-require-provider-source",
+    code: 'import Markdown from "react-markdown";\nrequire(moduleName);\nexport const Example = ({blocks}) => <section>{blocks.map(block => <Markdown  components={{code({className}) { return <code>{className?.includes("language-sample")}</code>; }}}>{block}</Markdown>)}</section>;\n',
+    expectedDiagnosticCount: 1,
+    options: {
+      forceJsx: true,
+      includeLocations: true,
+    },
+  },
+  {
+    name: "foreign-require-provider-source",
+    code: 'import Markdown from "react-markdown";\nrequire("example-ui");\nexport const Example = ({blocks}) => <section>{blocks.map(block => <Markdown  components={{code({className}) { return <code>{className?.includes("language-sample")}</code>; }}}>{block}</Markdown>)}</section>;\n',
+    expectedDiagnosticCount: 0,
+    options: {
+      forceJsx: true,
+      includeLocations: true,
+    },
+  },
+  {
+    name: "unknown-dynamic-provider-source",
+    code: 'import Markdown from "react-markdown";\nimport(moduleName);\nexport const Example = ({blocks}) => <section>{blocks.map(block => <Markdown  components={{code({className}) { return <code>{className?.includes("language-sample")}</code>; }}}>{block}</Markdown>)}</section>;\n',
+    expectedDiagnosticCount: 1,
+    options: {
+      forceJsx: true,
+      includeLocations: true,
+    },
+  },
+  {
+    name: "foreign-dynamic-provider-source",
+    code: 'import Markdown from "react-markdown";\nimport("example-ui");\nexport const Example = ({blocks}) => <section>{blocks.map(block => <Markdown  components={{code({className}) { return <code>{className?.includes("language-sample")}</code>; }}}>{block}</Markdown>)}</section>;\n',
+    expectedDiagnosticCount: 0,
+    options: {
+      forceJsx: true,
+      includeLocations: true,
+    },
+  },
+  {
+    name: "erased-interface-require-provider-write",
+    code: 'import Markdown from "react-markdown";\ninterface require {} require("react-markdown").default=replacement;\nexport const Example = ({blocks}) => <section>{blocks.map(block => <Markdown  components={{code({className}) { return <code>{className?.includes("language-sample")}</code>; }}}>{block}</Markdown>)}</section>;\n',
+    expectedDiagnosticCount: 1,
+    options: {
+      forceJsx: true,
+      includeLocations: true,
+    },
+  },
+  {
+    name: "typeonly-require-provider-write",
+    code: 'import Markdown from "react-markdown";\nimport type {require} from "example-types"; require("react-markdown").default=replacement;\nexport const Example = ({blocks}) => <section>{blocks.map(block => <Markdown  components={{code({className}) { return <code>{className?.includes("language-sample")}</code>; }}}>{block}</Markdown>)}</section>;\n',
+    expectedDiagnosticCount: 1,
+    options: {
+      forceJsx: true,
+      includeLocations: true,
+    },
+  },
+  {
+    name: "outer-runtime-loader-survives-inner-interface",
+    code: 'import Markdown from "react-markdown";\nconst require=()=>({default:null}); {interface require {} require("react-markdown").default=replacement;}\nexport const Example = ({blocks}) => <section>{blocks.map(block => <Markdown  components={{code({className}) { return <code>{className?.includes("language-sample")}</code>; }}}>{block}</Markdown>)}</section>;\n',
+    expectedDiagnosticCount: 0,
+    options: {
+      forceJsx: true,
+      includeLocations: true,
+    },
+  },
+  {
+    name: "local-shadow-write-does-not-change-renderer-parameter",
+    code: 'import Markdown from "react-markdown";\nconst reset=(className)=>{interface className{};className=[];};reset([]);\nexport const Example = ({blocks}) => <section>{blocks.map(block => <Markdown  components={{code({className}) { return <code>{className?.includes("language-sample")}</code>; }}}>{block}</Markdown>)}</section>;\n',
+    expectedDiagnosticCount: 0,
+    options: {
+      forceJsx: true,
+      includeLocations: true,
+    },
+  },
+  {
+    name: "global-object-require-write",
+    code: 'import Markdown from "react-markdown";\nglobalThis.require("react-markdown").default=replacement;\nexport const Example = ({blocks}) => <section>{blocks.map(block => <Markdown  components={{code({className}) { return <code>{className?.includes("language-sample")}</code>; }}}>{block}</Markdown>)}</section>;\n',
+    expectedDiagnosticCount: 1,
+    options: {
+      forceJsx: true,
+      includeLocations: true,
+    },
+  },
+  {
+    name: "global-carrier-require-write",
+    code: 'import Markdown from "react-markdown";\nconst carrier=globalThis;carrier.require("react-markdown").default=replacement;\nexport const Example = ({blocks}) => <section>{blocks.map(block => <Markdown  components={{code({className}) { return <code>{className?.includes("language-sample")}</code>; }}}>{block}</Markdown>)}</section>;\n',
+    expectedDiagnosticCount: 1,
+    options: {
+      forceJsx: true,
+      includeLocations: true,
+    },
+  },
+  {
+    name: "foreign-global-require-control",
+    code: 'import Markdown from "react-markdown";\nglobalThis.require("example-ui");\nexport const Example = ({blocks}) => <section>{blocks.map(block => <Markdown  components={{code({className}) { return <code>{className?.includes("language-sample")}</code>; }}}>{block}</Markdown>)}</section>;\n',
+    expectedDiagnosticCount: 0,
+    options: {
+      forceJsx: true,
+      includeLocations: true,
+    },
+  },
+  {
+    name: "local-global-object-control",
+    code: 'import Markdown from "react-markdown";\nconst globalThis={require:()=>({default:null})};globalThis.require("react-markdown").default=replacement;\nexport const Example = ({blocks}) => <section>{blocks.map(block => <Markdown  components={{code({className}) { return <code>{className?.includes("language-sample")}</code>; }}}>{block}</Markdown>)}</section>;\n',
+    expectedDiagnosticCount: 0,
+    options: {
+      forceJsx: true,
+      includeLocations: true,
+    },
+  },
+  {
+    name: "erased-global-object-require-write",
+    code: 'import Markdown from "react-markdown";\ninterface globalThis{} globalThis.require("react-markdown").default=replacement;\nexport const Example = ({blocks}) => <section>{blocks.map(block => <Markdown  components={{code({className}) { return <code>{className?.includes("language-sample")}</code>; }}}>{block}</Markdown>)}</section>;\n',
+    expectedDiagnosticCount: 1,
+    options: {
+      forceJsx: true,
+      includeLocations: true,
+    },
+  },
+  {
+    name: "erased-global-carrier-require-write",
+    code: 'import Markdown from "react-markdown";\ninterface globalThis{};const carrier=globalThis;carrier.require("react-markdown").default=replacement;\nexport const Example = ({blocks}) => <section>{blocks.map(block => <Markdown  components={{code({className}) { return <code>{className?.includes("language-sample")}</code>; }}}>{block}</Markdown>)}</section>;\n',
+    expectedDiagnosticCount: 1,
+    options: {
+      forceJsx: true,
+      includeLocations: true,
+    },
+  },
+  {
+    name: "real-global-carrier-survives-inner-interface",
+    code: 'import Markdown from "react-markdown";\nconst globalThis={require:()=>({default:null})};{interface globalThis{};const carrier=globalThis;carrier.require("react-markdown").default=replacement;}\nexport const Example = ({blocks}) => <section>{blocks.map(block => <Markdown  components={{code({className}) { return <code>{className?.includes("language-sample")}</code>; }}}>{block}</Markdown>)}</section>;\n',
+    expectedDiagnosticCount: 0,
+    options: {
+      forceJsx: true,
+      includeLocations: true,
+    },
+  },
+  {
+    name: "foreign-erased-global-carrier-control",
+    code: 'import Markdown from "react-markdown";\ninterface globalThis{};const carrier=globalThis;carrier.require("example-ui");\nexport const Example = ({blocks}) => <section>{blocks.map(block => <Markdown  components={{code({className}) { return <code>{className?.includes("language-sample")}</code>; }}}>{block}</Markdown>)}</section>;\n',
+    expectedDiagnosticCount: 0,
+    options: {
+      forceJsx: true,
+      includeLocations: true,
+    },
   },
 ];
 

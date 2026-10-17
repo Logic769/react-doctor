@@ -1,19 +1,18 @@
-import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
+import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
-import { getImportDeclarationForSymbol } from "../../../utils/get-import-declaration-for-symbol.js";
 import { getStaticKeyName } from "../../../utils/get-static-key-name.js";
-import { isAstDescendant } from "../../../utils/is-ast-descendant.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
-import { isTypeOnlyImport } from "../../../utils/is-type-only-import.js";
 import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
 import { isWithinAssignmentTarget } from "../../../utils/is-within-assignment-target.js";
 import { resolveImportedJsxComponentName } from "../../../utils/resolve-imported-jsx-component-name.js";
 import { walkAst } from "../../../utils/walk-ast.js";
+import { hasClosedReactMarkdownCodeProvider } from "./has-closed-react-markdown-code-provider.js";
 import {
   REACT_MARKDOWN_FIRST_VALUE_INDEX,
-  REACT_MARKDOWN_RUNTIME_TYPESCRIPT_NODES,
   REACT_MARKDOWN_SINGLE_VALUE_COUNT,
 } from "./constants.js";
+
+const classnameProofs = new WeakMap<ScopeAnalysis, WeakMap<SymbolDescriptor, boolean>>();
 
 export const isReactMarkdownCodeClassname = (
   identifier: EsTreeNodeOfType<"Identifier">,
@@ -21,6 +20,14 @@ export const isReactMarkdownCodeClassname = (
 ): boolean => {
   const symbol = scopes.symbolFor(identifier);
   if (!symbol || symbol.kind !== "parameter") return false;
+  let proofs = classnameProofs.get(scopes);
+  if (!proofs) {
+    proofs = new WeakMap();
+    classnameProofs.set(scopes, proofs);
+  }
+  const cached = proofs.get(symbol);
+  if (cached !== undefined) return cached;
+  proofs.set(symbol, false);
   const property = symbol.bindingIdentifier.parent;
   const pattern = property?.parent;
   if (
@@ -91,102 +98,23 @@ export const isReactMarkdownCodeClassname = (
   }
   const provider = scopes.symbolFor(opening.name);
   if (!provider || !isNodeOfType(provider.declarationNode, "ImportDefaultSpecifier")) return false;
-  const protectedNames = new Set([symbol.name]);
-  for (const importedSymbol of scopes.rootScope.symbols) {
-    const declaration = getImportDeclarationForSymbol(importedSymbol);
-    if (
-      declaration?.source.value === "react-markdown" &&
-      !isTypeOnlyImport(declaration) &&
-      !(
-        isNodeOfType(importedSymbol.declarationNode, "ImportSpecifier") &&
-        importedSymbol.declarationNode.importKind === "type"
-      )
-    ) {
-      protectedNames.add(importedSymbol.name);
-    }
-  }
-  let hasUnsupportedRuntime = false;
-  walkAst(scopes.rootScope.node, (node) => {
-    if (hasUnsupportedRuntime) return false;
-    if (
-      ("declare" in node && node.declare === true) ||
-      ((isNodeOfType(node, "TSInterfaceDeclaration") ||
-        isNodeOfType(node, "TSTypeAliasDeclaration")) &&
-        protectedNames.has(node.id.name)) ||
-      (isNodeOfType(node, "ImportDeclaration") &&
-        node.specifiers.some(
-          (specifier) =>
-            protectedNames.has(specifier.local.name) &&
-            (isTypeOnlyImport(node) ||
-              (isNodeOfType(specifier, "ImportSpecifier") && specifier.importKind === "type")),
-        )) ||
-      node.type === "WithStatement" ||
-      REACT_MARKDOWN_RUNTIME_TYPESCRIPT_NODES.has(node.type) ||
-      ((isNodeOfType(node, "TSEnumDeclaration") || isNodeOfType(node, "TSModuleDeclaration")) &&
-        !node.declare)
-    ) {
-      hasUnsupportedRuntime = true;
-      return false;
-    }
+  if (!hasClosedReactMarkdownCodeProvider(scopes)) return false;
+  let hasRendererExposure = false;
+  walkAst(renderer, (node) => {
+    if (hasRendererExposure) return false;
     if (isTypeScriptTypePosition(node)) return false;
     if (
-      isAstDescendant(node, renderer) &&
-      (isNodeOfType(node, "ThisExpression") ||
-        (isNodeOfType(node, "Identifier") &&
-          node.name === "arguments" &&
-          scopes.referenceFor(node) !== null))
+      isNodeOfType(node, "ThisExpression") ||
+      (isNodeOfType(node, "Identifier") &&
+        node.name === "arguments" &&
+        scopes.referenceFor(node) !== null)
     ) {
-      hasUnsupportedRuntime = true;
+      hasRendererExposure = true;
       return false;
-    }
-    if (isNodeOfType(node, "Identifier") && node.name === "eval") {
-      const selectedSymbol = scopes.symbolFor(node);
-      const imported = selectedSymbol ? getImportDeclarationForSymbol(selectedSymbol) : null;
-      if (
-        selectedSymbol?.bindingIdentifier !== node &&
-        (scopes.isGlobalReference(node) ||
-          selectedSymbol?.kind === "ts-interface" ||
-          selectedSymbol?.kind === "ts-type-alias" ||
-          (imported &&
-            (isTypeOnlyImport(imported) ||
-              (isNodeOfType(selectedSymbol?.declarationNode, "ImportSpecifier") &&
-                selectedSymbol.declarationNode.importKind === "type"))))
-      ) {
-        hasUnsupportedRuntime = true;
-        return false;
-      }
-    }
-    if (
-      !isNodeOfType(node, "ImportDeclaration") ||
-      node.source.value !== "react-markdown" ||
-      isTypeOnlyImport(node)
-    ) {
-      return undefined;
-    }
-    for (const specifier of node.specifiers) {
-      if (isNodeOfType(specifier, "ImportSpecifier") && specifier.importKind === "type") continue;
-      const importedSymbol = scopes.symbolFor(specifier.local);
-      if (!isNodeOfType(specifier, "ImportDefaultSpecifier") || !importedSymbol) {
-        hasUnsupportedRuntime = true;
-        return false;
-      }
-      for (const reference of importedSymbol.references) {
-        if (isTypeScriptTypePosition(reference.identifier)) continue;
-        const parent = reference.identifier.parent;
-        if (
-          reference.flag !== "read" ||
-          isWithinAssignmentTarget(reference.identifier) ||
-          !isNodeOfType(reference.identifier, "JSXIdentifier") ||
-          (!isNodeOfType(parent, "JSXOpeningElement") &&
-            !isNodeOfType(parent, "JSXClosingElement")) ||
-          parent.name !== reference.identifier
-        ) {
-          hasUnsupportedRuntime = true;
-          return false;
-        }
-      }
     }
     return undefined;
   });
-  return !hasUnsupportedRuntime;
+  const isSupported = !hasRendererExposure;
+  proofs.set(symbol, isSupported);
+  return isSupported;
 };

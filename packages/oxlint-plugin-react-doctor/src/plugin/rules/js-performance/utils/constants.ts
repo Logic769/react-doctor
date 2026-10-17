@@ -5,3 +5,7 @@ export const REACT_MARKDOWN_RUNTIME_TYPESCRIPT_NODES = new Set([
   "TSExportAssignment",
   "TSParameterProperty",
 ]);
+
+export const REACT_MARKDOWN_SMALL_LOOKUP_COUNT = 20;
+export const REACT_MARKDOWN_LARGE_LOOKUP_COUNT = 100;
+export const REACT_MARKDOWN_MAXIMUM_WORK_MULTIPLIER = 8;
