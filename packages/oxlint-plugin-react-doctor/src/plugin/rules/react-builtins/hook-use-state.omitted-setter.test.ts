@@ -384,6 +384,38 @@ describe("hook-use-state omitted setters", () => {
     expect(result.parseErrors).toEqual([]);
     expect(result.diagnostics).toHaveLength(0);
   });
+  it.each([
+    `declare const require: any; require("react").useState = customHook;`,
+    `declare function require(source: string): any; require("react").useState = customHook;`,
+    `interface Object {} Object.defineProperty(provider, "useState", {value: customHook});`,
+    `type Reflect = unknown; Reflect.set(provider, "useState", customHook);`,
+    `import type {Function} from "./types"; Function("replaceProvider()")();`,
+    `import {type Object} from "./types"; Object.defineProperty(provider, "useState", {value: customHook});`,
+    `declare const globalThis: any; globalThis.require("react").useState = customHook;`,
+    `declare const module: any; module.require("react").useState = customHook;`,
+    `declare const process: any; process.mainModule.require("react").useState = customHook;`,
+  ])("retains diagnostics through erased provider bindings: %s", (exposure) => {
+    const result = runRule(
+      hookUseState,
+      `import {useState} from "react"; ${exposure} const [seededTotal] = useState(7);`,
+    );
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(1);
+  });
+  it.each([
+    `declare const require: any;`,
+    `interface Object { description: string; }`,
+    `type Reflect = unknown;`,
+    `import type {Function} from "./types";`,
+    `const require = () => ({}); require("metadata");`,
+  ])("allows unused erased declarations and real local loaders: %s", (metadata) => {
+    const result = runRule(
+      hookUseState,
+      `import {useState} from "react"; ${metadata} const [seededTotal] = useState(7);`,
+    );
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(0);
+  });
   it("allows other ordinary literal CommonJS loads", () => {
     const result = runRule(
       hookUseState,
