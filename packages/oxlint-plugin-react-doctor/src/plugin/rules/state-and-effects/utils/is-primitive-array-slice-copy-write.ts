@@ -1,4 +1,5 @@
-import type { SymbolDescriptor } from "../../../semantic/scope-analysis.js";
+import { isBindingAssignmentTarget } from "./primitive-slice-copy/is-binding-assignment-target.js";
+import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
 import { findProgramRoot } from "../../../utils/find-program-root.js";
@@ -6,6 +7,9 @@ import { findTransparentExpressionRoot } from "../../../utils/find-transparent-e
 import { getImportDeclarationForSymbol } from "../../../utils/get-import-declaration-for-symbol.js";
 import { getResolvedStaticPropertyName } from "../../../utils/get-resolved-static-property-name.js";
 import { getStaticPropertyName } from "../../../utils/get-static-property-name.js";
+import { getStaticStringExpression } from "../../../utils/get-static-string-expression.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import { getSymbolTypeAnnotation } from "../../../utils/get-symbol-type-annotation.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import {
@@ -35,6 +39,20 @@ import {
   STATE_PAIR_ELEMENT_COUNT,
 } from "./primitive-slice-copy/constants.js";
 
+interface ClosedArrayProgram {
+  readonly supported: boolean;
+  readonly unresolvedMembers: ReadonlySet<EsTreeNode>;
+  readonly numericStateMembers: ReadonlyMap<number, ReadonlySet<EsTreeNode>>;
+  readonly runtimeModuleSources: ReadonlySet<string>;
+  readonly hasUnknownRuntimeModule: boolean;
+}
+
+const closedArrayPrograms = new WeakMap<ScopeAnalysis, ClosedArrayProgram>();
+const primitiveParameterReads = new WeakMap<SymbolDescriptor, boolean>();
+const numericLoopBindings = new WeakMap<SymbolDescriptor, boolean>();
+const readonlyCallBindings = new WeakMap<SymbolDescriptor, boolean>();
+const closedImportSources = new WeakMap<ScopeAnalysis, ReadonlyMap<string, boolean>>();
+
 const isPrimitiveInput = (
   expression: EsTreeNode,
   annotationType: string,
@@ -55,12 +73,19 @@ const isPrimitiveInput = (
     );
   if (!isNodeOfType(candidate, "Identifier")) return false;
   const symbol = context.scopes.symbolFor(candidate);
-  return Boolean(
-    symbol?.kind === "parameter" &&
-    !isNodeOfType(symbol.bindingIdentifier.parent, "AssignmentPattern") &&
-    getSymbolTypeAnnotation(symbol)?.type === annotationType &&
-    symbol.references.every((reference) => reference.flag === "read"),
+  if (
+    symbol?.kind !== "parameter" ||
+    isNodeOfType(symbol.bindingIdentifier.parent, "AssignmentPattern") ||
+    getSymbolTypeAnnotation(symbol)?.type !== annotationType
+  )
+    return false;
+  const cached = primitiveParameterReads.get(symbol);
+  if (cached !== undefined) return cached;
+  const readonly = symbol.references.every(
+    (reference) => reference.flag === "read" && !isBindingAssignmentTarget(reference.identifier),
   );
+  primitiveParameterReads.set(symbol, readonly);
+  return readonly;
 };
 
 const isReadonlyNumericLoopBinding = (
@@ -89,10 +114,16 @@ const isReadonlyNumericLoopBinding = (
     context.scopes.symbolFor(loop.update.argument)?.id !== symbol.id
   )
     return false;
+  const cached = numericLoopBindings.get(symbol);
+  if (cached !== undefined) return cached;
   const update = loop.update;
-  return symbol.references.every(
-    (reference) => reference.flag === "read" || reference.identifier === update.argument,
+  const readonly = symbol.references.every(
+    (reference) =>
+      (reference.flag === "read" && !isBindingAssignmentTarget(reference.identifier)) ||
+      reference.identifier === update.argument,
   );
+  numericLoopBindings.set(symbol, readonly);
+  return readonly;
 };
 
 const isNumericStateIndex = (expression: EsTreeNode, context: RuleContext): boolean => {
@@ -111,8 +142,10 @@ const isNumericStateIndex = (expression: EsTreeNode, context: RuleContext): bool
   );
 };
 
-const hasReadonlyCallReferences = (symbol: SymbolDescriptor): boolean =>
-  symbol.references.every((reference) => {
+const hasReadonlyCallReferences = (symbol: SymbolDescriptor): boolean => {
+  const cached = readonlyCallBindings.get(symbol);
+  if (cached !== undefined) return cached;
+  const readonly = symbol.references.every((reference) => {
     if (isTypeScriptTypePosition(reference.identifier)) return true;
     const root = findTransparentExpressionRoot(reference.identifier);
     return (
@@ -122,6 +155,9 @@ const hasReadonlyCallReferences = (symbol: SymbolDescriptor): boolean =>
       !root.parent.optional
     );
   });
+  readonlyCallBindings.set(symbol, readonly);
+  return readonly;
+};
 
 const hasClosedNamedImports = (
   declaration: EsTreeNodeOfType<"ImportDeclaration">,
@@ -142,6 +178,25 @@ const hasClosedNamedImports = (
     );
   });
 
+const getClosedImportSources = (context: RuleContext): ReadonlyMap<string, boolean> => {
+  const cached = closedImportSources.get(context.scopes);
+  if (cached) return cached;
+  const sources = new Map<string, boolean>();
+  const program = context.scopes.rootScope.node;
+  if (isNodeOfType(program, "Program")) {
+    for (const statement of program.body) {
+      if (!isNodeOfType(statement, "ImportDeclaration")) continue;
+      const source = statement.source.value;
+      sources.set(
+        source,
+        sources.get(source) !== false && hasClosedNamedImports(statement, context),
+      );
+    }
+  }
+  closedImportSources.set(context.scopes, sources);
+  return sources;
+};
+
 const isPrimitiveArrayLiteral = (expression: EsTreeNode, annotationType: string): boolean => {
   const candidate = stripParenExpression(expression);
   return (
@@ -156,13 +211,14 @@ const isPrimitiveArrayLiteral = (expression: EsTreeNode, annotationType: string)
   );
 };
 
-const hasClosedSetterWrites = (
+const getClosedSetterModuleSources = (
   setter: SymbolDescriptor,
   updater: EsTreeNode,
   annotationType: string,
   context: RuleContext,
-): boolean =>
-  setter.references.every((reference) => {
+): ReadonlySet<string> | null => {
+  const sources = new Set(["react"]);
+  const closed = setter.references.every((reference) => {
     if (isTypeScriptTypePosition(reference.identifier)) return true;
     const root = findTransparentExpressionRoot(reference.identifier);
     const call = root.parent;
@@ -184,22 +240,21 @@ const hasClosedSetterWrites = (
     const producer = context.scopes.symbolFor(callee);
     const declaration = producer ? getImportDeclarationForSymbol(producer) : null;
     const program = declaration ? findProgramRoot(declaration) : null;
-    return Boolean(
+    const closedProducer = Boolean(
       producer &&
       isNodeOfType(producer.declarationNode, "ImportSpecifier") &&
       producer.declarationNode.importKind !== "type" &&
       declaration &&
       declaration.source.value !== "react" &&
       isNodeOfType(program, "Program") &&
-      program.body.every(
-        (statement) =>
-          !isNodeOfType(statement, "ImportDeclaration") ||
-          statement.source.value !== declaration.source.value ||
-          hasClosedNamedImports(statement, context),
-      ) &&
+      getClosedImportSources(context).get(declaration.source.value) === true &&
       hasReadonlyCallReferences(producer),
     );
+    if (closedProducer && declaration) sources.add(declaration.source.value);
+    return closedProducer;
   });
+  return closed ? sources : null;
+};
 
 const isUnexposedStateArray = (symbol: SymbolDescriptor, context: RuleContext): boolean =>
   symbol.references.every((reference) => {
@@ -225,30 +280,36 @@ const isUnexposedStateArray = (symbol: SymbolDescriptor, context: RuleContext): 
     );
   });
 
-const hasClosedArrayProviders = (
-  program: EsTreeNodeOfType<"Program">,
-  state: SymbolDescriptor,
-  selectedWrite: EsTreeNode,
-  context: RuleContext,
-): boolean => {
-  let isClosed = true;
-  walkAst(program, (node) => {
-    if (!isClosed) return false;
+const analyzeClosedArrayProgram = (context: RuleContext): ClosedArrayProgram => {
+  const cached = closedArrayPrograms.get(context.scopes);
+  if (cached) return cached;
+  const unresolvedMembers = new Set<EsTreeNode>();
+  const numericStateMembers = new Map<number, Set<EsTreeNode>>();
+  const runtimeModuleSources = new Set<string>();
+  let hasUnknownRuntimeModule = false;
+  let supported = true;
+  walkAst(context.scopes.rootScope.node, (node) => {
+    if (!supported) return false;
     if (
       ("declare" in node && node.declare === true) ||
       EVALUATED_TYPESCRIPT_NODE_TYPES.has(node.type) ||
       isNodeOfType(node, "WithStatement")
     ) {
-      isClosed = false;
+      supported = false;
       return false;
     }
     if (isTypeScriptTypePosition(node)) return false;
+    if (isNodeOfType(node, "ImportExpression")) {
+      const source = getStaticStringExpression(node.source);
+      if (source === null) hasUnknownRuntimeModule = true;
+      else runtimeModuleSources.add(source);
+    }
     if (
       isNodeOfType(node, "ImportDeclaration") &&
       node.source.value === "react" &&
-      !hasClosedNamedImports(node, context)
+      getClosedImportSources(context).get("react") === false
     ) {
-      isClosed = false;
+      supported = false;
       return false;
     }
     if (
@@ -260,42 +321,65 @@ const hasClosedArrayProviders = (
         allowConstTemplateLiteral: true,
         stringifyNonStringLiterals: true,
       });
-      const numericStateRead =
-        isNodeOfType(node, "MemberExpression") &&
-        isNodeOfType(node.object, "Identifier") &&
-        context.scopes.symbolFor(node.object)?.id === state.id &&
-        isNumericStateIndex(node.property, context);
-      if (name === null && node.computed && node !== selectedWrite && !numericStateRead) {
-        isClosed = false;
-        return false;
-      }
-      if (name !== null && ARRAY_PROVIDER_PROPERTY_NAMES.has(name)) {
-        isClosed = false;
-        return false;
+      if (name === null && node.computed) {
+        unresolvedMembers.add(node);
+        if (
+          isNodeOfType(node, "MemberExpression") &&
+          isNodeOfType(node.object, "Identifier") &&
+          isNumericStateIndex(node.property, context)
+        ) {
+          const symbol = context.scopes.symbolFor(node.object);
+          if (symbol) {
+            let members = numericStateMembers.get(symbol.id);
+            if (!members) {
+              members = new Set();
+              numericStateMembers.set(symbol.id, members);
+            }
+            members.add(node);
+          }
+        }
       }
       if (
-        isNodeOfType(node, "MemberExpression") &&
-        name === "slice" &&
-        isWithinAssignmentTarget(node)
+        (name !== null && ARRAY_PROVIDER_PROPERTY_NAMES.has(name)) ||
+        (isNodeOfType(node, "MemberExpression") &&
+          name === "slice" &&
+          isWithinAssignmentTarget(node))
       ) {
-        isClosed = false;
+        supported = false;
         return false;
       }
     }
     if (!isNodeOfType(node, "Identifier") || !context.scopes.referenceFor(node)) return;
     const symbol = context.scopes.symbolFor(node);
-    const declaration = symbol ? getImportDeclarationForSymbol(symbol) : null;
-    if (
-      symbol &&
-      (symbol.kind === "ts-interface" ||
-        symbol.kind === "ts-type-alias" ||
-        (declaration &&
-          (isTypeOnlyImport(declaration) ||
-            (isNodeOfType(symbol.declarationNode, "ImportSpecifier") &&
-              symbol.declarationNode.importKind === "type"))))
-    ) {
-      isClosed = false;
+    if (symbol && isErasedTypeScriptBinding(symbol) && !hasRuntimeValueBinding(symbol)) {
+      supported = false;
       return false;
+    }
+    const isRequire = isProvenGlobalNamespaceReference(node, "require", context.scopes);
+    const isModule = isProvenGlobalNamespaceReference(node, "module", context.scopes);
+    if (isRequire || isModule) {
+      const identifierRoot = findTransparentExpressionRoot(node);
+      const member = identifierRoot.parent;
+      const callee =
+        isModule &&
+        isNodeOfType(member, "MemberExpression") &&
+        !member.optional &&
+        member.object === identifierRoot &&
+        getStaticPropertyName(member) === "require"
+          ? findTransparentExpressionRoot(member)
+          : identifierRoot;
+      const call = callee.parent;
+      const source =
+        isNodeOfType(call, "CallExpression") &&
+        !call.optional &&
+        call.callee === callee &&
+        call.arguments.length === SINGLE_ARGUMENT_COUNT &&
+        !isNodeOfType(call.arguments[0], "SpreadElement")
+          ? getStaticStringExpression(call.arguments[0])
+          : null;
+      if (source === null) hasUnknownRuntimeModule = true;
+      else runtimeModuleSources.add(source);
+      return;
     }
     if (
       node.name === "arguments" ||
@@ -304,7 +388,7 @@ const hasClosedArrayProviders = (
         (name) => name !== "Array" && isProvenGlobalNamespaceReference(node, name, context.scopes),
       )
     ) {
-      isClosed = false;
+      supported = false;
       return false;
     }
     if (!isProvenGlobalNamespaceReference(node, "Array", context.scopes)) return;
@@ -319,11 +403,38 @@ const hasClosedArrayProviders = (
       call.optional ||
       call.callee !== member
     ) {
-      isClosed = false;
+      supported = false;
       return false;
     }
   });
-  return isClosed;
+  const analysis = {
+    supported,
+    unresolvedMembers,
+    numericStateMembers,
+    runtimeModuleSources,
+    hasUnknownRuntimeModule,
+  };
+  closedArrayPrograms.set(context.scopes, analysis);
+  return analysis;
+};
+
+const hasClosedArrayProviders = (
+  state: SymbolDescriptor,
+  selectedWrite: EsTreeNode,
+  protectedModuleSources: ReadonlySet<string>,
+  context: RuleContext,
+): boolean => {
+  const analysis = analyzeClosedArrayProgram(context);
+  if (
+    !analysis.supported ||
+    analysis.hasUnknownRuntimeModule ||
+    [...protectedModuleSources].some((source) => analysis.runtimeModuleSources.has(source))
+  )
+    return false;
+  const stateMembers = analysis.numericStateMembers.get(state.id);
+  const selectedWriteCount =
+    analysis.unresolvedMembers.has(selectedWrite) && !stateMembers?.has(selectedWrite) ? 1 : 0;
+  return analysis.unresolvedMembers.size === (stateMembers?.size ?? 0) + selectedWriteCount;
 };
 
 export const isPrimitiveArraySliceCopyWrite = (
@@ -462,13 +573,17 @@ export const isPrimitiveArraySliceCopyWrite = (
   if (
     !isPrimitiveInput(target.property, "TSNumberKeyword", context) ||
     !isPrimitiveInput(write.right, annotation.elementType.type, context) ||
-    !isUnexposedStateArray(pair.stateSymbol, context) ||
-    !hasClosedSetterWrites(pair.setterSymbol, updater, annotation.elementType.type, context)
+    !isUnexposedStateArray(pair.stateSymbol, context)
   )
     return false;
-  const program = findProgramRoot(updater);
-  return (
-    isNodeOfType(program, "Program") &&
-    hasClosedArrayProviders(program, pair.stateSymbol, target, context)
+  const protectedModuleSources = getClosedSetterModuleSources(
+    pair.setterSymbol,
+    updater,
+    annotation.elementType.type,
+    context,
+  );
+  return Boolean(
+    protectedModuleSources &&
+    hasClosedArrayProviders(pair.stateSymbol, target, protectedModuleSources, context),
   );
 };
