@@ -1,5 +1,5 @@
 import { HTML_TAGS } from "../../../constants/html-tags.js";
-import type { SymbolDescriptor } from "../../../semantic/scope-analysis.js";
+import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
 import { findEnclosingFunction } from "../../../utils/find-enclosing-function.js";
@@ -8,6 +8,9 @@ import { findTransparentExpressionRoot } from "../../../utils/find-transparent-e
 import { getAuthoritativeJsxAttribute } from "../../../utils/get-authoritative-jsx-attribute.js";
 import { getDirectConstInitializer } from "../../../utils/get-direct-const-initializer.js";
 import { getJsxAttributeName } from "../../../utils/get-jsx-attribute-name.js";
+import { getStaticPropertyName } from "../../../utils/get-static-property-name.js";
+import { isMemberMutationTarget } from "../../../utils/is-member-mutation-target.js";
+import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
 import { getImportedName } from "../../../utils/get-imported-name.js";
 import { getValueImportSource } from "../../../utils/get-value-import-declaration.js";
 import { isJsxFragmentElement } from "../../../utils/is-jsx-fragment-element.js";
@@ -18,6 +21,7 @@ import type { RuleContext } from "../../../utils/rule-context.js";
 import { walkAst } from "../../../utils/walk-ast.js";
 import {
   NATIVE_SUBMIT_HANDLER_PARAMETER_COUNT,
+  NATIVE_SUBMIT_MODULE_ARGUMENT_COUNT,
   NATIVE_SUBMIT_ATTRIBUTE_COUNT,
   NATIVE_SUBMIT_HELPER_ARGUMENT_COUNT,
   NATIVE_SUBMIT_PROVIDER_MODULES,
@@ -31,6 +35,12 @@ interface NativeSubmitFunctionBinding {
     | EsTreeNodeOfType<"FunctionExpression">;
   readonly symbol: SymbolDescriptor;
 }
+
+const supportedPrograms = new WeakMap<ScopeAnalysis, boolean>();
+const sourcePragmaProofs = new WeakMap<ScopeAnalysis, Map<string, boolean>>();
+const navigationReferenceProofs = new WeakMap<SymbolDescriptor, boolean>();
+const loadedRouterProofs = new WeakMap<ScopeAnalysis, WeakMap<EsTreeNode, boolean>>();
+const jsxChildrenByParent = new WeakMap<EsTreeNode, ReadonlySet<EsTreeNode>>();
 
 const readDirectFunctionBinding = (
   node: EsTreeNode,
@@ -102,9 +112,89 @@ const hasClosedProviderReferences = (symbol: SymbolDescriptor): boolean =>
     return false;
   });
 
+const isLoadedRouterProvider = (expression: EsTreeNode, context: RuleContext): boolean => {
+  const current = stripParenExpression(expression);
+  let proofs = loadedRouterProofs.get(context.scopes);
+  if (!proofs) {
+    proofs = new WeakMap();
+    loadedRouterProofs.set(context.scopes, proofs);
+  }
+  const cached = proofs.get(current);
+  if (cached !== undefined) return cached;
+  proofs.set(current, false);
+  let loaded = false;
+  if (isNodeOfType(current, "Identifier")) {
+    const symbol = context.scopes.symbolFor(current);
+    const initializer = symbol && getDirectConstInitializer(symbol);
+    loaded = Boolean(initializer && isLoadedRouterProvider(initializer, context));
+  } else if (
+    isNodeOfType(current, "MemberExpression") &&
+    getStaticPropertyName(current) === "default"
+  ) {
+    loaded = isLoadedRouterProvider(current.object, context);
+  } else if (
+    isNodeOfType(current, "CallExpression") &&
+    !current.optional &&
+    current.arguments.length === NATIVE_SUBMIT_MODULE_ARGUMENT_COUNT &&
+    isNodeOfType(current.callee, "MemberExpression") &&
+    !current.callee.optional &&
+    getStaticPropertyName(current.callee) === "require" &&
+    isNodeOfType(current.callee.object, "Identifier") &&
+    current.callee.object.name === "module" &&
+    context.scopes.isGlobalReference(current.callee.object)
+  ) {
+    const [source] = current.arguments;
+    loaded =
+      isNodeOfType(source, "Literal") &&
+      (source.value === "react-router" || source.value === "react-router-dom");
+  }
+  proofs.set(current, loaded);
+  return loaded;
+};
+
+const hasClosedLoadedRouterUse = (node: EsTreeNode, context: RuleContext): boolean => {
+  if (
+    (!isNodeOfType(node, "Identifier") || context.scopes.referenceFor(node)) &&
+    isLoadedRouterProvider(node, context)
+  ) {
+    const root = findTransparentExpressionRoot(node);
+    const parent = root.parent;
+    if (isNodeOfType(parent, "MemberExpression") && parent.object === root) {
+      const property = getStaticPropertyName(parent);
+      return (
+        property !== null &&
+        ((property !== "useNavigate" && property !== "default") || !isMemberMutationTarget(parent))
+      );
+    }
+    if (
+      isNodeOfType(parent, "VariableDeclarator") &&
+      parent.init === root &&
+      isNodeOfType(parent.id, "Identifier") &&
+      isNodeOfType(parent.parent, "VariableDeclaration") &&
+      parent.parent.kind === "const"
+    )
+      return true;
+    return isNodeOfType(parent, "UnaryExpression") && parent.operator === "void";
+  }
+  return true;
+};
+
 const hasSupportedProgram = (program: EsTreeNode, context: RuleContext): boolean => {
   const source = context.sourceCode?.getText?.();
-  if (source === undefined || /@jsx(?:\s|Frag|ImportSource|Runtime)/u.test(source)) return false;
+  if (source === undefined) return false;
+  let sourceProofs = sourcePragmaProofs.get(context.scopes);
+  if (!sourceProofs) {
+    sourceProofs = new Map();
+    sourcePragmaProofs.set(context.scopes, sourceProofs);
+  }
+  let sourceSupported = sourceProofs.get(source);
+  if (sourceSupported === undefined) {
+    sourceSupported = !/@jsx(?:\s|Frag|ImportSource|Runtime)/u.test(source);
+    sourceProofs.set(source, sourceSupported);
+  }
+  if (!sourceSupported) return false;
+  const cached = supportedPrograms.get(context.scopes);
+  if (cached !== undefined) return cached;
   let supported = true;
   walkAst(program, (node) => {
     if (!supported) return false;
@@ -118,6 +208,10 @@ const hasSupportedProgram = (program: EsTreeNode, context: RuleContext): boolean
       return false;
     }
     if (isTypeScriptTypePosition(node)) return false;
+    if (!hasClosedLoadedRouterUse(node, context)) {
+      supported = false;
+      return false;
+    }
     if (isNodeOfType(node, "Identifier") || isNodeOfType(node, "JSXIdentifier")) {
       const reference = context.scopes.referenceFor(node);
       const symbol = reference?.resolvedSymbol;
@@ -144,6 +238,7 @@ const hasSupportedProgram = (program: EsTreeNode, context: RuleContext): boolean
       }
     }
   });
+  supportedPrograms.set(context.scopes, supported);
   return supported;
 };
 
@@ -197,17 +292,19 @@ const isReturnedForm = (
       current = parent;
       continue;
     }
-    if (isNodeOfType(parent, "JSXFragment") && parent.children.some((child) => child === root)) {
-      current = parent;
-      continue;
-    }
-    if (
-      isNodeOfType(parent, "JSXElement") &&
-      parent.children.some((child) => child === root) &&
-      isNativeContainer(parent.openingElement, context)
-    ) {
-      current = parent;
-      continue;
+    if (isNodeOfType(parent, "JSXFragment") || isNodeOfType(parent, "JSXElement")) {
+      let children = jsxChildrenByParent.get(parent);
+      if (!children) {
+        children = new Set(parent.children);
+        jsxChildrenByParent.set(parent, children);
+      }
+      if (
+        children.has(root) &&
+        (isNodeOfType(parent, "JSXFragment") || isNativeContainer(parent.openingElement, context))
+      ) {
+        current = parent;
+        continue;
+      }
     }
     return false;
   }
@@ -261,10 +358,11 @@ export const isClosedNativeSubmitNavigation = (
   const navigateSymbol = context.scopes.symbolFor(navigateDeclaration.id);
   const hookSymbol = context.scopes.symbolFor(navigateDeclaration.init.callee);
   const hookSource = hookSymbol && getValueImportSource(hookSymbol);
-  if (
-    !navigateSymbol ||
-    getDirectConstInitializer(navigateSymbol) !== navigateDeclaration.init ||
-    navigateSymbol.references.some((reference) => {
+  if (!navigateSymbol || getDirectConstInitializer(navigateSymbol) !== navigateDeclaration.init)
+    return false;
+  let referencesClosed = navigationReferenceProofs.get(navigateSymbol);
+  if (referencesClosed === undefined) {
+    referencesClosed = !navigateSymbol.references.some((reference) => {
       if (isTypeScriptTypePosition(reference.identifier)) return false;
       const parent = reference.identifier.parent;
       return (
@@ -273,7 +371,11 @@ export const isClosedNativeSubmitNavigation = (
         parent.callee !== reference.identifier ||
         parent.optional
       );
-    }) ||
+    });
+    navigationReferenceProofs.set(navigateSymbol, referencesClosed);
+  }
+  if (
+    !referencesClosed ||
     !hookSymbol ||
     getImportedName(hookSymbol.declarationNode) !== "useNavigate" ||
     (hookSource !== "react-router" && hookSource !== "react-router-dom")

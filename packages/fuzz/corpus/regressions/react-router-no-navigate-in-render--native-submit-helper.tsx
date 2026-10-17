@@ -1,7 +1,7 @@
-// Rule: react-router-no-navigate-in-render
-// Weakness: control-flow
-// Source: independent synthetic native submit callback
-// Verdict: pass
+// rule: react-router-no-navigate-in-render
+// weakness: control-flow
+// source: independent synthetic native submit callback
+// verdict: pass
 import { useNavigate } from "react-router-dom";
 
 interface SubmitEvent {

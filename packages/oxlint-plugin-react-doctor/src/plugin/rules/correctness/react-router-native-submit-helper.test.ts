@@ -316,7 +316,7 @@ const cases: ReadonlyArray<NativeSubmitNavigationCase> = [
     expectedCount: 1,
   },
   {
-    name: "runtime-erased-binding-frontier-declined",
+    name: "runtime-erased-binding-preserves-closed-helper",
     code: 'import { Fragment } from "react";\nimport { useNavigate } from "react-router-dom";\nexport const Screen = () => {\n  const navigate = useNavigate();\n  const CREATE_SESSION = async () => { await Promise.resolve(); navigate("/next"); };\n  const onSubmit = (event: { preventDefault: () => void }) => { interface CREATE_SESSION {} event.preventDefault(); CREATE_SESSION(); };\n  return <form onSubmit={onSubmit}><button type="submit">Go</button></form>;\n};\n',
     options: {
       filename: "src/native-submit-helper/case-19.tsx",
@@ -329,7 +329,7 @@ const cases: ReadonlyArray<NativeSubmitNavigationCase> = [
         },
       },
     },
-    expectedCount: 1,
+    expectedCount: 0,
   },
   {
     name: "runtime-typescript-namespace-declined",

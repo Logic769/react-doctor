@@ -5,6 +5,7 @@ import type { EsTreeNode } from "../../utils/es-tree-node.js";
 import { parseSourceText } from "../../utils/parse-source-file.js";
 import type { Rule } from "../../utils/rule.js";
 import { wrapWithSemanticContext } from "../../utils/wrap-with-semantic-context.js";
+import { jsxCurlyBracePresence } from "../react-builtins/jsx-curly-brace-presence.js";
 import { reactRouterNoNavigateInRender } from "./react-router-no-navigate-in-render.js";
 
 const source = `import { useNavigate } from "react-router-dom";
@@ -65,5 +66,35 @@ describe("native submit helper host context", () => {
       },
     };
     wrapWithSemanticContext(rule).create({ report: () => {}, sourceCode });
+  });
+});
+
+describe("semantic wrapper source consumers", () => {
+  it("curly-plain-literal-active", () => {
+    const result = runRule(
+      wrapWithSemanticContext(jsxCurlyBracePresence),
+      'export const Example = () => <div>{"plain"}</div>;',
+      { filename: "src/native-submit/source-compat.tsx", includeLocations: true },
+    );
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(1);
+  });
+  it("curly-unicode-source-escape-preserved", () => {
+    const result = runRule(
+      wrapWithSemanticContext(jsxCurlyBracePresence),
+      'export const Example = () => <div>{"Hello \\u1026 world"}</div>;',
+      { filename: "src/native-submit/source-compat.tsx", includeLocations: true },
+    );
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+  it("curly-node-text-comment-is-local", () => {
+    const result = runRule(
+      wrapWithSemanticContext(jsxCurlyBracePresence),
+      'export const Example = () => <><div>{/* preserve this literal */"commented"}</div><span>{"plain"}</span></>;',
+      { filename: "src/native-submit/source-compat.tsx", includeLocations: true },
+    );
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(1);
   });
 });

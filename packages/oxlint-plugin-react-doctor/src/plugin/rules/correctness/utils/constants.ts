@@ -25,3 +25,5 @@ export const NATIVE_SUBMIT_RUNTIME_TYPESCRIPT_NODES: ReadonlySet<string> = new S
   "TSImportEqualsDeclaration",
   "TSExportAssignment",
 ]);
+
+export const NATIVE_SUBMIT_MODULE_ARGUMENT_COUNT = 1;
