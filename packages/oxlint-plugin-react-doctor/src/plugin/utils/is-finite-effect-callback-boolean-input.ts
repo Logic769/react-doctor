@@ -1,5 +1,6 @@
+import { SECOND_ARGUMENT_INDEX } from "../rules/state-and-effects/utils/effect/constants.js";
 import { componentOrHookDisplayNameForFunction } from "./component-or-hook-display-name.js";
-import type { SymbolDescriptor } from "../semantic/scope-analysis.js";
+import type { ScopeAnalysis, SymbolDescriptor } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
 import { findEnclosingFunction } from "./find-enclosing-function.js";
 import { findProgramRoot } from "./find-program-root.js";
@@ -8,6 +9,8 @@ import { getDirectConstInitializer } from "./get-direct-const-initializer.js";
 import { getImportedName } from "./get-imported-name.js";
 import { getResolvedStaticPropertyName } from "./get-resolved-static-property-name.js";
 import { isBindingAssignmentTarget } from "./is-binding-assignment-target.js";
+import { hasRuntimeValueBinding } from "./has-runtime-value-binding.js";
+import { isErasedTypeScriptBinding } from "./is-erased-typescript-binding.js";
 import { isFunctionLike } from "./is-function-like.js";
 import { isMemberMutationTarget } from "./is-member-mutation-target.js";
 import { isNodeOfType } from "./is-node-of-type.js";
@@ -19,11 +22,20 @@ import { stripParenExpression } from "./strip-paren-expression.js";
 import { walkAst } from "./walk-ast.js";
 
 const supportedPrograms = new WeakMap<EsTreeNode, boolean>();
+const readonlyBindings = new WeakMap<SymbolDescriptor, boolean>();
+const producerReferences = new WeakMap<SymbolDescriptor, boolean>();
+const producerSources = new WeakMap<ScopeAnalysis, Map<string, boolean>>();
+const awaitedInputs = new WeakMap<SymbolDescriptor, boolean>();
 
-const isReadonlyBinding = (symbol: SymbolDescriptor): boolean =>
-  symbol.references.every(
+const isReadonlyBinding = (symbol: SymbolDescriptor): boolean => {
+  const cached = readonlyBindings.get(symbol);
+  if (cached !== undefined) return cached;
+  const readonly = symbol.references.every(
     (reference) => reference.flag === "read" && !isBindingAssignmentTarget(reference.identifier),
   );
+  readonlyBindings.set(symbol, readonly);
+  return readonly;
+};
 
 const isDirectCallReference = (expression: EsTreeNode): boolean => {
   const root = findTransparentExpressionRoot(expression);
@@ -190,14 +202,7 @@ const isSupportedProgram = (expression: EsTreeNode, context: RuleContext): boole
     const reference = context.scopes.referenceFor(node);
     if (!reference) return;
     const symbol = reference.resolvedSymbol;
-    if (
-      symbol?.kind === "ts-interface" ||
-      symbol?.kind === "ts-type-alias" ||
-      (symbol?.kind === "import" &&
-        (("importKind" in symbol.declarationNode && symbol.declarationNode.importKind === "type") ||
-          (isNodeOfType(symbol.declarationNode.parent, "ImportDeclaration") &&
-            symbol.declarationNode.parent.importKind === "type")))
-    ) {
+    if (symbol && isErasedTypeScriptBinding(symbol) && !hasRuntimeValueBinding(symbol)) {
       supported = false;
       return false;
     }
@@ -239,22 +244,36 @@ const isSupportedProgram = (expression: EsTreeNode, context: RuleContext): boole
   return supported;
 };
 
-const isReadonlyAwaitedInput = (expression: EsTreeNode, context: RuleContext): boolean => {
-  if (!isNodeOfType(expression, "Identifier")) return false;
-  const symbol = context.scopes.symbolFor(expression);
-  const initializer = symbol ? getDirectConstInitializer(symbol) : null;
-  const callback = findEnclosingFunction(expression);
-  if (
-    !symbol ||
-    !initializer ||
-    !isReadonlyBinding(symbol) ||
-    symbol.declarationNode.range[1] > expression.range[0] ||
-    !isFunctionLike(callback) ||
-    !callback.async ||
-    callback.generator ||
-    findEnclosingFunction(symbol.declarationNode) !== callback
-  )
-    return false;
+const hasSupportedProducerReferences = (
+  producer: SymbolDescriptor,
+  context: RuleContext,
+): boolean => {
+  const cached = producerReferences.get(producer);
+  if (cached !== undefined) return cached;
+  const supported = producer.references.every((reference) => {
+    if (isDirectCallReference(reference.identifier)) return true;
+    const root = findTransparentExpressionRoot(reference.identifier);
+    const dependencyArray = root.parent;
+    const wrapper = dependencyArray?.parent;
+    return (
+      isNodeOfType(dependencyArray, "ArrayExpression") &&
+      dependencyArray.elements.some((element) => element === root) &&
+      isNodeOfType(wrapper, "CallExpression") &&
+      wrapper.arguments[SECOND_ARGUMENT_INDEX] === dependencyArray &&
+      isProvenUnmodifiedReactApiCall(wrapper, "useCallback", context.scopes)
+    );
+  });
+  producerReferences.set(producer, supported);
+  return supported;
+};
+
+const hasSupportedAwaitedInputBinding = (
+  symbol: SymbolDescriptor,
+  context: RuleContext,
+): boolean => {
+  const initializer = getDirectConstInitializer(symbol);
+  const callback = findEnclosingFunction(symbol.declarationNode);
+  if (!initializer || !isReadonlyBinding(symbol) || !isFunctionLike(callback)) return false;
   const awaited = stripParenExpression(initializer);
   if (!isNodeOfType(awaited, "AwaitExpression")) return false;
   const call = stripParenExpression(awaited.argument);
@@ -265,19 +284,7 @@ const isReadonlyAwaitedInput = (expression: EsTreeNode, context: RuleContext): b
   if (
     !producer ||
     !isReadonlyBinding(producer) ||
-    !producer.references.every((reference) => {
-      if (isDirectCallReference(reference.identifier)) return true;
-      const root = findTransparentExpressionRoot(reference.identifier);
-      const dependencyArray = root.parent;
-      const wrapper = dependencyArray?.parent;
-      return (
-        isNodeOfType(dependencyArray, "ArrayExpression") &&
-        dependencyArray.elements.some((element) => element === root) &&
-        isNodeOfType(wrapper, "CallExpression") &&
-        wrapper.arguments[1] === dependencyArray &&
-        isProvenUnmodifiedReactApiCall(wrapper, "useCallback", context.scopes)
-      );
-    })
+    !hasSupportedProducerReferences(producer, context)
   )
     return false;
   const declaration = producer.declarationNode;
@@ -291,32 +298,34 @@ const isReadonlyAwaitedInput = (expression: EsTreeNode, context: RuleContext): b
     )
       return false;
     const source = declaration.parent.source.value;
-    const program = findProgramRoot(expression);
-    return Boolean(
-      program &&
-      program.body.every((statement) => {
-        if (
-          !isNodeOfType(statement, "ImportDeclaration") ||
-          statement.importKind === "type" ||
-          statement.source.value !== source
-        )
+    const program = findProgramRoot(symbol.declarationNode);
+    if (!program || !isNodeOfType(program, "Program")) return false;
+    let sources = producerSources.get(context.scopes);
+    if (!sources) {
+      sources = new Map();
+      producerSources.set(context.scopes, sources);
+    }
+    const cached = sources.get(source);
+    if (cached !== undefined) return cached;
+    const supported = program.body.every((statement) => {
+      if (
+        !isNodeOfType(statement, "ImportDeclaration") ||
+        statement.importKind === "type" ||
+        statement.source.value !== source
+      )
+        return true;
+      return statement.specifiers.every((specifier) => {
+        if (isNodeOfType(specifier, "ImportSpecifier") && getImportedName(specifier) !== "default")
           return true;
-        return statement.specifiers.every((specifier) => {
-          if (
-            isNodeOfType(specifier, "ImportSpecifier") &&
-            getImportedName(specifier) !== "default"
-          )
-            return true;
-          const namespace = context.scopes.symbolFor(specifier.local);
-          return Boolean(
-            namespace &&
-            namespace.references.every((reference) =>
-              isTypeScriptTypePosition(reference.identifier),
-            ),
-          );
-        });
-      }),
-    );
+        const namespace = context.scopes.symbolFor(specifier.local);
+        return Boolean(
+          namespace &&
+          namespace.references.every((reference) => isTypeScriptTypePosition(reference.identifier)),
+        );
+      });
+    });
+    sources.set(source, supported);
+    return supported;
   }
   const owner = findEnclosingFunction(callback);
   if (
@@ -335,6 +344,26 @@ const isReadonlyAwaitedInput = (expression: EsTreeNode, context: RuleContext): b
     ancestor = ancestor.parent;
   }
   return true;
+};
+
+const isReadonlyAwaitedInput = (expression: EsTreeNode, context: RuleContext): boolean => {
+  if (!isNodeOfType(expression, "Identifier")) return false;
+  const symbol = context.scopes.symbolFor(expression);
+  const callback = findEnclosingFunction(expression);
+  if (
+    !symbol ||
+    symbol.declarationNode.range[1] > expression.range[0] ||
+    !isFunctionLike(callback) ||
+    !callback.async ||
+    callback.generator ||
+    findEnclosingFunction(symbol.declarationNode) !== callback
+  )
+    return false;
+  const cached = awaitedInputs.get(symbol);
+  if (cached !== undefined) return cached;
+  const supported = hasSupportedAwaitedInputBinding(symbol, context);
+  awaitedInputs.set(symbol, supported);
+  return supported;
 };
 
 export const isFiniteEffectCallbackBooleanInput = (
