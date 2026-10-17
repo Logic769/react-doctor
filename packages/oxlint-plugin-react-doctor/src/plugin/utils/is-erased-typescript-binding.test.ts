@@ -16,6 +16,8 @@ describe("isErasedTypeScriptBinding", () => {
     { code: 'import type candidate from "provider";', expected: true },
     { code: 'import type * as candidate from "provider";', expected: true },
     { code: 'import { type candidate } from "provider";', expected: true },
+    { code: 'import type candidate = require("provider");', expected: true },
+    { code: 'import candidate = require("provider");', expected: false },
     { code: "const candidate = 0;", expected: false },
     { code: "let candidate = 0;", expected: false },
     { code: "var candidate = 0;", expected: false },

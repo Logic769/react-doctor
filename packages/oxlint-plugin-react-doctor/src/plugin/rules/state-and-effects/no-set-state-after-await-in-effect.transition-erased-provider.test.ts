@@ -38,6 +38,21 @@ const cases = [
     code: 'declare const Array:any; declare const Symbol:any;Array.prototype[Symbol.iterator] = function* () { yield 0; yield () => {}; };import { useEffect, useState, useTransition } from "react";\nexport const Example = ({value}) => { const [text, writeText] = useState(""); const [pending, startTransition] = useTransition(); useEffect(() => { startTransition(async () => { await Promise.resolve(value); writeText(value); }); }, [value]); return <output>{pending ? "waiting" : text}</output>; };\n',
     expected: 0,
   },
+  {
+    name: "rejects type-only import-equals provider rewrites",
+    code: 'import type require = require("provider-types");require("react").useTransition = () => [false, () => {}];import { useEffect, useState, useTransition } from "react";\nexport const Example = ({value}) => { const [text, writeText] = useState(""); const [pending, startTransition] = useTransition(); useEffect(() => { startTransition(async () => { await Promise.resolve(value); writeText(value); }); }, [value]); return <output>{pending ? "waiting" : text}</output>; };\n',
+    expected: 0,
+  },
+  {
+    name: "preserves genuine import-equals value binding",
+    code: 'import require = require("provider-values");require("react").useTransition = () => [false, () => {}];import { useEffect, useState, useTransition } from "react";\nexport const Example = ({value}) => { const [text, writeText] = useState(""); const [pending, startTransition] = useTransition(); useEffect(() => { startTransition(async () => { await Promise.resolve(value); writeText(value); }); }, [value]); return <output>{pending ? "waiting" : text}</output>; };\n',
+    expected: 1,
+  },
+  {
+    name: "preserves genuine value binding with merged interface",
+    code: 'const require = () => ({}); interface require {}require("react").useTransition = () => [false, () => {}];import { useEffect, useState, useTransition } from "react";\nexport const Example = ({value}) => { const [text, writeText] = useState(""); const [pending, startTransition] = useTransition(); useEffect(() => { startTransition(async () => { await Promise.resolve(value); writeText(value); }); }, [value]); return <output>{pending ? "waiting" : text}</output>; };\n',
+    expected: 1,
+  },
 ];
 
 describe("erased runtime provider admission", () => {
