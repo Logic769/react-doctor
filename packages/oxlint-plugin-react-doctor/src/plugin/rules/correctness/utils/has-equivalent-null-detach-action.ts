@@ -1,5 +1,5 @@
 import { HTML_TAGS } from "../../../constants/html-tags.js";
-import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
+import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import { getAuthoritativeJsxAttribute } from "../../../utils/get-authoritative-jsx-attribute.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
@@ -16,6 +16,8 @@ export interface StoreAction {
   key: EsTreeNode;
   value: EsTreeNode | null;
 }
+
+const readonlyExternalBindings = new WeakMap<SymbolDescriptor, boolean>();
 
 export const getSingleStatement = (statement: EsTreeNode | null | undefined): EsTreeNode | null => {
   if (!statement) return null;
@@ -70,7 +72,13 @@ export const getExternalReferenceKey = (
   }
   if (!isNodeOfType(expression, "Identifier")) return null;
   const symbol = scopes.symbolFor(expression);
-  if (!symbol || symbol.references.some((reference) => reference.flag !== "read")) return null;
+  if (!symbol) return null;
+  let readonly = readonlyExternalBindings.get(symbol);
+  if (readonly === undefined) {
+    readonly = !symbol.references.some((reference) => reference.flag !== "read");
+    readonlyExternalBindings.set(symbol, readonly);
+  }
+  if (!readonly) return null;
   let declarationAncestor: EsTreeNode | null | undefined = symbol.declarationNode;
   while (declarationAncestor) {
     if (declarationAncestor === callback) return null;

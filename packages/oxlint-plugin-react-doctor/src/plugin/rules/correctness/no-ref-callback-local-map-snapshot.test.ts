@@ -441,7 +441,7 @@ const cases: readonly SnapshotCase[] = [
         },
       },
     },
-    expected: 0,
+    expected: 1,
   },
   {
     name: "react-provider-visible-transport",

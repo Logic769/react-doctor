@@ -14,6 +14,10 @@ import { getAuthoritativeJsxAttribute } from "../../../utils/get-authoritative-j
 import { getEquivalentSymbols } from "../../../utils/get-equivalent-symbols.js";
 import { getImportedName } from "../../../utils/get-imported-name.js";
 import { getResolvedStaticPropertyName } from "../../../utils/get-resolved-static-property-name.js";
+import { getStaticStringExpression } from "../../../utils/get-static-string-expression.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
+import { isMemberMutationTarget } from "../../../utils/is-member-mutation-target.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import {
   isImportedFromReact,
@@ -43,8 +47,71 @@ import {
   type StoreAction,
 } from "./has-equivalent-null-detach-action.js";
 
-const isReadonly = (symbol: SymbolDescriptor): boolean =>
-  symbol.references.every((reference) => reference.flag === "read");
+const readonlyBindings = new WeakMap<SymbolDescriptor, boolean>();
+const supportedPrograms = new WeakMap<ScopeAnalysis, boolean>();
+const readonlyKeyPaths = new WeakMap<SymbolDescriptor, Map<string, boolean>>();
+
+const isReadonly = (symbol: SymbolDescriptor): boolean => {
+  const cached = readonlyBindings.get(symbol);
+  if (cached !== undefined) return cached;
+  const readonly = symbol.references.every(
+    (reference) => reference.flag === "read" && !isWithinAssignmentTarget(reference.identifier),
+  );
+  readonlyBindings.set(symbol, readonly);
+  return readonly;
+};
+
+const isRuntimeGlobalReference = (identifier: EsTreeNode, scopes: ScopeAnalysis): boolean => {
+  if (scopes.isGlobalReference(identifier)) return true;
+  const symbol = scopes.symbolFor(identifier);
+  return Boolean(symbol && isErasedTypeScriptBinding(symbol) && !hasRuntimeValueBinding(symbol));
+};
+
+const hasReadonlyLoadedReactUse = (expression: EsTreeNode, scopes: ScopeAnalysis): boolean => {
+  let current = findTransparentExpressionRoot(expression);
+  while (isNodeOfType(current.parent, "MemberExpression") && current.parent.object === current) {
+    const member = current.parent;
+    if (getResolvedStaticPropertyName(member, scopes) === null || isMemberMutationTarget(member))
+      return false;
+    current = findTransparentExpressionRoot(member);
+  }
+  const parent = current.parent;
+  return (
+    isNodeOfType(parent, "ExpressionStatement") ||
+    (isNodeOfType(parent, "UnaryExpression") &&
+      (parent.operator === "typeof" || parent.operator === "void")) ||
+    (isNodeOfType(parent, "CallExpression") && parent.callee === current && !parent.optional)
+  );
+};
+
+const hasSupportedLoaderUse = (identifier: EsTreeNode, scopes: ScopeAnalysis): boolean => {
+  if (!isNodeOfType(identifier, "Identifier")) return false;
+  const root = findTransparentExpressionRoot(identifier);
+  if (
+    isNodeOfType(root.parent, "UnaryExpression") &&
+    (root.parent.operator === "typeof" || root.parent.operator === "void")
+  )
+    return true;
+  const callee =
+    identifier.name === "module" &&
+    isNodeOfType(root.parent, "MemberExpression") &&
+    root.parent.object === root &&
+    !root.parent.optional &&
+    getResolvedStaticPropertyName(root.parent, scopes) === "require"
+      ? findTransparentExpressionRoot(root.parent)
+      : root;
+  const call = callee.parent;
+  if (
+    !isNodeOfType(call, "CallExpression") ||
+    call.optional ||
+    call.callee !== callee ||
+    call.arguments.length !== SINGLE_VALUE_COUNT ||
+    (identifier.name === "module" && callee === root)
+  )
+    return false;
+  const source = getStaticStringExpression(call.arguments[NO_VALUE_COUNT]);
+  return Boolean(source && (source !== "react" || hasReadonlyLoadedReactUse(call, scopes)));
+};
 
 const isDirectInvocation = (node: EsTreeNode): boolean => {
   const expression = findTransparentExpressionRoot(node);
@@ -135,6 +202,8 @@ const hasClosedReactProvider = (identifier: EsTreeNode, scopes: ScopeAnalysis): 
 };
 
 const hasSupportedProgram = (scopes: ScopeAnalysis): boolean => {
+  const cached = supportedPrograms.get(scopes);
+  if (cached !== undefined) return cached;
   let supported = true;
   const checkedReactSymbols = new Set<number>();
   walkAst(scopes.rootScope.node, (node) => {
@@ -147,24 +216,25 @@ const hasSupportedProgram = (scopes: ScopeAnalysis): boolean => {
     if (isNodeOfType(node, "Identifier")) {
       const reference = scopes.referenceFor(node);
       const symbol = reference?.resolvedSymbol;
+      const isRuntimeGlobal = reference && isRuntimeGlobalReference(node, scopes);
+      const isLoader = node.name === "require" || node.name === "module";
       if (
         reference &&
-        (symbol?.kind === "ts-interface" ||
-          symbol?.kind === "ts-type-alias" ||
+        ((isLoader && isRuntimeGlobal && !hasSupportedLoaderUse(node, scopes)) ||
+          (symbol &&
+            isErasedTypeScriptBinding(symbol) &&
+            !hasRuntimeValueBinding(symbol) &&
+            node.name !== "Map" &&
+            !isLoader) ||
           (UNSUPPORTED_PROVIDER_GLOBALS.has(node.name) &&
-            (node.name === "eval" || scopes.isGlobalReference(node))))
+            (node.name === "eval" || isRuntimeGlobal)))
       )
         supported = false;
       if (symbol && isImportedFromReact(symbol) && !checkedReactSymbols.has(symbol.id)) {
         checkedReactSymbols.add(symbol.id);
         if (!hasClosedReactProvider(node, scopes)) supported = false;
       }
-      if (
-        reference &&
-        node.name === "Map" &&
-        scopes.isGlobalReference(node) &&
-        !isDirectInvocation(node)
-      )
+      if (reference && node.name === "Map" && isRuntimeGlobal && !isDirectInvocation(node))
         supported = false;
     }
     if (
@@ -186,6 +256,7 @@ const hasSupportedProgram = (scopes: ScopeAnalysis): boolean => {
     }
     return undefined;
   });
+  supportedPrograms.set(scopes, supported);
   return supported;
 };
 
@@ -282,7 +353,7 @@ const hasClosedRef = (
     !isNodeOfType(allocation, "NewExpression") ||
     !isNodeOfType(allocation.callee, "Identifier") ||
     allocation.callee.name !== "Map" ||
-    !scopes.isGlobalReference(allocation.callee) ||
+    !isRuntimeGlobalReference(allocation.callee, scopes) ||
     allocation.arguments.length !== NO_VALUE_COUNT
   )
     return false;
@@ -302,7 +373,7 @@ const hasClosedRef = (
   });
 };
 
-const hasReadonlyKeyPathAliases = (
+const proveReadonlyKeyPathAliases = (
   root: EsTreeNode,
   selectedPath: readonly string[],
   scopes: ScopeAnalysis,
@@ -357,6 +428,9 @@ const hasReadonlyKeyPathAliases = (
         }
         pendingSymbols.push(...aliases);
       } else if (
+        isNodeOfType(parent, "CallExpression") ||
+        isNodeOfType(parent, "NewExpression") ||
+        isNodeOfType(parent, "TaggedTemplateExpression") ||
         isNodeOfType(parent, "AssignmentExpression") ||
         isNodeOfType(parent, "LogicalExpression") ||
         isNodeOfType(parent, "ConditionalExpression") ||
@@ -373,6 +447,26 @@ const hasReadonlyKeyPathAliases = (
   return true;
 };
 
+const hasReadonlyKeyPathAliases = (
+  root: EsTreeNode,
+  selectedPath: readonly string[],
+  scopes: ScopeAnalysis,
+): boolean => {
+  const symbol = scopes.symbolFor(root);
+  if (!symbol) return false;
+  let paths = readonlyKeyPaths.get(symbol);
+  if (!paths) {
+    paths = new Map();
+    readonlyKeyPaths.set(symbol, paths);
+  }
+  const path = JSON.stringify(selectedPath);
+  const cached = paths.get(path);
+  if (cached !== undefined) return cached;
+  const readonly = proveReadonlyKeyPathAliases(root, selectedPath, scopes);
+  paths.set(path, readonly);
+  return readonly;
+};
+
 const getStableKey = (
   key: EsTreeNode,
   callback: EsTreeNode,
@@ -387,15 +481,7 @@ const getStableKey = (
   while (isNodeOfType(root, "MemberExpression")) root = stripParenExpression(root.object);
   if (!isNodeOfType(root, "Identifier")) return null;
   const equivalents = getEquivalentSymbols(root, scopes);
-  if (
-    !equivalents.length ||
-    equivalents.some(
-      (symbol) =>
-        !isReadonly(symbol) ||
-        symbol.references.some(({ identifier }) => isWithinAssignmentTarget(identifier)),
-    )
-  )
-    return null;
+  if (!equivalents.length || equivalents.some((symbol) => !isReadonly(symbol))) return null;
   for (const symbol of equivalents) {
     const initializer = symbol.initializer && stripParenExpression(symbol.initializer);
     if (
