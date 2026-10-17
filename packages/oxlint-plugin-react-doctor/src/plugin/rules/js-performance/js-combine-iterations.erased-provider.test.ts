@@ -48,6 +48,21 @@ const cases = [
     code: 'import type Object from "provider-types";declare const require: any; Object.defineProperty(require("@ephox/katamari").Optional, "from", {value: () => []});import { Optional } from "@ephox/katamari"; const result = Optional.from(value).filter(item => item.active).map(item => item.label);',
     expected: 1,
   },
+  {
+    name: "rejects type-only import-equals provider rewrites",
+    code: 'import type Object = require("provider-types");Object.defineProperty({}, "unrelated", {value: 42});import { Optional } from "@ephox/katamari"; const result = Optional.from(value).filter(item => item.active).map(item => item.label);',
+    expected: 1,
+  },
+  {
+    name: "preserves genuine import-equals value binding",
+    code: 'import Object = require("provider-values");Object.defineProperty({}, "unrelated", {value: 42});import { Optional } from "@ephox/katamari"; const result = Optional.from(value).filter(item => item.active).map(item => item.label);',
+    expected: 0,
+  },
+  {
+    name: "preserves genuine value binding with merged interface",
+    code: 'const Object = {defineProperty: () => null, getPrototypeOf: () => ({})}; interface Object {}Object.defineProperty({}, "unrelated", {value: 42});import { Optional } from "@ephox/katamari"; const result = Optional.from(value).filter(item => item.active).map(item => item.label);',
+    expected: 0,
+  },
 ];
 
 describe("erased runtime provider admission", () => {
