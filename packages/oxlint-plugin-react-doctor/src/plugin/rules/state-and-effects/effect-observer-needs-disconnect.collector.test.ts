@@ -403,3 +403,18 @@ describe("collector dependency probes", () => {
     expect(run()).toHaveLength(0);
   });
 });
+
+describe("erased collector provider declarations", () => {
+  it.each([
+    "declare const Object: any;",
+    "interface Object {}",
+    'import type Object from "provider-types";',
+  ])("retains the observer warning under %s", (declaration) => {
+    const mutation =
+      'Object.defineProperty(Object.getPrototypeOf([]), "splice", { value: () => [] });';
+    expect(run(component, declaration + mutation + collector)).toHaveLength(1);
+  });
+  it("ignores an unused erased provider declaration", () => {
+    expect(run(component, "declare const Object: any;" + collector)).toHaveLength(0);
+  });
+});

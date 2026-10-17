@@ -1,3 +1,4 @@
+import { isErasedTypeScriptBinding } from "./is-erased-typescript-binding.js";
 import {
   analyzeScopes,
   type ScopeAnalysis,
@@ -63,6 +64,29 @@ const hasClosedNativeEnvironment = (
 ): boolean => {
   let isClosed = true;
   walkAst(program, (node) => {
+    if (
+      isNodeOfType(node, "Identifier") &&
+      !isTypeScriptTypePosition(node) &&
+      [
+        "Object",
+        "Reflect",
+        "Function",
+        "require",
+        "module",
+        "Array",
+        "process",
+        "globalThis",
+        "window",
+        "self",
+        "global",
+      ].includes(node.name)
+    ) {
+      const symbol = scopes.symbolFor(node);
+      if (symbol && symbol.bindingIdentifier !== node && isErasedTypeScriptBinding(symbol)) {
+        isClosed = false;
+        return false;
+      }
+    }
     if (!isClosed || ignoredFunctions.has(node)) return false;
     if (isTypeScriptTypePosition(node)) return false;
     const dependency = getRuntimeStaticDependencySource(node);
