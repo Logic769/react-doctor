@@ -6,6 +6,7 @@ import { findTransparentExpressionRoot } from "../../../utils/find-transparent-e
 import { getDirectConstInitializer } from "../../../utils/get-direct-const-initializer.js";
 import { getResolvedStaticPropertyName } from "../../../utils/get-resolved-static-property-name.js";
 import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { isProvenGlobalObjectReference } from "../../../utils/is-proven-global-namespace-reference.js";
 import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
@@ -122,7 +123,8 @@ const hasClosedLocalMapReferences = (
       GUARDED_MAP_ERASED_PROVIDER_NAMES.has(node.name) &&
       providerSymbol &&
       providerSymbol.bindingIdentifier !== node &&
-      isErasedTypeScriptBinding(providerSymbol)
+      isErasedTypeScriptBinding(providerSymbol) &&
+      !hasRuntimeValueBinding(providerSymbol)
     ) {
       hasProviderExposure = true;
       return false;
