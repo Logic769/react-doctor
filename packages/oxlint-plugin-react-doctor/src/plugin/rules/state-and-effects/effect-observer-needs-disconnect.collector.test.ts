@@ -434,3 +434,20 @@ describe("collector provider runtime value bindings", () => {
     expect(run(component, declaration + mutation + collector)).toHaveLength(0);
   });
 });
+
+describe("erased collector provider namespaces", () => {
+  const mutation =
+    'Object.defineProperty(Object.getPrototypeOf([]), "splice", { value: () => [] });';
+  it.each([
+    "namespace Object {}",
+    "namespace Object { export interface Marker {} }",
+    "namespace Object { export namespace Nested { export type Marker = unknown; } }",
+  ])("retains the observer warning under %s", (declaration) => {
+    expect(run(component, declaration + mutation + collector)).toHaveLength(1);
+  });
+  it("preserves a genuine runtime namespace", () => {
+    expect(
+      run(component, "namespace Object { export const marker = 1; } void Object;" + collector),
+    ).toHaveLength(0);
+  });
+});
