@@ -1,3 +1,4 @@
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
@@ -107,6 +108,18 @@ export const hasClosedPlatformSubscriptionProviders = (
   let admitted = true;
   walkAst(scopes.rootScope.node, (candidate) => {
     if (!admitted) return false;
+    if (isNodeOfType(candidate, "Identifier") && !isTypeScriptTypePosition(candidate)) {
+      const binding = scopes.symbolFor(candidate);
+      if (
+        binding &&
+        binding.bindingIdentifier !== candidate &&
+        PLATFORM_SUBSCRIPTION_EXPOSED_GLOBALS.has(candidate.name) &&
+        isErasedTypeScriptBinding(binding)
+      ) {
+        admitted = false;
+        return false;
+      }
+    }
     if (PLATFORM_SUBSCRIPTION_UNSUPPORTED_TS_RUNTIME_TYPES.has(candidate.type)) {
       admitted = false;
       return false;
