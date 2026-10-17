@@ -1,11 +1,34 @@
 import * as fs from "node:fs";
 import os from "node:os";
 import * as path from "node:path";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { runRule } from "../../../test-utils/run-rule.js";
 import { resetModuleResolutionCaches } from "../../utils/resolve-relative-import-path.js";
 import { resetCrossFileExportCaches } from "../../utils/resolve-cross-file-function-export.js";
 import { htmlLabelHasSingleControl } from "./html-label-has-single-control.js";
+const walkAstCounter = vi.hoisted(() => vi.fn());
+
+vi.mock("../../utils/walk-ast.js", async (importOriginal) => {
+  const originalModule = await importOriginal<typeof import("../../utils/walk-ast.js")>();
+  return {
+    ...originalModule,
+    walkAst: walkAstCounter.mockImplementation(originalModule.walkAst),
+  };
+});
+
+const assignmentTargetCounter = vi.hoisted(() => vi.fn());
+
+vi.mock("../../utils/is-within-assignment-target.js", async (importOriginal) => {
+  const originalModule =
+    await importOriginal<typeof import("../../utils/is-within-assignment-target.js")>();
+  return {
+    ...originalModule,
+    isWithinAssignmentTarget: assignmentTargetCounter.mockImplementation(
+      originalModule.isWithinAssignmentTarget,
+    ),
+  };
+});
+
 interface ImportedButtonCase {
   name: string;
   code: string;
@@ -435,6 +458,49 @@ const cases: ImportedButtonCase[] = [
   },
 ];
 describe("local imported native button label provenance", () => {
+  it("checks imported binding references once across native and polymorphic consumers", () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "rd-label-binding-work-"));
+    temporaryDirectories.push(directory);
+    const filename = path.join(directory, "view.tsx");
+    const code = `import { Button } from "./button";
+      export const Example = () => <>
+        <label><input /><Button /></label>
+        <label><input /><Button asChild={true}><span /></Button></label>
+        <label><input /><Button /></label>
+      </>;`;
+    fs.writeFileSync(filename, code);
+    fs.writeFileSync(
+      path.join(directory, "button.tsx"),
+      'import { Slot } from "@radix-ui/react-slot"; export const Button = ({ asChild = false, ...props }) => { const Host = asChild ? Slot : "button"; return <Host {...props} />; };',
+    );
+    resetModuleResolutionCaches();
+    resetCrossFileExportCaches();
+    assignmentTargetCounter.mockClear();
+    const result = runRule(htmlLabelHasSingleControl, code, { filename });
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(2);
+    expect(
+      assignmentTargetCounter.mock.calls.filter(
+        ([node]) => node.type === "JSXIdentifier" && node.name === "Button",
+      ),
+    ).toHaveLength(4);
+  });
+
+  it.each([
+    { name: "supported", source: "" },
+    { name: "unsupported", source: 'void import("./unknown");' },
+  ])("walks a $name consumer program once across sibling labels", ({ source }) => {
+    walkAstCounter.mockClear();
+    const result = runRule(
+      htmlLabelHasSingleControl,
+      `${source} export const Example = () => <><label><input /></label><label><input /></label></>;`,
+      { filename: "/tmp/rd-label-program-scaling/view.tsx" },
+    );
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toEqual([]);
+    expect(walkAstCounter.mock.calls.filter(([node]) => node.type === "Program")).toHaveLength(1);
+  });
+
   it.each(cases)("$name", ({ code, buttonCode, expectedCount, extraSources }) => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "rd-label-native-button-"));
     temporaryDirectories.push(directory);

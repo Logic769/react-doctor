@@ -25,22 +25,42 @@ import { walkAst } from "../../../utils/walk-ast.js";
 import { walkOwnFunctionScope } from "../../../utils/walk-own-function-scope.js";
 import { LABEL_NATIVE_BUTTON_RUNTIME_TYPES } from "./label-native-button-runtime-types.js";
 
+const supportedProgramCache = new WeakMap<EsTreeNode, boolean>();
+const readonlySymbolCache = new WeakMap<SymbolDescriptor, boolean>();
+const jsxOnlySymbolCache = new WeakMap<SymbolDescriptor, boolean>();
+
 export const hasImportedNativeButtonControlPair = (
   label: EsTreeNodeOfType<"JSXElement">,
   context: RuleContext,
   labelableNames: ReadonlySet<string>,
 ): boolean => {
-  const isReadonly = (symbol: SymbolDescriptor): boolean =>
-    symbol.references.every(
+  const isReadonly = (symbol: SymbolDescriptor): boolean => {
+    const cached = readonlySymbolCache.get(symbol);
+    if (cached !== undefined) return cached;
+    const isReadonlyBinding = symbol.references.every(
       (reference) =>
         reference.flag === "read" &&
         !isWithinAssignmentTarget(findTransparentExpressionRoot(reference.identifier)),
     );
+    readonlySymbolCache.set(symbol, isReadonlyBinding);
+    return isReadonlyBinding;
+  };
   const isJsxName = (node: EsTreeNode): boolean =>
     isNodeOfType(node, "JSXIdentifier") &&
     ((isNodeOfType(node.parent, "JSXOpeningElement") && node.parent.name === node) ||
       (isNodeOfType(node.parent, "JSXClosingElement") && node.parent.name === node));
+  const hasOnlyJsxReferences = (symbol: SymbolDescriptor): boolean => {
+    const cached = jsxOnlySymbolCache.get(symbol);
+    if (cached !== undefined) return cached;
+    const areAllReferencesJsxNames = symbol.references.every((reference) =>
+      isJsxName(reference.identifier),
+    );
+    jsxOnlySymbolCache.set(symbol, areAllReferencesJsxNames);
+    return areAllReferencesJsxNames;
+  };
   const supportsProgram = (program: EsTreeNode, scopes: ScopeAnalysis): boolean => {
+    const cached = supportedProgramCache.get(program);
+    if (cached !== undefined) return cached;
     let supported = true;
     walkAst(program, (node) => {
       if (!supported) return false;
@@ -74,6 +94,7 @@ export const hasImportedNativeButtonControlPair = (
           supported = false;
       }
     });
+    supportedProgramCache.set(program, supported);
     return supported;
   };
   const program = findProgramRoot(label);
@@ -128,7 +149,7 @@ export const hasImportedNativeButtonControlPair = (
       isTypeOnlyImport(declaration) ||
       !isReadonly(symbol) ||
       symbol.scope.symbols.filter((other) => other.name === symbol.name).length !== 1 ||
-      !symbol.references.every((reference) => isJsxName(reference.identifier)) ||
+      !hasOnlyJsxReferences(symbol) ||
       !isNodeOfType(declaration.source, "Literal") ||
       typeof declaration.source.value !== "string" ||
       !declaration.source.value.startsWith(".")
@@ -231,7 +252,7 @@ export const hasImportedNativeButtonControlPair = (
       !choice ||
       !isReadonly(selector) ||
       findEnclosingFunction(selector.declarationNode) !== component ||
-      !selector.references.every((reference) => isJsxName(reference.identifier)) ||
+      !hasOnlyJsxReferences(selector) ||
       !isNodeOfType(choice, "ConditionalExpression") ||
       !isNodeOfType(choice.test, "Identifier") ||
       !isNodeOfType(choice.alternate, "Literal") ||
