@@ -16,3 +16,5 @@ export const INLINE_MAP_RUNTIME_TYPESCRIPT_NODES = new Set([
 
 export const INLINE_MAP_EVENT_ATTRIBUTE_COUNT = 1;
 export const INLINE_MAP_NATIVE_EVENT_NAMES = new Set(["onClick", "onMouseEnter"]);
+
+export const INLINE_MAP_EFFECT_DEPENDENCIES_ARGUMENT_INDEX = 1;

@@ -1,4 +1,4 @@
-import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
+import type { SymbolDescriptor, ScopeAnalysis } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
 import { executesDuringRender } from "../../../utils/executes-during-render.js";
@@ -32,6 +32,7 @@ interface InlineMapRenderFunctionInput {
 }
 
 const supportedPrograms = new WeakMap<ScopeAnalysis, boolean>();
+const supportedReceivers = new WeakMap<SymbolDescriptor, boolean>();
 
 export const findInlineMapRenderFunction = ({
   allocation,
@@ -69,53 +70,71 @@ export const findInlineMapRenderFunction = ({
   if (isNodeOfType(receiver, "Identifier")) {
     const symbol = scopes.symbolFor(receiver);
     const declaration = symbol?.declarationNode;
-    const valueImport = symbol ? getValueImportDeclaration(symbol) : null;
-    const isLocalArray = Boolean(
-      symbol?.kind === "const" &&
-      isNodeOfType(declaration, "VariableDeclarator") &&
-      declaration.id === symbol.bindingIdentifier &&
-      declaration.init &&
-      declaration.range[1] <= mapCall.range[0] &&
-      !isNodeOfType(declaration.parent?.parent, "ExportNamedDeclaration") &&
-      isAllLiteralArrayExpression(stripParenExpression(declaration.init)),
-    );
     if (
       !symbol ||
-      (!valueImport && !isLocalArray) ||
-      isNodeOfType(symbol.declarationNode, "ImportNamespaceSpecifier") ||
-      hasPossibleStaticPropertyMutationOrEscape(receiver, "map", scopes)
+      (symbol.kind === "const" &&
+        isNodeOfType(declaration, "VariableDeclarator") &&
+        declaration.range[1] > mapCall.range[0])
     )
       return null;
-    for (const reference of symbol.references) {
-      if (isTypeScriptTypePosition(reference.identifier)) continue;
-      const root = findTransparentExpressionRoot(reference.identifier);
-      const member = root.parent;
-      if (
-        reference.flag !== "read" ||
-        isWithinAssignmentTarget(reference.identifier) ||
-        !isNodeOfType(member, "MemberExpression") ||
-        member.object !== root
-      )
-        return null;
-      if (
-        member.computed &&
-        isNodeOfType(member.property, "Literal") &&
-        typeof member.property.value === "number" &&
-        Number.isSafeInteger(member.property.value) &&
-        member.property.value >= INLINE_MAP_MINIMUM_ELEMENT_INDEX
-      )
-        continue;
-      if (member.computed) return null;
-      const propertyName = getStaticPropertyName(member);
-      if (propertyName === "length") continue;
-      const call = findTransparentExpressionRoot(member).parent;
-      if (
-        propertyName !== "map" ||
-        !isNodeOfType(call, "CallExpression") ||
-        call.callee !== findTransparentExpressionRoot(member)
-      )
-        return null;
+    let supportedReceiver = supportedReceivers.get(symbol);
+    if (supportedReceiver === undefined) {
+      const valueImport = getValueImportDeclaration(symbol);
+      const isLocalArray = Boolean(
+        symbol.kind === "const" &&
+        isNodeOfType(declaration, "VariableDeclarator") &&
+        declaration.id === symbol.bindingIdentifier &&
+        declaration.init &&
+        !isNodeOfType(declaration.parent?.parent, "ExportNamedDeclaration") &&
+        isAllLiteralArrayExpression(stripParenExpression(declaration.init)),
+      );
+      supportedReceiver = Boolean(
+        (valueImport || isLocalArray) &&
+        !isNodeOfType(symbol.declarationNode, "ImportNamespaceSpecifier") &&
+        !hasPossibleStaticPropertyMutationOrEscape(receiver, "map", scopes),
+      );
+      if (supportedReceiver) {
+        for (const reference of symbol.references) {
+          if (isTypeScriptTypePosition(reference.identifier)) continue;
+          const root = findTransparentExpressionRoot(reference.identifier);
+          const member = root.parent;
+          if (
+            reference.flag !== "read" ||
+            isWithinAssignmentTarget(reference.identifier) ||
+            !isNodeOfType(member, "MemberExpression") ||
+            member.object !== root
+          ) {
+            supportedReceiver = false;
+            break;
+          }
+          if (
+            member.computed &&
+            isNodeOfType(member.property, "Literal") &&
+            typeof member.property.value === "number" &&
+            Number.isSafeInteger(member.property.value) &&
+            member.property.value >= INLINE_MAP_MINIMUM_ELEMENT_INDEX
+          )
+            continue;
+          if (member.computed) {
+            supportedReceiver = false;
+            break;
+          }
+          const propertyName = getStaticPropertyName(member);
+          if (propertyName === "length") continue;
+          const call = findTransparentExpressionRoot(member).parent;
+          if (
+            propertyName !== "map" ||
+            !isNodeOfType(call, "CallExpression") ||
+            call.callee !== findTransparentExpressionRoot(member)
+          ) {
+            supportedReceiver = false;
+            break;
+          }
+        }
+      }
+      supportedReceivers.set(symbol, supportedReceiver);
     }
+    if (!supportedReceiver) return null;
   } else if (!isAllLiteralArrayExpression(receiver)) return null;
   let supportedProgram = supportedPrograms.get(scopes);
   if (supportedProgram === undefined) {
@@ -142,6 +161,13 @@ export const findInlineMapRenderFunction = ({
           supportedProgram = false;
           return false;
         }
+      }
+      if (
+        isProvenGlobalNamespaceReference(node, "eval", scopes) ||
+        isProvenGlobalNamespaceReference(node, "Function", scopes)
+      ) {
+        supportedProgram = false;
+        return false;
       }
       if (isProvenGlobalNamespaceReference(node, "Array", scopes)) {
         const root = findTransparentExpressionRoot(node);

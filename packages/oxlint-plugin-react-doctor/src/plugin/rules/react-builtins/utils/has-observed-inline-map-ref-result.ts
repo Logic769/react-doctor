@@ -1,4 +1,8 @@
-import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
+import type {
+  ScopeAnalysis,
+  ScopeDescriptor,
+  SymbolDescriptor,
+} from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
 import { findEnclosingFunction } from "../../../utils/find-enclosing-function.js";
@@ -6,6 +10,8 @@ import { findTransparentExpressionRoot } from "../../../utils/find-transparent-e
 import { getFunctionBindingIdentifier } from "../../../utils/get-function-binding-name.js";
 import { getStaticPropertyName } from "../../../utils/get-static-property-name.js";
 import { getSymbolTypeAnnotation } from "../../../utils/get-symbol-type-annotation.js";
+import { isReactEffectHookCall } from "../../../utils/is-react-effect-hook-call.js";
+import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
 import { isEffectCallbackReference } from "../../../utils/is-effect-callback-reference.js";
 import { hasJsxSpreadAttribute } from "../../../utils/has-jsx-spread-attribute.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
@@ -16,6 +22,7 @@ import { isCreateRefResultWriteOnly } from "../is-create-ref-result-write-only.j
 import { isValueRenderedInSameRender } from "../is-value-rendered-in-same-render.js";
 import {
   INLINE_MAP_ARGUMENT_COUNT,
+  INLINE_MAP_EFFECT_DEPENDENCIES_ARGUMENT_INDEX,
   INLINE_MAP_FIRST_ARGUMENT_INDEX,
   INLINE_MAP_EVENT_ATTRIBUTE_COUNT,
   INLINE_MAP_NATIVE_EVENT_NAMES,
@@ -28,6 +35,11 @@ interface ObservedInlineMapRefResultInput {
   filename: string;
   scopes: ScopeAnalysis;
 }
+
+const observerSymbolsByScope = new WeakMap<
+  ScopeDescriptor,
+  WeakMap<EsTreeNode, WeakMap<EsTreeNode, SymbolDescriptor>>
+>();
 
 export const hasObservedInlineMapRefResult = ({
   mapCall,
@@ -47,9 +59,36 @@ export const hasObservedInlineMapRefResult = ({
   if (
     symbol?.kind !== "const" ||
     symbol.bindingIdentifier !== result.id ||
-    symbol.references.some(
-      (reference) => reference.flag !== "read" || isWithinAssignmentTarget(reference.identifier),
-    ) ||
+    symbol.references.some((reference) => {
+      if (isTypeScriptTypePosition(reference.identifier)) return false;
+      if (reference.flag !== "read" || isWithinAssignmentTarget(reference.identifier)) return true;
+      const root = findTransparentExpressionRoot(reference.identifier);
+      const parent = root.parent;
+      if (isNodeOfType(parent, "MemberExpression") && parent.object === root) {
+        const memberRoot = findTransparentExpressionRoot(parent);
+        const consumer = memberRoot.parent;
+        return (
+          (isNodeOfType(consumer, "CallExpression") || isNodeOfType(consumer, "NewExpression")) &&
+          consumer.callee === memberRoot
+        );
+      }
+      if (
+        isNodeOfType(parent, "UnaryExpression") &&
+        parent.argument === root &&
+        (parent.operator === "void" || parent.operator === "typeof" || parent.operator === "!")
+      )
+        return false;
+      const dependencies = isNodeOfType(parent, "ArrayExpression")
+        ? findTransparentExpressionRoot(parent)
+        : null;
+      const effect = dependencies?.parent;
+      return !(
+        dependencies &&
+        isNodeOfType(effect, "CallExpression") &&
+        effect.arguments[INLINE_MAP_EFFECT_DEPENDENCIES_ARGUMENT_INDEX] === dependencies &&
+        isReactEffectHookCall(effect, scopes)
+      );
+    }) ||
     isCreateRefResultWriteOnly(mapCall, filename, scopes)
   )
     return false;
@@ -155,14 +194,25 @@ export const hasObservedInlineMapRefResult = ({
     if (findEnclosingFunction(observer) !== owner) return false;
     const binding = getFunctionBindingIdentifier(observer);
     if (!binding) return false;
-    const observerSymbol = isNodeOfType(observer, "FunctionDeclaration")
-      ? scopes
-          .scopeFor(observer)
-          .symbols.find(
-            (candidate) =>
-              candidate.bindingIdentifier === binding && candidate.declarationNode === observer,
-          )
-      : scopes.symbolFor(binding);
+    let observerSymbol: SymbolDescriptor | null;
+    if (isNodeOfType(observer, "FunctionDeclaration")) {
+      const scope = scopes.scopeFor(observer);
+      let symbolsByBinding = observerSymbolsByScope.get(scope);
+      if (!symbolsByBinding) {
+        symbolsByBinding = new WeakMap();
+        for (const candidate of scope.symbols) {
+          let symbolsByDeclaration = symbolsByBinding.get(candidate.bindingIdentifier);
+          if (!symbolsByDeclaration) {
+            symbolsByDeclaration = new WeakMap();
+            symbolsByBinding.set(candidate.bindingIdentifier, symbolsByDeclaration);
+          }
+          if (!symbolsByDeclaration.has(candidate.declarationNode))
+            symbolsByDeclaration.set(candidate.declarationNode, candidate);
+        }
+        observerSymbolsByScope.set(scope, symbolsByBinding);
+      }
+      observerSymbol = symbolsByBinding.get(binding)?.get(observer) ?? null;
+    } else observerSymbol = scopes.symbolFor(binding);
     if (
       !observerSymbol ||
       (observerSymbol.kind !== "function" &&
