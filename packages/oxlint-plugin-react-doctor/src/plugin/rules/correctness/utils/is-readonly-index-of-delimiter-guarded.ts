@@ -12,6 +12,7 @@ import { getDirectConstInitializer } from "../../../utils/get-direct-const-initi
 import { getStaticPropertyName } from "../../../utils/get-static-property-name.js";
 import { getSymbolTypeAnnotation } from "../../../utils/get-symbol-type-annotation.js";
 import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { isNativePrototypeExposure } from "../../../utils/is-native-prototype-exposure.js";
 import { isPresenceProvenBeforeNode } from "../../../utils/is-presence-proven-before-node.js";
@@ -114,6 +115,7 @@ export const isReadonlyIndexOfDelimiterGuarded = (
         symbol &&
         symbol.bindingIdentifier !== candidate &&
         isErasedTypeScriptBinding(symbol) &&
+        !hasRuntimeValueBinding(symbol) &&
         (candidate.name === "String" ||
           candidate.name === "Number" ||
           candidate.name === "globalThis" ||
