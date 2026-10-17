@@ -3,9 +3,9 @@ import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import { findProgramRoot } from "../../../utils/find-program-root.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
 import { getDirectConstInitializer } from "../../../utils/get-direct-const-initializer.js";
-import { getImportDeclarationForSymbol } from "../../../utils/get-import-declaration-for-symbol.js";
 import { getStaticPropertyName } from "../../../utils/get-static-property-name.js";
 import { getSymbolTypeAnnotation } from "../../../utils/get-symbol-type-annotation.js";
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { isNativePrototypeExposure } from "../../../utils/is-native-prototype-exposure.js";
 import {
@@ -13,7 +13,6 @@ import {
   isProvenGlobalObjectReference,
 } from "../../../utils/is-proven-global-namespace-reference.js";
 import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
-import { isTypeOnlyImport } from "../../../utils/is-type-only-import.js";
 import { isWithinAssignmentTarget } from "../../../utils/is-within-assignment-target.js";
 import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
 import { walkAst } from "../../../utils/walk-ast.js";
@@ -50,15 +49,7 @@ export const hasClosedLiteralStarRegexProviders = (
     }
     if (isNodeOfType(node, "Identifier") && REGEX_GLOBAL_EXPOSED_PROPERTY_NAMES.has(node.name)) {
       const symbol = scopes.symbolFor(node);
-      const importDeclaration = symbol ? getImportDeclarationForSymbol(symbol) : null;
-      if (
-        symbol &&
-        (symbol.kind === "ts-interface" ||
-          symbol.kind === "ts-type-alias" ||
-          (importDeclaration !== null && isTypeOnlyImport(importDeclaration)) ||
-          (isNodeOfType(symbol.declarationNode, "ImportSpecifier") &&
-            symbol.declarationNode.importKind === "type"))
-      ) {
+      if (symbol && symbol.bindingIdentifier !== node && isErasedTypeScriptBinding(symbol)) {
         isClosed = false;
         return false;
       }

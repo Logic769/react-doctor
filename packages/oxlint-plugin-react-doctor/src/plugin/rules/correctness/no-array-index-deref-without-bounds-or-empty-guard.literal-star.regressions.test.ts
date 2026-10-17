@@ -6,6 +6,31 @@ const commonOptions = { filename: "src/example.tsx", forceJsx: true, includeLoca
 
 const cases = [
   {
+    name: "inert-type-only-provider-import-keeps-native-proof",
+    code: 'import type { RegExp } from "types"; export const read = (input: string) => /^a*/.exec(input)![0].length;',
+    count: 0,
+  },
+  {
+    name: "inert-ambient-provider-declaration-keeps-native-proof",
+    code: "declare const RegExp: any; export const read = (input: string) => /^a*/.exec(input)![0].length;",
+    count: 0,
+  },
+  {
+    name: "ambient-variable-does-not-hide-runtime-provider-mutation",
+    code: "declare const RegExp: any; RegExp.prototype.exec = () => null; export const read = (input: string) => /^a*/.exec(input)![0].length;",
+    count: 1,
+  },
+  {
+    name: "ambient-global-does-not-hide-runtime-provider-mutation",
+    code: "declare const globalThis: any; globalThis.RegExp.prototype.exec = () => null; export const read = (input: string) => /^a*/.exec(input)![0].length;",
+    count: 1,
+  },
+  {
+    name: "ambient-class-does-not-hide-runtime-provider-mutation",
+    code: "declare class RegExp {} RegExp.prototype.exec = () => null; export const read = (input: string) => /^a*/.exec(input)![0].length;",
+    count: 1,
+  },
+  {
     name: "opaque-string-method-name-does-not-close-regex-escape",
     code: 'import matcher from "matcher-tools"; matcher.match(/x/); export const read = (input: string) => input.match(/^a*/)![0].length;',
     count: 1,
