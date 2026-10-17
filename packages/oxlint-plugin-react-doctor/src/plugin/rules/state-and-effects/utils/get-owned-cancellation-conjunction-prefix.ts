@@ -1,14 +1,20 @@
+import type { SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import { findProgramRoot } from "../../../utils/find-program-root.js";
 import { isEffectLocalCancellationGuard } from "../../../utils/is-effect-local-cancellation-guard.js";
+import { isProvenGlobalNamespaceReference } from "../../../utils/is-proven-global-namespace-reference.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
 import { isWithinAssignmentTarget } from "../../../utils/is-within-assignment-target.js";
 import type { RuleContext } from "../../../utils/rule-context.js";
-import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
+import {
+  TRANSPARENT_EXPRESSION_WRAPPER_TYPES,
+  stripParenExpression,
+} from "../../../utils/strip-paren-expression.js";
 import { walkAst } from "../../../utils/walk-ast.js";
 
 const PROGRAM_SUPPORT = new WeakMap<EsTreeNode, boolean>();
+const READONLY_TAIL_BINDINGS = new WeakMap<SymbolDescriptor, boolean>();
 const ERASED_TYPES = new Set([
   "TSInterfaceDeclaration",
   "TSTypeAliasDeclaration",
@@ -20,13 +26,6 @@ const RUNTIME_TYPES = new Set([
   "TSImportEqualsDeclaration",
   "TSExportAssignment",
   "TSParameterProperty",
-]);
-const EXPRESSION_WRAPPERS = new Set([
-  "TSAsExpression",
-  "TSInstantiationExpression",
-  "TSNonNullExpression",
-  "TSSatisfiesExpression",
-  "TSTypeAssertion",
 ]);
 const READABLE_BINDING_KINDS = new Set([
   "const",
@@ -44,22 +43,26 @@ const hasSupportedCancellationProgram = (expression: EsTreeNode, context: RuleCo
   let supported = true;
   walkAst(program, (node) => {
     if (!supported) return false;
-    const referenceSymbol = isNodeOfType(node, "Identifier")
-      ? context.scopes.referenceFor(node)?.resolvedSymbol
-      : null;
+    const reference = isNodeOfType(node, "Identifier") ? context.scopes.referenceFor(node) : null;
+    const referenceSymbol = reference?.resolvedSymbol;
     if (
       ("declare" in node && node.declare === true) ||
       referenceSymbol?.kind === "ts-interface" ||
       referenceSymbol?.kind === "ts-type-alias" ||
       RUNTIME_TYPES.has(node.type) ||
       isNodeOfType(node, "WithStatement") ||
-      (isNodeOfType(node, "Identifier") && node.name === "eval")
+      (isNodeOfType(node, "Identifier") &&
+        node.name === "eval" &&
+        (reference !== null ||
+          (isNodeOfType(node.parent, "MemberExpression") &&
+            node.parent.property === node &&
+            isProvenGlobalNamespaceReference(node.parent, "eval", context.scopes))))
     ) {
       supported = false;
       return false;
     }
     if (ERASED_TYPES.has(node.type) || isTypeScriptTypePosition(node)) return false;
-    if (node.type.startsWith("TS") && !EXPRESSION_WRAPPERS.has(node.type)) {
+    if (node.type.startsWith("TS") && !TRANSPARENT_EXPRESSION_WRAPPER_TYPES.has(node.type)) {
       supported = false;
       return false;
     }
@@ -75,13 +78,14 @@ const isReadonlyCancellationTailIdentifier = (
 ): boolean => {
   if (!isNodeOfType(expression, "Identifier")) return false;
   const symbol = context.scopes.symbolFor(expression);
-  return Boolean(
-    symbol &&
-    READABLE_BINDING_KINDS.has(symbol.kind) &&
-    symbol.references.every(
-      (reference) => reference.flag === "read" && !isWithinAssignmentTarget(reference.identifier),
-    ),
+  if (!symbol || !READABLE_BINDING_KINDS.has(symbol.kind)) return false;
+  const previous = READONLY_TAIL_BINDINGS.get(symbol);
+  if (previous !== undefined) return previous;
+  const isReadonly = symbol.references.every(
+    (reference) => reference.flag === "read" && !isWithinAssignmentTarget(reference.identifier),
   );
+  READONLY_TAIL_BINDINGS.set(symbol, isReadonly);
+  return isReadonly;
 };
 
 const isCancellationTailAtom = (expression: EsTreeNode, context: RuleContext): boolean => {
