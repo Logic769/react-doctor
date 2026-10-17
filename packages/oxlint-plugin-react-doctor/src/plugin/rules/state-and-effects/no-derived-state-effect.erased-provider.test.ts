@@ -88,6 +88,31 @@ const cases = [
     code: 'namespace require { export const marker = 1; } void require;import {useEffect,useRef,useState,useCallback} from "react";\nexport const Example=({value,other,enabled})=>{const [count,writeCount]=useState(0);const current=useRef(count);useEffect(()=>{writeCount(value);current.current=value},[value]);return <output>{count}</output>};',
     expected: 0,
   },
+  {
+    name: "rejects opaque runtime imported provider exposure",
+    code: 'import React from "react";function rewrite(){mutate(React);}rewrite();declare const globalThis:any;typeof globalThis;void globalThis;import {useEffect,useRef,useState,useCallback} from "react";\nexport const Example=({value,other,enabled})=>{const [count,writeCount]=useState(0);const current=useRef(count);useEffect(()=>{writeCount(value);current.current=value},[value]);return <output>{count}</output>};',
+    expected: 1,
+  },
+  {
+    name: "rejects imported provider exposure beneath inner interface",
+    code: 'import React from "react";function rewrite(){interface React{}mutate(React);}rewrite();declare const globalThis:any;typeof globalThis;void globalThis;import {useEffect,useRef,useState,useCallback} from "react";\nexport const Example=({value,other,enabled})=>{const [count,writeCount]=useState(0);const current=useRef(count);useEffect(()=>{writeCount(value);current.current=value},[value]);return <output>{count}</output>};',
+    expected: 1,
+  },
+  {
+    name: "rejects imported provider exposure beneath inner type alias",
+    code: 'import React from "react";function rewrite(){type React=unknown;mutate(React);}rewrite();declare const globalThis:any;typeof globalThis;void globalThis;import {useEffect,useRef,useState,useCallback} from "react";\nexport const Example=({value,other,enabled})=>{const [count,writeCount]=useState(0);const current=useRef(count);useEffect(()=>{writeCount(value);current.current=value},[value]);return <output>{count}</output>};',
+    expected: 1,
+  },
+  {
+    name: "rejects imported provider exposure beneath erased namespace",
+    code: 'import React from "react";namespace ProofScope{namespace React{}mutate(React);}declare const globalThis:any;typeof globalThis;void globalThis;import {useEffect,useRef,useState,useCallback} from "react";\nexport const Example=({value,other,enabled})=>{const [count,writeCount]=useState(0);const current=useRef(count);useEffect(()=>{writeCount(value);current.current=value},[value]);return <output>{count}</output>};',
+    expected: 1,
+  },
+  {
+    name: "preserves genuine inner runtime provider shadow",
+    code: 'import React from "react";function rewrite(){const React={};interface React{}mutate(React);}rewrite();declare const globalThis:any;typeof globalThis;void globalThis;import {useEffect,useRef,useState,useCallback} from "react";\nexport const Example=({value,other,enabled})=>{const [count,writeCount]=useState(0);const current=useRef(count);useEffect(()=>{writeCount(value);current.current=value},[value]);return <output>{count}</output>};',
+    expected: 0,
+  },
 ];
 
 describe("erased runtime provider admission", () => {
