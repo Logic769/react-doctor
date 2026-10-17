@@ -1035,7 +1035,11 @@ const supportedProgram = (program: EsTreeNode, context: RuleContext): boolean =>
   return supported;
 };
 
-const isLoadedReactProvider = (expression: EsTreeNode, context: RuleContext): boolean => {
+const isLoadedReactProvider = (
+  expression: EsTreeNode,
+  context: RuleContext,
+  allowModuleRequire = false,
+): boolean => {
   let current = stripParenExpression(expression);
   const visitedSymbols = new Set<SymbolDescriptor>();
   while (true) {
@@ -1050,6 +1054,22 @@ const isLoadedReactProvider = (expression: EsTreeNode, context: RuleContext): bo
     if (isNodeOfType(current, "MemberExpression") && getStaticPropertyName(current) === "default") {
       current = stripParenExpression(current.object);
       continue;
+    }
+    if (
+      allowModuleRequire &&
+      isNodeOfType(current, "CallExpression") &&
+      !current.optional &&
+      isNodeOfType(current.callee, "MemberExpression") &&
+      !current.callee.optional &&
+      !current.callee.computed &&
+      getStaticPropertyName(current.callee) === "require" &&
+      isNodeOfType(current.callee.object, "Identifier") &&
+      current.callee.object.name === "module" &&
+      isRuntimeGlobalReference(current.callee.object, context) &&
+      current.arguments.length === SINGLE_ARGUMENT_COUNT
+    ) {
+      const [source] = current.arguments;
+      return isNodeOfType(source, "Literal") && source.value === "react";
     }
     return (
       isNodeOfType(current, "CallExpression") &&
@@ -1940,6 +1960,136 @@ const hasTokenComputedProviderUse = (member: EsTreeNode, context: RuleContext): 
   return false;
 };
 
+interface TokenMapComponentIndex {
+  staleHelpers: Map<SymbolDescriptor, EsTreeNode[]>;
+  cancellationHelpers: Map<SymbolDescriptor, EsTreeNode[]>;
+  insertions: Map<SymbolDescriptor, EsTreeNodeOfType<"CallExpression">[]>;
+  cleanups: Map<SymbolDescriptor, EsTreeNode[]>;
+}
+
+const supportedTokenPrograms = new WeakMap<ScopeAnalysis, boolean>();
+const tokenMapComponents = new WeakMap<
+  ScopeAnalysis,
+  WeakMap<EsTreeNode, TokenMapComponentIndex>
+>();
+
+const supportedTokenProgram = (program: EsTreeNode, context: RuleContext): boolean => {
+  const cached = supportedTokenPrograms.get(context.scopes);
+  if (cached !== undefined) return cached;
+  let supported = true;
+  walkAst(program, (node) => {
+    if (!supported) return false;
+    if (isTypeScriptTypePosition(node)) return false;
+    if (
+      isNodeOfType(node, "MemberExpression") &&
+      ((isMemberMutationTarget(node) &&
+        (getStaticPropertyName(node) === "useState" ||
+          getStaticPropertyName(node) === "useRef" ||
+          getStaticPropertyName(node) === "useEffect" ||
+          getStaticPropertyName(node) === "useCallback") &&
+        isLoadedReactProvider(node.object, context, true)) ||
+        (node.computed &&
+          getResolvedStaticPropertyName(node, context.scopes, {
+            allowConstTemplateLiteral: true,
+            allowConstNumericLiteral: true,
+            stringifyNonStringLiterals: true,
+          }) === null &&
+          hasTokenComputedProviderUse(node, context)))
+    )
+      supported = false;
+  });
+  supportedTokenPrograms.set(context.scopes, supported);
+  return supported;
+};
+
+const indexTokenMapComponent = (
+  component: EsTreeNode,
+  context: RuleContext,
+): TokenMapComponentIndex => {
+  let components = tokenMapComponents.get(context.scopes);
+  if (!components) {
+    components = new WeakMap();
+    tokenMapComponents.set(context.scopes, components);
+  }
+  const cached = components.get(component);
+  if (cached) return cached;
+  const index: TokenMapComponentIndex = {
+    staleHelpers: new Map(),
+    cancellationHelpers: new Map(),
+    insertions: new Map(),
+    cleanups: new Map(),
+  };
+  const storeForCall = (call: EsTreeNode | null | undefined): SymbolDescriptor | null => {
+    if (!isNodeOfType(call, "CallExpression") || !isNodeOfType(call.callee, "MemberExpression"))
+      return null;
+    const receiver = call.callee.object;
+    return isNodeOfType(receiver, "MemberExpression") &&
+      !receiver.computed &&
+      !receiver.optional &&
+      getStaticPropertyName(receiver) === "current" &&
+      isNodeOfType(receiver.object, "Identifier")
+      ? context.scopes.symbolFor(receiver.object)
+      : null;
+  };
+  walkAst(component, (node) => {
+    if (methodCall(node, "set", RECORD_FIELD_COUNT)) {
+      const symbol = storeForCall(node);
+      if (symbol) {
+        const calls = index.insertions.get(symbol) ?? [];
+        calls.push(node);
+        index.insertions.set(symbol, calls);
+      }
+    }
+    if (!isFunctionLike(node)) return;
+    const body = stripParenExpression(node.body);
+    if (findEnclosingFunction(node) === component) {
+      if (
+        isNodeOfType(body, "BinaryExpression") &&
+        body.operator === "!==" &&
+        methodCall(body.left, "get", SINGLE_ARGUMENT_COUNT)
+      ) {
+        const symbol = storeForCall(body.left);
+        if (symbol) {
+          const functions = index.staleHelpers.get(symbol) ?? [];
+          functions.push(node);
+          index.staleHelpers.set(symbol, functions);
+        }
+      }
+      const first = isNodeOfType(body, "BlockStatement")
+        ? body.body.at(EMPTY_ARGUMENT_COUNT)
+        : null;
+      const guard = isNodeOfType(first, "IfStatement") ? stripParenExpression(first.test) : null;
+      const membership = isNodeOfType(guard, "UnaryExpression")
+        ? stripParenExpression(guard.argument)
+        : null;
+      if (
+        node.params.length === SINGLE_ARGUMENT_COUNT &&
+        methodCall(membership, "has", SINGLE_ARGUMENT_COUNT)
+      ) {
+        const symbol = storeForCall(membership);
+        if (symbol) {
+          const functions = index.cancellationHelpers.get(symbol) ?? [];
+          functions.push(node);
+          index.cancellationHelpers.set(symbol, functions);
+        }
+      }
+    }
+    const first = isNodeOfType(body, "BlockStatement")
+      ? expressionStatement(body.body.at(EMPTY_ARGUMENT_COUNT))
+      : null;
+    if (methodCall(first, "clear", EMPTY_ARGUMENT_COUNT)) {
+      const symbol = storeForCall(first);
+      if (symbol) {
+        const functions = index.cleanups.get(symbol) ?? [];
+        functions.push(node);
+        index.cleanups.set(symbol, functions);
+      }
+    }
+  });
+  components.set(component, index);
+  return index;
+};
+
 const certifyOwnedTokenMapRecordReset = (write: EsTreeNode, context: RuleContext): boolean => {
   if (
     !isNodeOfType(write, "CallExpression") ||
@@ -1971,23 +2121,7 @@ const certifyOwnedTokenMapRecordReset = (write: EsTreeNode, context: RuleContext
     !supportedProgram(program, context)
   )
     return false;
-  let supported = true;
-  walkAst(program, (node) => {
-    if (!supported) return false;
-    if (isTypeScriptTypePosition(node)) return false;
-    if (
-      isNodeOfType(node, "MemberExpression") &&
-      node.computed &&
-      getResolvedStaticPropertyName(node, context.scopes, {
-        allowConstTemplateLiteral: true,
-        allowConstNumericLiteral: true,
-        stringifyNonStringLiterals: true,
-      }) === null &&
-      hasTokenComputedProviderUse(node, context)
-    )
-      supported = false;
-  });
-  if (!supported) return false;
+  if (!supportedTokenProgram(program, context)) return false;
   const [tokenStatement, releaseStatement, , resetStatement] = owner.body.body;
   const tokenClear = expressionStatement(tokenStatement);
   const release = expressionStatement(releaseStatement);
@@ -2056,11 +2190,7 @@ const certifyOwnedTokenMapRecordReset = (write: EsTreeNode, context: RuleContext
       certificate.allowedReferences.add(reference.identifier);
     else return false;
   }
-  const functions: EsTreeNode[] = [];
-  walkAst(component, (node) => {
-    if (node !== component && isFunctionLike(node) && findEnclosingFunction(node) === component)
-      functions.push(node);
-  });
+  const componentIndex = indexTokenMapComponent(component, context);
   for (const reference of pair.setterSymbol.references) {
     const call = reference.identifier.parent;
     if (!isSetterCall(call, certificate) || call.callee !== reference.identifier) return false;
@@ -2069,7 +2199,7 @@ const certifyOwnedTokenMapRecordReset = (write: EsTreeNode, context: RuleContext
   }
   if (certificate.mark === certificate.setter || certificate.clear === certificate.setter)
     return false;
-  for (const candidate of functions) {
+  for (const candidate of componentIndex.staleHelpers.get(tokenRegistry) ?? []) {
     const body = isFunctionLike(candidate) ? stripParenExpression(candidate.body) : null;
     if (
       isNodeOfType(body, "BinaryExpression") &&
@@ -2080,17 +2210,13 @@ const certifyOwnedTokenMapRecordReset = (write: EsTreeNode, context: RuleContext
     }
   }
   if (certificate.stale === certificate.setter) return false;
-  const insertions: EsTreeNodeOfType<"CallExpression">[] = [];
-  walkAst(component, (node) => {
-    if (tokenStoreCall(node, controllerRegistry, "set", RECORD_FIELD_COUNT, certificate))
-      insertions.push(node);
-  });
+  const insertions = componentIndex.insertions.get(controllerRegistry) ?? [];
   if (
     insertions.length === EMPTY_ARGUMENT_COUNT ||
     !insertions.every((call) => tokenRequest(call, certificate))
   )
     return false;
-  for (const candidate of functions) {
+  for (const candidate of componentIndex.cancellationHelpers.get(tokenRegistry) ?? []) {
     if (!isFunctionLike(candidate) || !isNodeOfType(candidate.body, "BlockStatement")) continue;
     const first = candidate.body.body.at(EMPTY_ARGUMENT_COUNT);
     if (
@@ -2101,7 +2227,7 @@ const certifyOwnedTokenMapRecordReset = (write: EsTreeNode, context: RuleContext
       if (!tokenCancellation(candidate, certificate)) return false;
     }
   }
-  walkAst(component, (node) => {
+  for (const node of componentIndex.cleanups.get(tokenRegistry) ?? []) {
     if (
       !isFunctionLike(node) ||
       node.async ||
@@ -2110,9 +2236,9 @@ const certifyOwnedTokenMapRecordReset = (write: EsTreeNode, context: RuleContext
       !isNodeOfType(node.body, "BlockStatement") ||
       node.body.body.length !== RESET_STATEMENT_COUNT
     )
-      return;
+      continue;
     const first = expressionStatement(node.body.body.at(EMPTY_ARGUMENT_COUNT));
-    if (!tokenStoreCall(first, tokenRegistry, "clear", EMPTY_ARGUMENT_COUNT, certificate)) return;
+    if (!tokenStoreCall(first, tokenRegistry, "clear", EMPTY_ARGUMENT_COUNT, certificate)) continue;
     const effect = node.parent;
     const effectCallback = isNodeOfType(effect, "ReturnStatement")
       ? findEnclosingFunction(effect)
@@ -2132,9 +2258,9 @@ const certifyOwnedTokenMapRecordReset = (write: EsTreeNode, context: RuleContext
         (isNodeOfType(effect, "ReturnStatement") && effect.argument === node)
       )
     )
-      return;
+      continue;
     tokenRelease(node.body.body, certificate);
-  });
+  }
   for (const reference of pair.stateSymbol.references) {
     const member = reference.identifier.parent;
     const comparison = member?.parent;
