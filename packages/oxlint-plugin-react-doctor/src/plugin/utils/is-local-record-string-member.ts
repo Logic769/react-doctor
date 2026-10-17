@@ -12,6 +12,7 @@ import { getFunctionBindingSymbols } from "./get-function-binding-symbols.js";
 import { getStaticPropertyKeyName } from "./get-static-property-key-name.js";
 import { getResolvedStaticPropertyName } from "./get-resolved-static-property-name.js";
 import { getStaticPropertyName } from "./get-static-property-name.js";
+import { isErasedTypeScriptBinding } from "./is-erased-typescript-binding.js";
 import { isFunctionLike } from "./is-function-like.js";
 import { isNodeOfType } from "./is-node-of-type.js";
 import { isReactApiCall } from "./is-react-api-call.js";
@@ -42,6 +43,7 @@ const hasUnsupportedSourceOperation = (context: RuleContext): boolean => {
   let unsupportedOperation = false;
   walkAst(context.scopes.rootScope.node, (node) => {
     if (unsupportedOperation) return false;
+    const binding = isNodeOfType(node, "Identifier") ? context.scopes.symbolFor(node) : null;
     const receiver = isNodeOfType(node, "MemberExpression")
       ? stripParenExpression(node.object)
       : null;
@@ -80,7 +82,10 @@ const hasUnsupportedSourceOperation = (context: RuleContext): boolean => {
         ["String", "Array", "Object", "Symbol", "Reflect", "Function", "eval"].includes(
           node.name,
         ) &&
-        context.scopes.isGlobalReference(node)) ||
+        (context.scopes.isGlobalReference(node) ||
+          Boolean(
+            binding && context.scopes.referenceFor(node) && isErasedTypeScriptBinding(binding),
+          ))) ||
       (isNodeOfType(node, "MemberExpression") &&
         [
           "prototype",

@@ -206,6 +206,21 @@ return records.map(record=>record.token.split(" ").map((part,index)=><span key={
   );
   it("accepts own literal string tokens through a local callback return and filter", () =>
     check(renderRecords(), 0));
+  it.each([
+    'interface Object {} Object.defineProperty(Object.getPrototypeOf(""), "split", {value: customSplit});',
+    'declare const Function: any; Function("String.prototype.split = customSplit")();',
+    'import type {Reflect} from "./types"; Reflect.set(Object.getPrototypeOf(""), "split", customSplit);',
+  ])("retains runtime exposure through erased declarations: %s", (exposure) =>
+    check(`${exposure} ${renderRecords()}`, 1),
+  );
+  it.each([
+    "interface Object {}",
+    "declare const Function: any;",
+    'import type {Reflect} from "./types";',
+    'const Object = {getPrototypeOf: () => null}; Object.getPrototypeOf("");',
+  ])("allows inert declarations and real local reflection: %s", (metadata) =>
+    check(`${metadata} ${renderRecords()}`, 0),
+  );
   it("accepts a direct literal array", () =>
     check(
       'const View=()=>[{token:"A A"}].map(record=>record.token.split(" ").map((part,index)=><span key={index}>{part}</span>));',
