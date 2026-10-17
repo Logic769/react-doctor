@@ -119,9 +119,9 @@ const awaitedExpressionIsMutatingNetworkOp = (
       if (methodName === "mutate" && (stripped.arguments?.length ?? 0) === 0) {
         return false;
       }
-      let receiverBase: EsTreeNode = callee.object as EsTreeNode;
+      let receiverBase = stripParenExpression(callee.object);
       while (isNodeOfType(receiverBase, "MemberExpression")) {
-        receiverBase = receiverBase.object as EsTreeNode;
+        receiverBase = stripParenExpression(receiverBase.object);
       }
       if (
         isNodeOfType(receiverBase, "Identifier") &&
