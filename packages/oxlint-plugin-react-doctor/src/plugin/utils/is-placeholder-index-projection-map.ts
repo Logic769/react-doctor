@@ -12,6 +12,7 @@ import {
 } from "./is-proven-global-namespace-reference.js";
 import { getStaticPropertyName } from "./get-static-property-name.js";
 import { isErasedTypeScriptBinding } from "./is-erased-typescript-binding.js";
+import { hasRuntimeValueBinding } from "./has-runtime-value-binding.js";
 import { isTypeScriptTypePosition } from "./is-typescript-type-position.js";
 import { isNodeOfType } from "./is-node-of-type.js";
 import { isWithinAssignmentTarget } from "./is-within-assignment-target.js";
@@ -114,7 +115,8 @@ const hasClosedArrayProvider = (scopes: ScopeAnalysis): boolean => {
       if (
         providerSymbol &&
         providerSymbol.bindingIdentifier !== node &&
-        isErasedTypeScriptBinding(providerSymbol)
+        isErasedTypeScriptBinding(providerSymbol) &&
+        !hasRuntimeValueBinding(providerSymbol)
       ) {
         isClosed = false;
         return false;
