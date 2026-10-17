@@ -1,3 +1,4 @@
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
 import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import { isTypeOnlyImport } from "../../../utils/is-type-only-import.js";
 import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
@@ -88,7 +89,9 @@ export const getButtonDisablingStateSetter = ({
         if (
           binding?.bindingIdentifier !== node &&
           (context.scopes.isGlobalReference(node) ||
-            Boolean(binding && isErasedTypeScriptBinding(binding)))
+            Boolean(
+              binding && isErasedTypeScriptBinding(binding) && !hasRuntimeValueBinding(binding),
+            ))
         ) {
           hasUnsupportedProviderSyntax = true;
           return false;
