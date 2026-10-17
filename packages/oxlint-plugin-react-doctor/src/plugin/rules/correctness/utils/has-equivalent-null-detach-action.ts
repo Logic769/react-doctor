@@ -6,25 +6,25 @@ import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { serializeReferenceKey } from "../../../utils/serialize-reference-key.js";
 import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
 
-interface NullDetachActionInput {
+export interface NullDetachActionInput {
   attribute: EsTreeNode;
   scopes: ScopeAnalysis;
 }
 
-interface StoreAction {
+export interface StoreAction {
   receiver: EsTreeNode;
   key: EsTreeNode;
   value: EsTreeNode | null;
 }
 
-const getSingleStatement = (statement: EsTreeNode | null | undefined): EsTreeNode | null => {
+export const getSingleStatement = (statement: EsTreeNode | null | undefined): EsTreeNode | null => {
   if (!statement) return null;
   if (!isNodeOfType(statement, "BlockStatement")) return statement;
   const [onlyStatement, ...remainingStatements] = statement.body;
   return onlyStatement && !remainingStatements.length ? onlyStatement : null;
 };
 
-const readStoreAction = (
+export const readStoreAction = (
   action: EsTreeNode | null | undefined,
   methodName: string,
 ): StoreAction | null => {
@@ -53,7 +53,7 @@ const readStoreAction = (
     : null;
 };
 
-const getExternalReferenceKey = (
+export const getExternalReferenceKey = (
   rawExpression: EsTreeNode,
   callback: EsTreeNode,
   scopes: ScopeAnalysis,
@@ -107,7 +107,9 @@ const targetSameStoreEntry = (
   );
 };
 
-const readReturnedAction = (statement: EsTreeNode | null | undefined): StoreAction | null => {
+export const readReturnedAction = (
+  statement: EsTreeNode | null | undefined,
+): StoreAction | null => {
   if (!statement || !isNodeOfType(statement, "ReturnStatement") || !statement.argument) return null;
   const returnedFunction = stripParenExpression(statement.argument);
   if (
