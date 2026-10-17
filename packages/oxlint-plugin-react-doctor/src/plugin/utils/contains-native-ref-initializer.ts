@@ -1,3 +1,4 @@
+import { isErasedTypeScriptBinding } from "./is-erased-typescript-binding.js";
 import type { ScopeAnalysis, SymbolDescriptor } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
 import { findTransparentExpressionRoot } from "./find-transparent-expression-root.js";
@@ -54,6 +55,20 @@ const hasClosedProviderProgram = (scopes: ScopeAnalysis): boolean => {
   let isClosed = true;
   walkAst(scopes.rootScope.node, (node) => {
     if (!isClosed || isTypeScriptTypePosition(node)) return false;
+    if (isNodeOfType(node, "Identifier") && !isTypeScriptTypePosition(node)) {
+      const binding = scopes.symbolFor(node);
+      if (
+        binding &&
+        binding.bindingIdentifier !== node &&
+        [...UNSUPPORTED_PROVIDER_GLOBAL_NAMES, "globalThis", "window", "self", "global"].includes(
+          node.name,
+        ) &&
+        isErasedTypeScriptBinding(binding)
+      ) {
+        isClosed = false;
+        return false;
+      }
+    }
     if (isNodeOfType(node, "ImportDeclaration")) {
       const source = node.source.value;
       if (source === "module" || source === "node:module") {
