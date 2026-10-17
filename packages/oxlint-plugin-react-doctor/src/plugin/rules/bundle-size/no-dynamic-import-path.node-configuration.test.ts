@@ -645,6 +645,66 @@ const cases: NodeConfigurationLoaderCase[] = [
     },
     expectedCount: 0,
   },
+  {
+    name: "merged provider interface",
+    code: 'import { pathToFileURL } from "url"; export const load=(file)=>import(pathToFileURL(file).href);interface pathToFileURL {}',
+    fixturePackage: { main: "index.js", engines: { node: ">=20" } },
+    expectedCount: 0,
+  },
+  {
+    name: "type interface before provider import",
+    code: 'interface pathToFileURL {}import { pathToFileURL } from "url"; export const load=(file)=>import(pathToFileURL(file).href);',
+    fixturePackage: { main: "index.js", engines: { node: ">=20" } },
+    expectedCount: 0,
+  },
+  {
+    name: "merged provider type alias",
+    code: 'import { pathToFileURL } from "url"; export const load=(file)=>import(pathToFileURL(file).href);type pathToFileURL=unknown;',
+    fixturePackage: { main: "index.js", engines: { node: ">=20" } },
+    expectedCount: 0,
+  },
+  {
+    name: "opaque provider exposure",
+    code: 'import { pathToFileURL } from "url"; export const load=(file)=>import(pathToFileURL(file).href);function change(){consume(pathToFileURL)}',
+    fixturePackage: { main: "index.js", engines: { node: ">=20" } },
+    expectedCount: 1,
+  },
+  {
+    name: "inner interface cannot hide provider exposure",
+    code: 'import { pathToFileURL } from "url"; export const load=(file)=>import(pathToFileURL(file).href);function change(){interface pathToFileURL{};consume(pathToFileURL)}',
+    fixturePackage: { main: "index.js", engines: { node: ">=20" } },
+    expectedCount: 1,
+  },
+  {
+    name: "inner type alias cannot hide provider exposure",
+    code: 'import { pathToFileURL } from "url"; export const load=(file)=>import(pathToFileURL(file).href);function change(){type pathToFileURL=unknown;consume(pathToFileURL)}',
+    fixturePackage: { main: "index.js", engines: { node: ">=20" } },
+    expectedCount: 1,
+  },
+  {
+    name: "inert ambient loader preserves closed profile",
+    code: 'declare const require:any;import { pathToFileURL } from "url"; export const load=(file)=>import(pathToFileURL(file).href);',
+    fixturePackage: { main: "index.js", engines: { node: ">=20" } },
+    expectedCount: 0,
+  },
+  {
+    name: "genuine local shadow with interface",
+    code: 'import { pathToFileURL } from "url"; export const load=(file)=>import(pathToFileURL(file).href);function change(){const pathToFileURL={};interface pathToFileURL{};consume(pathToFileURL)}',
+    fixturePackage: { main: "index.js", engines: { node: ">=20" } },
+    expectedCount: 0,
+  },
+  {
+    name: "genuine local shadow before interface",
+    code: 'import { pathToFileURL } from "url"; export const load=(file)=>import(pathToFileURL(file).href);function change(){interface pathToFileURL{};const pathToFileURL={};consume(pathToFileURL)}',
+    fixturePackage: { main: "index.js", engines: { node: ">=20" } },
+    expectedCount: 0,
+  },
+  {
+    name: "unrelated empty namespace retains original fallback",
+    code: 'namespace Marker{};import { pathToFileURL } from "url"; export const load=(file)=>import(pathToFileURL(file).href);',
+    fixturePackage: { main: "index.js", engines: { node: ">=20" } },
+    expectedCount: 1,
+  },
 ];
 
 describe("Node file URL configuration loader", () => {
