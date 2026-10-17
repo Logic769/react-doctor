@@ -2,6 +2,8 @@ import { analyzeScopes } from "../../../semantic/scope-analysis.js";
 import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { RuleContext } from "../../../utils/rule-context.js";
+import { isProbeRecorderActive } from "../../../utils/cross-file-probe-recorder.js";
+import { isReactApiCall } from "../../../utils/is-react-api-call.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
 import { getFunctionBindingSymbols } from "../../../utils/get-function-binding-symbols.js";
 import { getImportDeclarationForSymbol } from "../../../utils/get-import-declaration-for-symbol.js";
@@ -44,6 +46,21 @@ interface ImportedNativeMediaGuardInput {
   executionNode: EsTreeNode;
 }
 
+interface ImportedMediaProgramFacts {
+  supported: boolean;
+  providersByFilePath: Map<string, SymbolDescriptor[]>;
+  providerProofsByFunction: WeakMap<EsTreeNode, boolean>;
+  nativeCallsByEffect: WeakMap<EsTreeNode, ReadonlySet<EsTreeNode>>;
+}
+
+const readonlyImportedMediaBindings = new WeakMap<SymbolDescriptor, boolean>();
+const importedMediaProgramFacts = new WeakMap<
+  ScopeAnalysis,
+  Map<string, ImportedMediaProgramFacts>
+>();
+const importedMediaExporterScopes = new WeakMap<EsTreeNode, ScopeAnalysis>();
+const importedMediaFunctionProofs = new WeakMap<EsTreeNode, WeakMap<EsTreeNode, boolean>>();
+
 export const createImportedNativeMediaGuardPredicate = ({
   context,
   effectFunction,
@@ -51,12 +68,17 @@ export const createImportedNativeMediaGuardPredicate = ({
 }: ImportedNativeMediaGuardInput): ((expression: EsTreeNode) => boolean) | null => {
   const filename = context.filename;
   if (!filename) return null;
-  const isReadonly = (symbol: SymbolDescriptor): boolean =>
-    symbol.references.every(
+  const isReadonly = (symbol: SymbolDescriptor): boolean => {
+    const cached = readonlyImportedMediaBindings.get(symbol);
+    if (cached !== undefined) return cached;
+    const readonly = symbol.references.every(
       (reference) =>
         isTypeScriptTypePosition(reference.identifier) ||
         (reference.flag === "read" && !isBindingAssignmentTarget(reference.identifier)),
     );
+    readonlyImportedMediaBindings.set(symbol, readonly);
+    return readonly;
+  };
   const isPrimitive = (node: EsTreeNode): boolean =>
     isNodeOfType(node, "Literal") &&
     !("regex" in node && node.regex) &&
@@ -130,44 +152,119 @@ export const createImportedNativeMediaGuardPredicate = ({
     });
     return !invalid;
   };
-  if (!isSupportedProgram(context.scopes.rootScope.node, context.scopes, new Set())) return null;
-  for (const symbol of context.scopes.rootScope.symbols) {
-    const declaration = getImportDeclarationForSymbol(symbol);
-    if (
-      !declaration ||
-      declaration.importKind === "type" ||
-      (isNodeOfType(symbol.declarationNode, "ImportSpecifier") &&
-        symbol.declarationNode.importKind === "type")
-    )
-      continue;
-    if (isNodeOfType(symbol.declarationNode, "ImportNamespaceSpecifier")) return null;
-    if (declaration.source.value !== "react") continue;
-    if (
-      !isReadonly(symbol) ||
-      !symbol.references.every((reference) => {
-        if (isTypeScriptTypePosition(reference.identifier)) return true;
-        const root = findTransparentExpressionRoot(reference.identifier);
-        const parent = root.parent;
-        const isDefault =
-          isNodeOfType(symbol.declarationNode, "ImportDefaultSpecifier") ||
-          getImportedName(symbol.declarationNode) === "default";
-        const api =
-          isDefault && isNodeOfType(parent, "MemberExpression")
-            ? getStaticPropertyName(parent)
-            : getImportedName(symbol.declarationNode);
-        const call = isDefault && parent ? findTransparentExpressionRoot(parent).parent : parent;
-        return Boolean(
-          api &&
-          IMPORTED_MEDIA_REACT_API_NAMES.has(api) &&
-          isNodeOfType(call, "CallExpression") &&
-          !call.optional &&
-          stripParenExpression(call.callee) === (isDefault ? parent : root) &&
-          isProvenUnmodifiedReactApiCall(call, api, context.scopes),
-        );
-      })
-    )
-      return null;
+  const shouldCaptureDependencies = isProbeRecorderActive();
+  let programs = importedMediaProgramFacts.get(context.scopes);
+  if (!programs) {
+    programs = new Map();
+    importedMediaProgramFacts.set(context.scopes, programs);
   }
+  let programFacts = shouldCaptureDependencies ? undefined : programs.get(filename);
+  if (!programFacts) {
+    programFacts = {
+      supported: false,
+      providersByFilePath: new Map(),
+      providerProofsByFunction: new WeakMap(),
+      nativeCallsByEffect: new WeakMap(),
+    };
+    if (!shouldCaptureDependencies) programs.set(filename, programFacts);
+    const hasEligibleImport = context.scopes.rootScope.symbols.some((symbol) => {
+      const declaration = getImportDeclarationForSymbol(symbol);
+      return (
+        isNodeOfType(symbol.declarationNode, "ImportSpecifier") &&
+        symbol.declarationNode.importKind !== "type" &&
+        declaration?.importKind !== "type" &&
+        typeof declaration?.source.value === "string" &&
+        declaration.source.value.startsWith(".") &&
+        getImportedName(symbol.declarationNode) !== "default"
+      );
+    });
+    if (hasEligibleImport) {
+      const proveImporter = (): boolean => {
+        if (!isSupportedProgram(context.scopes.rootScope.node, context.scopes, new Set()))
+          return false;
+        const providerApiProofs = new WeakMap<SymbolDescriptor, Map<string, boolean>>();
+        const isClosedProviderCall = (
+          call: EsTreeNode,
+          api: string,
+          symbol: SymbolDescriptor,
+        ): boolean => {
+          if (!isReactApiCall(call, api, context.scopes)) return false;
+          let proofs = providerApiProofs.get(symbol);
+          if (!proofs) {
+            proofs = new Map();
+            providerApiProofs.set(symbol, proofs);
+          }
+          const cached = proofs.get(api);
+          if (cached !== undefined) return cached;
+          const closed = isProvenUnmodifiedReactApiCall(call, api, context.scopes);
+          proofs.set(api, closed);
+          return closed;
+        };
+        for (const symbol of context.scopes.rootScope.symbols) {
+          const declaration = getImportDeclarationForSymbol(symbol);
+          if (
+            !declaration ||
+            declaration.importKind === "type" ||
+            (isNodeOfType(symbol.declarationNode, "ImportSpecifier") &&
+              symbol.declarationNode.importKind === "type")
+          )
+            continue;
+          if (isNodeOfType(symbol.declarationNode, "ImportNamespaceSpecifier")) return false;
+          if (declaration.source.value !== "react") continue;
+          if (
+            !isReadonly(symbol) ||
+            !symbol.references.every((reference) => {
+              if (isTypeScriptTypePosition(reference.identifier)) return true;
+              const root = findTransparentExpressionRoot(reference.identifier);
+              const parent = root.parent;
+              const isDefault =
+                isNodeOfType(symbol.declarationNode, "ImportDefaultSpecifier") ||
+                getImportedName(symbol.declarationNode) === "default";
+              const api =
+                isDefault && isNodeOfType(parent, "MemberExpression")
+                  ? getStaticPropertyName(parent)
+                  : getImportedName(symbol.declarationNode);
+              const call =
+                isDefault && parent ? findTransparentExpressionRoot(parent).parent : parent;
+              return Boolean(
+                api &&
+                IMPORTED_MEDIA_REACT_API_NAMES.has(api) &&
+                isNodeOfType(call, "CallExpression") &&
+                !call.optional &&
+                stripParenExpression(call.callee) === (isDefault ? parent : root) &&
+                isClosedProviderCall(call, api, symbol),
+              );
+            })
+          )
+            return false;
+        }
+
+        return true;
+      };
+      programFacts.supported = proveImporter();
+      if (programFacts.supported) {
+        for (const provider of context.scopes.rootScope.symbols) {
+          const providerImport = getImportDeclarationForSymbol(provider);
+          if (
+            !providerImport ||
+            providerImport.importKind === "type" ||
+            (isNodeOfType(provider.declarationNode, "ImportSpecifier") &&
+              provider.declarationNode.importKind === "type") ||
+            typeof providerImport.source.value !== "string"
+          )
+            continue;
+          const filePath = resolveModulePath(filename, providerImport.source.value);
+          if (!filePath) continue;
+          const providers = programFacts.providersByFilePath.get(filePath) ?? [];
+          providers.push(provider);
+          programFacts.providersByFilePath.set(filePath, providers);
+        }
+      }
+    }
+  }
+  if (!programFacts.supported) return null;
+  const currentProgramFacts = programFacts;
+  const importProofs = new WeakMap<SymbolDescriptor, boolean>();
 
   const proveCall = (call: EsTreeNode): boolean => {
     if (
@@ -195,251 +292,296 @@ export const createImportedNativeMediaGuardPredicate = ({
       !isReadonly(imported)
     )
       return false;
-    const resolvedPath = resolveModulePath(filename, declaration.source.value);
-    const resolved = resolveCrossFileFunctionExportWithFilePath(
-      filename,
-      declaration.source.value,
-      exportedName,
-    );
-    if (!resolved || resolved.filePath !== resolvedPath) return false;
-    const functionNode = resolved.functionNode;
-    if (
-      !isFunctionLike(functionNode) ||
-      functionNode.async ||
-      functionNode.generator ||
-      functionNode.params.length !== NATIVE_MEDIA_CALL_ARGUMENT_COUNT ||
-      !isNodeOfType(functionNode.params[FIRST_ARGUMENT_INDEX], "Identifier") ||
-      !isNodeOfType(resolved.programNode, "Program")
-    )
-      return false;
-    const scopes = analyzeScopes(resolved.programNode);
-    const parameter = scopes.symbolFor(functionNode.params[FIRST_ARGUMENT_INDEX]);
-    const bindings = getFunctionBindingSymbols(functionNode, scopes);
-    if (
-      !parameter ||
-      !isReadonly(parameter) ||
-      bindings.length !== NATIVE_MEDIA_CALL_ARGUMENT_COUNT
-    )
-      return false;
-    const binding = bindings[FIRST_ARGUMENT_INDEX];
-    if (
-      !binding ||
-      binding.name !== exportedName ||
-      !isReadonly(binding) ||
-      scopes.rootScope.symbols.filter(
-        (symbol) => symbol.name === binding.name && !isErasedTypeScriptBinding(symbol),
-      ).length !== NATIVE_MEDIA_CALL_ARGUMENT_COUNT ||
-      !binding.references.every(
-        (reference) =>
-          isTypeScriptTypePosition(reference.identifier) ||
-          isDirectCallReference(reference.identifier),
-      )
-    )
-      return false;
-    const carrier = functionNode.parent;
-    const exported = isNodeOfType(carrier, "VariableDeclarator") ? carrier.parent?.parent : carrier;
-    if (
-      !isNodeOfType(exported, "ExportNamedDeclaration") ||
-      exported.source ||
-      exported.specifiers.length !== 0 ||
-      !(
-        exported.declaration === functionNode ||
-        (isNodeOfType(carrier, "VariableDeclarator") &&
-          carrier.id === binding.bindingIdentifier &&
-          isNodeOfType(carrier.parent, "VariableDeclaration") &&
-          carrier.parent.kind === "const" &&
-          exported.declaration === carrier.parent)
-      )
-    )
-      return false;
-
-    const allowedGlobals = new Set<EsTreeNode>();
-    const isStaticData = (expression: EsTreeNode): boolean => {
-      const node = stripParenExpression(expression);
-      if (isPrimitive(node) || isFunctionLike(node)) return true;
-      if (isNodeOfType(node, "ArrayExpression"))
-        return node.elements.every((element) => element !== null && isPrimitive(element));
-      if (
-        !isNodeOfType(node, "NewExpression") ||
-        !isNodeOfType(node.callee, "Identifier") ||
-        node.callee.name !== "Set" ||
-        !scopes.isGlobalReference(node.callee) ||
-        node.arguments.length !== NATIVE_MEDIA_CALL_ARGUMENT_COUNT ||
-        !isNodeOfType(node.arguments[FIRST_ARGUMENT_INDEX], "ArrayExpression") ||
-        !node.arguments[FIRST_ARGUMENT_INDEX].elements.every(
-          (element) => element !== null && isPrimitive(element),
-        )
-      )
-        return false;
-      allowedGlobals.add(node.callee);
-      return true;
-    };
-    for (const statement of resolved.programNode.body) {
-      if (isNodeOfType(statement, "ImportDeclaration")) {
-        if (statement.importKind !== "type") return false;
-        continue;
-      }
-      if (
-        isNodeOfType(statement, "ExportDefaultDeclaration") ||
-        isNodeOfType(statement, "ExportAllDeclaration")
-      )
-        return false;
-      const node = isNodeOfType(statement, "ExportNamedDeclaration")
-        ? statement.declaration
-        : statement;
-      if (
-        isNodeOfType(statement, "ExportNamedDeclaration") &&
-        (statement.source || statement.specifiers.length !== 0)
-      )
-        return false;
-      if (
-        isNodeOfType(node, "FunctionDeclaration") ||
-        isNodeOfType(node, "TSInterfaceDeclaration") ||
-        isNodeOfType(node, "TSTypeAliasDeclaration") ||
-        isNodeOfType(node, "EmptyStatement")
-      )
-        continue;
-      if (isNodeOfType(node, "ExpressionStatement") && isPrimitive(node.expression)) continue;
-      if (
-        !isNodeOfType(node, "VariableDeclaration") ||
-        node.kind !== "const" ||
-        !node.declarations.every(
-          (item) => isNodeOfType(item.id, "Identifier") && item.init && isStaticData(item.init),
-        )
-      )
-        return false;
-    }
-    let returnExpression: EsTreeNode | null = null;
-    if (isNodeOfType(functionNode.body, "BlockStatement")) {
-      const statements = functionNode.body.body;
-      const returned = statements[statements.length - 1];
-      if (
-        !isNodeOfType(returned, "ReturnStatement") ||
-        !returned.argument ||
-        (statements.length !== IMPORTED_MEDIA_SINGLE_RETURN_STATEMENT_COUNT &&
-          statements.length !== IMPORTED_MEDIA_SSR_BODY_STATEMENT_COUNT)
-      )
-        return false;
-      returnExpression = returned.argument;
-      if (statements.length === IMPORTED_MEDIA_SSR_BODY_STATEMENT_COUNT) {
-        const prefix = statements[FIRST_ARGUMENT_INDEX];
-        if (!isNodeOfType(prefix, "IfStatement") || prefix.alternate) return false;
-        const test = stripParenExpression(prefix.test);
-        if (!isNodeOfType(test, "BinaryExpression") || test.operator !== "===") return false;
-        const typeOf = isNodeOfType(test.left, "UnaryExpression") ? test.left : test.right;
-        const missing = typeOf === test.left ? test.right : test.left;
-        if (
-          !isNodeOfType(typeOf, "UnaryExpression") ||
-          typeOf.operator !== "typeof" ||
-          !isNodeOfType(typeOf.argument, "Identifier") ||
-          typeOf.argument.name !== "document" ||
-          !scopes.isGlobalReference(typeOf.argument) ||
-          !isNodeOfType(missing, "Literal") ||
-          missing.value !== "undefined"
-        )
-          return false;
-        const exit =
-          isNodeOfType(prefix.consequent, "BlockStatement") &&
-          prefix.consequent.body.length === IMPORTED_MEDIA_SINGLE_RETURN_STATEMENT_COUNT
-            ? prefix.consequent.body[FIRST_ARGUMENT_INDEX]
-            : prefix.consequent;
-        if (
-          !isNodeOfType(exit, "ReturnStatement") ||
-          !isNodeOfType(exit.argument, "Literal") ||
-          exit.argument.value !== false
-        )
-          return false;
-        allowedGlobals.add(typeOf.argument);
-      }
-    } else returnExpression = functionNode.body;
-    const comparison = returnExpression ? stripParenExpression(returnExpression) : null;
-    if (
-      !isNodeOfType(comparison, "BinaryExpression") ||
-      !["===", "!=="].includes(comparison.operator)
-    )
-      return false;
-    const empty = isNodeOfType(comparison.right, "Literal") ? comparison.right : comparison.left;
-    const capability = stripParenExpression(
-      empty === comparison.right ? comparison.left : comparison.right,
-    );
-    if (
-      !isNodeOfType(empty, "Literal") ||
-      empty.value !== "" ||
-      !isNodeOfType(capability, "CallExpression") ||
-      capability.optional ||
-      capability.arguments.length !== NATIVE_MEDIA_CALL_ARGUMENT_COUNT ||
-      !isNodeOfType(capability.callee, "MemberExpression") ||
-      capability.callee.optional ||
-      capability.callee.computed ||
-      getStaticPropertyName(capability.callee) !== "canPlayType"
-    )
-      return false;
-    const argument = stripParenExpression(capability.arguments[FIRST_ARGUMENT_INDEX]);
-    const created = stripParenExpression(capability.callee.object);
-    if (
-      !isNodeOfType(argument, "Identifier") ||
-      scopes.symbolFor(argument) !== parameter ||
-      !isNodeOfType(created, "CallExpression") ||
-      created.optional ||
-      created.arguments.length !== NATIVE_MEDIA_CALL_ARGUMENT_COUNT ||
-      !isNodeOfType(created.callee, "MemberExpression") ||
-      created.callee.optional ||
-      created.callee.computed ||
-      getStaticPropertyName(created.callee) !== "createElement"
-    )
-      return false;
-    const document = stripParenExpression(created.callee.object);
-    const tag = created.arguments[FIRST_ARGUMENT_INDEX];
-    if (
-      !isNodeOfType(document, "Identifier") ||
-      document.name !== "document" ||
-      !scopes.isGlobalReference(document) ||
-      !isNodeOfType(tag, "Literal") ||
-      typeof tag.value !== "string" ||
-      !NATIVE_MEDIA_ELEMENT_NAMES.has(tag.value)
-    )
-      return false;
-    allowedGlobals.add(document);
-    if (!isSupportedProgram(resolved.programNode, scopes, allowedGlobals)) return false;
-
-    for (const provider of context.scopes.rootScope.symbols) {
-      const providerImport = getImportDeclarationForSymbol(provider);
-      if (
-        !providerImport ||
-        providerImport.importKind === "type" ||
-        (isNodeOfType(provider.declarationNode, "ImportSpecifier") &&
-          provider.declarationNode.importKind === "type") ||
-        typeof providerImport.source.value !== "string"
-      )
-        continue;
-      if (resolveModulePath(filename, providerImport.source.value) !== resolved.filePath) continue;
-      const name = getImportedName(provider.declarationNode);
-      if (isNodeOfType(provider.declarationNode, "ImportDefaultSpecifier") || name === "default")
-        return false;
-      if (!name) return false;
-      const other = resolveCrossFileFunctionExportWithFilePath(
+    const cachedImport = importProofs.get(imported);
+    if (cachedImport !== undefined) return cachedImport;
+    const proveImport = (): boolean => {
+      const resolvedPath = resolveModulePath(filename, declaration.source.value);
+      const resolved = resolveCrossFileFunctionExportWithFilePath(
         filename,
-        providerImport.source.value,
-        name,
+        declaration.source.value,
+        exportedName,
       );
-      if (other?.functionNode !== functionNode) continue;
+      if (!resolved || resolved.filePath !== resolvedPath) return false;
+      const functionNode = resolved.functionNode;
       if (
-        !isReadonly(provider) ||
-        !provider.references.every(
-          (reference) =>
-            isTypeScriptTypePosition(reference.identifier) ||
-            isDirectCallReference(reference.identifier),
-        )
+        !isFunctionLike(functionNode) ||
+        functionNode.async ||
+        functionNode.generator ||
+        functionNode.params.length !== NATIVE_MEDIA_CALL_ARGUMENT_COUNT ||
+        !isNodeOfType(functionNode.params[FIRST_ARGUMENT_INDEX], "Identifier") ||
+        !isNodeOfType(resolved.programNode, "Program")
       )
         return false;
-    }
-    return true;
+      const exporterProgram = resolved.programNode;
+      let scopes = importedMediaExporterScopes.get(exporterProgram);
+      if (!scopes) {
+        scopes = analyzeScopes(exporterProgram);
+        importedMediaExporterScopes.set(exporterProgram, scopes);
+      }
+      let functionProofs = importedMediaFunctionProofs.get(exporterProgram);
+      if (!functionProofs) {
+        functionProofs = new WeakMap();
+        importedMediaFunctionProofs.set(exporterProgram, functionProofs);
+      }
+      let functionProof = functionProofs.get(functionNode);
+      if (functionProof === undefined) {
+        const proveFunction = (): boolean => {
+          const parameter = scopes.symbolFor(functionNode.params[FIRST_ARGUMENT_INDEX]);
+          const bindings = getFunctionBindingSymbols(functionNode, scopes);
+          if (
+            !parameter ||
+            !isReadonly(parameter) ||
+            bindings.length !== NATIVE_MEDIA_CALL_ARGUMENT_COUNT
+          )
+            return false;
+          const binding = bindings[FIRST_ARGUMENT_INDEX];
+          if (
+            !binding ||
+            binding.name !== exportedName ||
+            !isReadonly(binding) ||
+            scopes.rootScope.symbols.filter(
+              (symbol) => symbol.name === binding.name && !isErasedTypeScriptBinding(symbol),
+            ).length !== NATIVE_MEDIA_CALL_ARGUMENT_COUNT ||
+            !binding.references.every(
+              (reference) =>
+                isTypeScriptTypePosition(reference.identifier) ||
+                isDirectCallReference(reference.identifier),
+            )
+          )
+            return false;
+          const carrier = functionNode.parent;
+          const exported = isNodeOfType(carrier, "VariableDeclarator")
+            ? carrier.parent?.parent
+            : carrier;
+          if (
+            !isNodeOfType(exported, "ExportNamedDeclaration") ||
+            exported.source ||
+            exported.specifiers.length !== 0 ||
+            !(
+              exported.declaration === functionNode ||
+              (isNodeOfType(carrier, "VariableDeclarator") &&
+                carrier.id === binding.bindingIdentifier &&
+                isNodeOfType(carrier.parent, "VariableDeclaration") &&
+                carrier.parent.kind === "const" &&
+                exported.declaration === carrier.parent)
+            )
+          )
+            return false;
+
+          const allowedGlobals = new Set<EsTreeNode>();
+          const isStaticData = (expression: EsTreeNode): boolean => {
+            const node = stripParenExpression(expression);
+            if (isPrimitive(node) || isFunctionLike(node)) return true;
+            if (isNodeOfType(node, "ArrayExpression"))
+              return node.elements.every((element) => element !== null && isPrimitive(element));
+            if (
+              !isNodeOfType(node, "NewExpression") ||
+              !isNodeOfType(node.callee, "Identifier") ||
+              node.callee.name !== "Set" ||
+              !scopes.isGlobalReference(node.callee) ||
+              node.arguments.length !== NATIVE_MEDIA_CALL_ARGUMENT_COUNT ||
+              !isNodeOfType(node.arguments[FIRST_ARGUMENT_INDEX], "ArrayExpression") ||
+              !node.arguments[FIRST_ARGUMENT_INDEX].elements.every(
+                (element) => element !== null && isPrimitive(element),
+              )
+            )
+              return false;
+            allowedGlobals.add(node.callee);
+            return true;
+          };
+          for (const statement of exporterProgram.body) {
+            if (isNodeOfType(statement, "ImportDeclaration")) {
+              if (statement.importKind !== "type") return false;
+              continue;
+            }
+            if (
+              isNodeOfType(statement, "ExportDefaultDeclaration") ||
+              isNodeOfType(statement, "ExportAllDeclaration")
+            )
+              return false;
+            const node = isNodeOfType(statement, "ExportNamedDeclaration")
+              ? statement.declaration
+              : statement;
+            if (
+              isNodeOfType(statement, "ExportNamedDeclaration") &&
+              (statement.source || statement.specifiers.length !== 0)
+            )
+              return false;
+            if (
+              isNodeOfType(node, "FunctionDeclaration") ||
+              isNodeOfType(node, "TSInterfaceDeclaration") ||
+              isNodeOfType(node, "TSTypeAliasDeclaration") ||
+              isNodeOfType(node, "EmptyStatement")
+            )
+              continue;
+            if (isNodeOfType(node, "ExpressionStatement") && isPrimitive(node.expression)) continue;
+            if (
+              !isNodeOfType(node, "VariableDeclaration") ||
+              node.kind !== "const" ||
+              !node.declarations.every(
+                (item) =>
+                  isNodeOfType(item.id, "Identifier") && item.init && isStaticData(item.init),
+              )
+            )
+              return false;
+          }
+          let returnExpression: EsTreeNode | null = null;
+          if (isNodeOfType(functionNode.body, "BlockStatement")) {
+            const statements = functionNode.body.body;
+            const returned = statements[statements.length - 1];
+            if (
+              !isNodeOfType(returned, "ReturnStatement") ||
+              !returned.argument ||
+              (statements.length !== IMPORTED_MEDIA_SINGLE_RETURN_STATEMENT_COUNT &&
+                statements.length !== IMPORTED_MEDIA_SSR_BODY_STATEMENT_COUNT)
+            )
+              return false;
+            returnExpression = returned.argument;
+            if (statements.length === IMPORTED_MEDIA_SSR_BODY_STATEMENT_COUNT) {
+              const prefix = statements[FIRST_ARGUMENT_INDEX];
+              if (!isNodeOfType(prefix, "IfStatement") || prefix.alternate) return false;
+              const test = stripParenExpression(prefix.test);
+              if (!isNodeOfType(test, "BinaryExpression") || test.operator !== "===") return false;
+              const typeOf = isNodeOfType(test.left, "UnaryExpression") ? test.left : test.right;
+              const missing = typeOf === test.left ? test.right : test.left;
+              if (
+                !isNodeOfType(typeOf, "UnaryExpression") ||
+                typeOf.operator !== "typeof" ||
+                !isNodeOfType(typeOf.argument, "Identifier") ||
+                typeOf.argument.name !== "document" ||
+                !scopes.isGlobalReference(typeOf.argument) ||
+                !isNodeOfType(missing, "Literal") ||
+                missing.value !== "undefined"
+              )
+                return false;
+              const exit =
+                isNodeOfType(prefix.consequent, "BlockStatement") &&
+                prefix.consequent.body.length === IMPORTED_MEDIA_SINGLE_RETURN_STATEMENT_COUNT
+                  ? prefix.consequent.body[FIRST_ARGUMENT_INDEX]
+                  : prefix.consequent;
+              if (
+                !isNodeOfType(exit, "ReturnStatement") ||
+                !isNodeOfType(exit.argument, "Literal") ||
+                exit.argument.value !== false
+              )
+                return false;
+              allowedGlobals.add(typeOf.argument);
+            }
+          } else returnExpression = functionNode.body;
+          const comparison = returnExpression ? stripParenExpression(returnExpression) : null;
+          if (
+            !isNodeOfType(comparison, "BinaryExpression") ||
+            !["===", "!=="].includes(comparison.operator)
+          )
+            return false;
+          const empty = isNodeOfType(comparison.right, "Literal")
+            ? comparison.right
+            : comparison.left;
+          const capability = stripParenExpression(
+            empty === comparison.right ? comparison.left : comparison.right,
+          );
+          if (
+            !isNodeOfType(empty, "Literal") ||
+            empty.value !== "" ||
+            !isNodeOfType(capability, "CallExpression") ||
+            capability.optional ||
+            capability.arguments.length !== NATIVE_MEDIA_CALL_ARGUMENT_COUNT ||
+            !isNodeOfType(capability.callee, "MemberExpression") ||
+            capability.callee.optional ||
+            capability.callee.computed ||
+            getStaticPropertyName(capability.callee) !== "canPlayType"
+          )
+            return false;
+          const argument = stripParenExpression(capability.arguments[FIRST_ARGUMENT_INDEX]);
+          const created = stripParenExpression(capability.callee.object);
+          if (
+            !isNodeOfType(argument, "Identifier") ||
+            scopes.symbolFor(argument) !== parameter ||
+            !isNodeOfType(created, "CallExpression") ||
+            created.optional ||
+            created.arguments.length !== NATIVE_MEDIA_CALL_ARGUMENT_COUNT ||
+            !isNodeOfType(created.callee, "MemberExpression") ||
+            created.callee.optional ||
+            created.callee.computed ||
+            getStaticPropertyName(created.callee) !== "createElement"
+          )
+            return false;
+          const document = stripParenExpression(created.callee.object);
+          const tag = created.arguments[FIRST_ARGUMENT_INDEX];
+          if (
+            !isNodeOfType(document, "Identifier") ||
+            document.name !== "document" ||
+            !scopes.isGlobalReference(document) ||
+            !isNodeOfType(tag, "Literal") ||
+            typeof tag.value !== "string" ||
+            !NATIVE_MEDIA_ELEMENT_NAMES.has(tag.value)
+          )
+            return false;
+          allowedGlobals.add(document);
+          return isSupportedProgram(exporterProgram, scopes, allowedGlobals);
+        };
+        functionProof = proveFunction();
+        functionProofs.set(functionNode, functionProof);
+      }
+      if (!functionProof) return false;
+      const cachedProviders = currentProgramFacts.providerProofsByFunction.get(functionNode);
+      if (cachedProviders !== undefined) return cachedProviders;
+      const proveProviders = (): boolean => {
+        for (const provider of currentProgramFacts.providersByFilePath.get(resolved.filePath) ??
+          []) {
+          const providerImport = getImportDeclarationForSymbol(provider);
+          if (
+            !providerImport ||
+            providerImport.importKind === "type" ||
+            (isNodeOfType(provider.declarationNode, "ImportSpecifier") &&
+              provider.declarationNode.importKind === "type") ||
+            typeof providerImport.source.value !== "string"
+          )
+            continue;
+          const name = getImportedName(provider.declarationNode);
+          if (
+            isNodeOfType(provider.declarationNode, "ImportDefaultSpecifier") ||
+            name === "default"
+          )
+            return false;
+          if (!name) return false;
+          const other = resolveCrossFileFunctionExportWithFilePath(
+            filename,
+            providerImport.source.value,
+            name,
+          );
+          if (other?.functionNode !== functionNode) continue;
+          if (
+            !isReadonly(provider) ||
+            !provider.references.every(
+              (reference) =>
+                isTypeScriptTypePosition(reference.identifier) ||
+                isDirectCallReference(reference.identifier),
+            )
+          )
+            return false;
+        }
+        return true;
+      };
+      const provenProviders = proveProviders();
+      currentProgramFacts.providerProofsByFunction.set(functionNode, provenProviders);
+      return provenProviders;
+    };
+    const proof = proveImport();
+    importProofs.set(imported, proof);
+    return proof;
   };
-  const nativeCalls = new Set<EsTreeNode>();
-  walkAst(effectFunction, (node) => {
-    if (node !== effectFunction && isFunctionLike(node)) return false;
-    if (isNodeOfType(node, "CallExpression") && proveCall(node)) nativeCalls.add(node);
-  });
+  const effects = currentProgramFacts.nativeCallsByEffect;
+  let nativeCalls = shouldCaptureDependencies ? undefined : effects.get(effectFunction);
+  if (!nativeCalls) {
+    const calls = new Set<EsTreeNode>();
+    walkAst(effectFunction, (node) => {
+      if (node !== effectFunction && isFunctionLike(node)) return false;
+      if (isNodeOfType(node, "CallExpression") && proveCall(node)) calls.add(node);
+    });
+    nativeCalls = calls;
+    if (!shouldCaptureDependencies) effects.set(effectFunction, nativeCalls);
+  }
   if (nativeCalls.size === 0) return null;
   const isReadonlyLocal = (expression: EsTreeNode): boolean => {
     const node = stripParenExpression(expression);
