@@ -21,6 +21,7 @@ const commonOptions: RunRuleOptions = {
 
 const cases: ObserverTestCase[] = [
   ...[
+    "import type require = require('provider-types'); require('mobx-react-lite').observer = () => 42;",
     "declare const require: any; require('mobx-react-lite').observer = () => 42;",
     "declare let require: any; require('mobx-react-lite').observer = () => 42;",
     "declare var require: any; require('mobx-react-lite').observer = () => 42;",
@@ -44,11 +45,19 @@ const cases: ObserverTestCase[] = [
     "interface require {}",
     "type require = unknown;",
     "const require = (_source: string) => ({ observer: 0 }); require('other').observer = 1;",
+    "const require = (_source: string) => ({ observer: 0 }); interface require {} require('other').observer = 1;",
+    "interface require {} const require = (_source: string) => ({ observer: 0 }); require('other').observer = 1;",
+    "const require = (_source: string) => ({ observer: 0 }); function localLoader() { interface require {} require('other').observer = 1; }",
   ].map((providerSource) => ({
     name: `inert declarations and runtime locals remain supported: ${providerSource}`,
     code: `import { observer } from 'mobx-react-lite'; ${providerSource} const Badge = observer(() => <span />); export const Card = () => <Badge />; export default Badge;`,
     expected: 0,
   })),
+  {
+    name: "value import-equals stays outside the closed observer profile",
+    code: "import { observer } from 'mobx-react-lite'; import require = require('local-loader'); require('other').observer = 1; const Badge = observer(() => <span />); export const Card = () => <Badge />; export default Badge;",
+    expected: 1,
+  },
   {
     name: "canonical-named-observer-component",
     code: "import { observer } from 'mobx-react-lite';\nconst Badge = observer(() => <span />);\nexport const Card = () => <Badge />;\nexport default Badge;\n",

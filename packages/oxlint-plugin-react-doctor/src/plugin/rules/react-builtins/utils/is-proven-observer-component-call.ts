@@ -8,6 +8,7 @@ import { getDirectConstInitializer } from "../../../utils/get-direct-const-initi
 import { getImportedName } from "../../../utils/get-imported-name.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
 import { isProvenGlobalObjectReference } from "../../../utils/is-proven-global-namespace-reference.js";
 import { isTypeOnlyImport } from "../../../utils/is-type-only-import.js";
 import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
@@ -161,7 +162,9 @@ export const isProvenObserverComponentCall = (
           (OBSERVER_UNSUPPORTED_GLOBAL_REFERENCE_NAMES.has(node.name) &&
             symbol?.bindingIdentifier !== node &&
             (scopes.isGlobalReference(node) ||
-              Boolean(symbol && isErasedTypeScriptBinding(symbol))))
+              Boolean(
+                symbol && isErasedTypeScriptBinding(symbol) && !hasRuntimeValueBinding(symbol),
+              )))
         ) {
           isSupported = false;
           return false;
