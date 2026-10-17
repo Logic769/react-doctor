@@ -1,3 +1,4 @@
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
@@ -25,6 +26,37 @@ const hasClosedReactCommandProvider = (scopes: ScopeAnalysis): boolean => {
   if (cached !== undefined) return cached;
   let closed = true;
   walkAst(scopes.rootScope.node, (node) => {
+    if (isNodeOfType(node, "Identifier") && !isTypeScriptTypePosition(node)) {
+      const reference = findTransparentExpressionRoot(node);
+      const member = reference.parent;
+      const isGlobalCarrier = ["globalThis", "window", "self", "global"].includes(node.name);
+      const providerName = isGlobalCarrier
+        ? isNodeOfType(member, "MemberExpression") && member.object === reference
+          ? getStaticPropertyName(member)
+          : null
+        : node.name;
+      const hasOpaqueCarrierUse =
+        isGlobalCarrier &&
+        !(
+          isNodeOfType(member, "MemberExpression") &&
+          member.object === reference &&
+          getStaticPropertyName(member) !== null
+        ) &&
+        !(
+          isNodeOfType(member, "UnaryExpression") &&
+          (member.operator === "typeof" || member.operator === "void")
+        );
+      const symbol =
+        hasOpaqueCarrierUse ||
+        (providerName &&
+          ["Object", "Reflect", "Function", "require", "module", "React"].includes(providerName))
+          ? scopes.symbolFor(node)
+          : null;
+      if (symbol && symbol.bindingIdentifier !== node && isErasedTypeScriptBinding(symbol)) {
+        closed = false;
+        return false;
+      }
+    }
     if (!closed || isTypeScriptTypePosition(node)) return false;
     if (
       isNodeOfType(node, "WithStatement") ||
