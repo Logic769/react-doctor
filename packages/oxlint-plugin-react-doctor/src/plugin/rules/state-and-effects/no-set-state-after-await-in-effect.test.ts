@@ -7,6 +7,9 @@ describe("erased native ref loader providers", () => {
     'import {useEffect,useRef,useState} from "react"; const Panel=({id,load})=>{const[value,setValue]=useState(null);const sequence=useRef(0);const callback=async()=>{const snapshot=sequence.current;await load(id);if(snapshot===sequence.current)setValue(id);};const holder=useRef(callback);useEffect(()=>{holder.current=callback;},[callback]);useEffect(()=>{sequence.current++;callback();},[id]);return <output>{value}</output>;};';
   it.each([
     'declare const require: any; require("react").useRef=customRef;',
+    'import type require = require("./types"); require("react").useRef=customRef;',
+    'namespace require {}require("react").useRef=customRef;',
+    'namespace require {export namespace Shape {export interface Marker {}}}require("react").useRef=customRef;',
     'declare function require(source: string): any; require("react").useRef=customRef;',
     'declare const require: any; (require as any)("react").useRef=customRef;',
   ])("retains a runtime provider replacement through %s", (exposure) => {
@@ -14,14 +17,16 @@ describe("erased native ref loader providers", () => {
     expect(result.parseErrors).toEqual([]);
     expect(result.diagnostics).toHaveLength(1);
   });
-  it.each(["declare const require: any;", 'const require=()=>({});require("metadata");'])(
-    "allows inert declarations and real local loaders: %s",
-    (metadata) => {
-      const result = runRule(noSetStateAfterAwaitInEffect, `${metadata}${source}`);
-      expect(result.parseErrors).toEqual([]);
-      expect(result.diagnostics).toHaveLength(0);
-    },
-  );
+  it.each([
+    "declare const require: any;",
+    'const require=()=>({});require("metadata");',
+    'function require(){return {useRef:customRef};} namespace require {export interface Marker {}} require("react").useRef=customRef;',
+    'const require=()=>({useRef:customRef});interface require {} require("react").useRef=customRef;',
+  ])("allows inert declarations and real local loaders: %s", (metadata) => {
+    const result = runRule(noSetStateAfterAwaitInEffect, `${metadata}${source}`);
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(0);
+  });
 });
 
 describe("no-set-state-after-await-in-effect", () => {
