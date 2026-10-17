@@ -6,6 +6,30 @@ const commonOptions = { forceJsx: true, includeLocations: true };
 
 const cases = [
   {
+    name: "ambient-regex-provider-mutation-retains-warning",
+    code: "declare const RegExp: any; RegExp.prototype.exec = () => null; export const read = (input: string) => input.match(/^a*/)![0].length;",
+    filename: "src/ambient-regex-provider.tsx",
+    count: 1,
+  },
+  {
+    name: "reflected-string-prototype-mutation-retains-warning",
+    code: 'Object.getPrototypeOf("").match = () => null; export const read = (input: string) => input.match(/^a*/)![0].length;',
+    filename: "src/reflected-string-provider.tsx",
+    count: 1,
+  },
+  {
+    name: "literal-constructor-prototype-mutation-retains-warning",
+    code: "(/x/).constructor.prototype.exec = () => null; export const read = (input: string) => input.match(/^a*/)![0].length;",
+    filename: "src/reflected-regex-provider.tsx",
+    count: 1,
+  },
+  {
+    name: "erased-regex-type-import-retains-runtime-provider-warning",
+    code: 'import type { RegExp } from "matcher-types"; RegExp.prototype.exec = () => null; export const read = (input: string) => input.match(/^a*/)![0].length;',
+    filename: "src/erased-regex-provider.tsx",
+    count: 1,
+  },
+  {
     name: "native-terminal-colon",
     code: "export const View = ({ text }: { text: string }) => <span>{text.match(/:*$/)![0].length}</span>;\n",
     filename: "/public/src/components/non-null-literal-star-0.tsx",
