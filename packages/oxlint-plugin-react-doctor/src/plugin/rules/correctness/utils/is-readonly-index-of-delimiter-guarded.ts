@@ -13,6 +13,7 @@ import { getImportDeclarationForSymbol } from "../../../utils/get-import-declara
 import { getStaticPropertyName } from "../../../utils/get-static-property-name.js";
 import { getSymbolTypeAnnotation } from "../../../utils/get-symbol-type-annotation.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
+import { isNativePrototypeExposure } from "../../../utils/is-native-prototype-exposure.js";
 import { isPresenceProvenBeforeNode } from "../../../utils/is-presence-proven-before-node.js";
 import {
   isProvenGlobalNamespaceReference,
@@ -104,6 +105,10 @@ export const isReadonlyIndexOfDelimiterGuarded = (
       return false;
     }
     if (isTypeScriptTypePosition(candidate)) return false;
+    if (isNativePrototypeExposure(candidate)) {
+      hasUnsupportedRuntime = true;
+      return false;
+    }
     if (isNodeOfType(candidate, "Identifier")) {
       const symbol = scopes.symbolFor(candidate);
       const importDeclaration = symbol ? getImportDeclarationForSymbol(symbol) : null;

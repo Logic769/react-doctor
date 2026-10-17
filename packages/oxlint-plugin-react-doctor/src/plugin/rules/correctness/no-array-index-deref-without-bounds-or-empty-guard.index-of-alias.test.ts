@@ -11,6 +11,21 @@ const options: RunRuleOptions = {
 
 const cases = [
   {
+    name: "reflected-string-prototype-mutation-retains-warning",
+    code: 'Object.getPrototypeOf("").split = () => []; export const read = (input: string) => { const text = input; const position = text.indexOf("."); return position !== -1 ? text.split(".")[1].length : 0; };',
+    count: 1,
+  },
+  {
+    name: "literal-constructor-prototype-mutation-retains-warning",
+    code: '("").constructor.prototype.split = () => []; export const read = (input: string) => { const text = input; const position = text.indexOf("."); return position !== -1 ? text.split(".")[1].length : 0; };',
+    count: 1,
+  },
+  {
+    name: "destructured-prototype-reflection-retains-warning",
+    code: 'const { getPrototypeOf: readPrototype } = Object; readPrototype("").split = () => []; export const read = (input: string) => { const text = input; const position = text.indexOf("."); return position !== -1 ? text.split(".")[1].length : 0; };',
+    count: 1,
+  },
+  {
     name: "readonly-const-alias-conditional",
     code: 'export const readSegment = (input: string, other: string) => { const text = input; const position = text.indexOf("."); return position !== -1 ? text.split(".")[1].length : 0; };\n',
     count: 0,

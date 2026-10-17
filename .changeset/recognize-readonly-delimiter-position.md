@@ -4,4 +4,4 @@
 "react-doctor": patch
 ---
 
-Recognize readonly indexOf delimiter positions that guard a split part from a primitive string or number input.
+Recognize readonly indexOf delimiter positions that guard a split part from a primitive string or number input. Keep warnings when source-visible prototype access makes native string behavior uncertain.
