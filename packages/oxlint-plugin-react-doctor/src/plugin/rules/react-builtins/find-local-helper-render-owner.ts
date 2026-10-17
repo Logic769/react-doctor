@@ -16,6 +16,7 @@ import { getImportedName } from "../../utils/get-imported-name.js";
 import { getValueImportSource } from "../../utils/get-value-import-declaration.js";
 import { isBindingAssignmentTarget } from "../../utils/is-binding-assignment-target.js";
 import { isErasedTypeScriptBinding } from "../../utils/is-erased-typescript-binding.js";
+import { hasRuntimeValueBinding } from "../../utils/has-runtime-value-binding.js";
 import { isFunctionLike } from "../../utils/is-function-like.js";
 import { isMemberMutationTarget } from "../../utils/is-member-mutation-target.js";
 import { isNodeOfType } from "../../utils/is-node-of-type.js";
@@ -134,7 +135,8 @@ export const findLocalHelperRenderOwner = (
       if (
         providerSymbol &&
         context.scopes.referenceFor(node) &&
-        isErasedTypeScriptBinding(providerSymbol)
+        isErasedTypeScriptBinding(providerSymbol) &&
+        !hasRuntimeValueBinding(providerSymbol)
       ) {
         hasProviderHazard = true;
         return false;
