@@ -1,3 +1,4 @@
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
 import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
 import { getImportedName } from "../../../utils/get-imported-name.js";
@@ -36,7 +37,8 @@ export const hasClosedThreeMutationProgram = (scopes: ScopeAnalysis): boolean =>
         binding &&
         binding.bindingIdentifier !== candidate &&
         THREE_REF_EXPOSED_GLOBAL_NAMES.has(candidate.name) &&
-        isErasedTypeScriptBinding(binding)
+        isErasedTypeScriptBinding(binding) &&
+        !hasRuntimeValueBinding(binding)
       ) {
         admitted = false;
         return false;
