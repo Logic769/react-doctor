@@ -1,4 +1,4 @@
-import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
+import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
 import { getDirectConstInitializer } from "../../../utils/get-direct-const-initializer.js";
@@ -10,6 +10,16 @@ import { walkAst } from "../../../utils/walk-ast.js";
 import type { UseStateBinding } from "./collect-use-state-bindings.js";
 import { isReadonlyNamedReactStateHook } from "./is-readonly-named-react-state-hook.js";
 
+interface LocalLiteralStateAnalysis {
+  bindingsByCall: Map<EsTreeNode, UseStateBinding>;
+  initializerResults: WeakMap<SymbolDescriptor, boolean>;
+}
+
+const localLiteralStateAnalyses = new WeakMap<
+  ReadonlyArray<UseStateBinding>,
+  LocalLiteralStateAnalysis
+>();
+
 export const isLocalLiteralStateInitializer = (
   initializerArgument: EsTreeNode | undefined,
   componentBody: EsTreeNode,
@@ -18,9 +28,17 @@ export const isLocalLiteralStateInitializer = (
 ): boolean => {
   if (!initializerArgument) return false;
   const initializerRoot = findTransparentExpressionRoot(initializerArgument);
-  const stateBinding = bindings.find(
-    (binding) => binding.declarator.init === initializerRoot.parent,
-  );
+  let analysis = localLiteralStateAnalyses.get(bindings);
+  if (!analysis) {
+    const bindingsByCall = new Map<EsTreeNode, UseStateBinding>();
+    for (const binding of bindings) {
+      if (binding.declarator.init) bindingsByCall.set(binding.declarator.init, binding);
+    }
+    analysis = { bindingsByCall, initializerResults: new WeakMap() };
+    localLiteralStateAnalyses.set(bindings, analysis);
+  }
+  const { bindingsByCall, initializerResults } = analysis;
+  const stateBinding = initializerRoot.parent && bindingsByCall.get(initializerRoot.parent);
   if (
     !stateBinding ||
     !isNodeOfType(stateBinding.declarator.parent, "VariableDeclaration") ||
@@ -39,6 +57,9 @@ export const isLocalLiteralStateInitializer = (
     declaration.range[1] > identifier.range[0]
   )
     return false;
+  const cached = initializerResults.get(symbol);
+  if (cached !== undefined) return cached;
+  initializerResults.set(symbol, false);
   const literal = stripParenExpression(initializer);
   if (!isNodeOfType(literal, "ObjectExpression")) {
     return false;
@@ -82,10 +103,11 @@ export const isLocalLiteralStateInitializer = (
       consumer.optional ||
       consumer.arguments.length !== 1 ||
       consumer.arguments[0] !== referenceRoot ||
-      !bindings.some((binding) => binding.declarator.init === consumer) ||
+      !bindingsByCall.has(consumer) ||
       !isReadonlyNamedReactStateHook(consumer, scopes)
     )
       return false;
   }
+  initializerResults.set(symbol, true);
   return true;
 };

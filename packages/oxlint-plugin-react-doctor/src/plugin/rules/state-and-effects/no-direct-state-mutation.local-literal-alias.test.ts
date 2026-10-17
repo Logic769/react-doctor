@@ -203,7 +203,7 @@ const cases = [
   },
   {
     name: "runtime-namespace-owner",
-    code: 'import { useState } from "react";\nexport const Panel = () => { const initial = { count: 0 }; const [snapshot, setSnapshot] = useState(initial); namespace Mode {export const ready=1;} snapshot.count = 1; return <output />; };',
+    code: 'import { useState } from "react";namespace Mode {export const ready=1;}\nexport const Panel = () => { const initial = { count: 0 }; const [snapshot, setSnapshot] = useState(initial); snapshot.count = 1; return <output />; };',
     options: {},
     expectedDiagnostics: 0,
   },

@@ -3,12 +3,16 @@ import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
 import { getImportDeclarationForSymbol } from "../../../utils/get-import-declaration-for-symbol.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import { getImportedName } from "../../../utils/get-imported-name.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { isTypeOnlyImport } from "../../../utils/is-type-only-import.js";
 import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
 import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
 import { walkAst } from "../../../utils/walk-ast.js";
+
+const closedReactStatePrograms = new WeakMap<ScopeAnalysis, boolean>();
 
 export const isReadonlyNamedReactStateHook = (call: EsTreeNode, scopes: ScopeAnalysis): boolean => {
   if (!isNodeOfType(call, "CallExpression") || call.optional) return false;
@@ -26,32 +30,45 @@ export const isReadonlyNamedReactStateHook = (call: EsTreeNode, scopes: ScopeAna
     getImportedName(symbol.declarationNode) !== "useState"
   )
     return false;
+  const cached = closedReactStatePrograms.get(scopes);
+  if (cached !== undefined) return cached;
   let isClosed = true;
+  const typeOnlyProviderNames = new Set<string>();
   walkAst(scopes.rootScope.node, (node) => {
     if (!isClosed) return false;
-    if (PLAIN_STATE_ALIAS_UNSUPPORTED_NODE_TYPES.has(node.type)) {
+    if (
+      PLAIN_STATE_ALIAS_UNSUPPORTED_NODE_TYPES.has(node.type) ||
+      node.type === "ImportExpression"
+    ) {
       isClosed = false;
       return false;
     }
     if (isTypeScriptTypePosition(node)) return false;
-    if (isNodeOfType(node, "Identifier") && node.name === "eval" && scopes.referenceFor(node)) {
-      const evalSymbol = scopes.symbolFor(node);
+    if (
+      isNodeOfType(node, "Identifier") &&
+      (node.name === "eval" || node.name === "require") &&
+      scopes.referenceFor(node)
+    ) {
+      const providerSymbol = scopes.symbolFor(node);
       if (
         scopes.isGlobalReference(node) ||
-        evalSymbol?.kind === "ts-interface" ||
-        evalSymbol?.kind === "ts-type-alias"
+        (providerSymbol &&
+          isErasedTypeScriptBinding(providerSymbol) &&
+          !hasRuntimeValueBinding(providerSymbol))
       ) {
         isClosed = false;
         return false;
       }
     }
-    if (
-      !isNodeOfType(node, "ImportDeclaration") ||
-      node.source.value !== "react" ||
-      isTypeOnlyImport(node)
-    )
-      return;
+    if (!isNodeOfType(node, "ImportDeclaration") || node.source.value !== "react") return;
     for (const specifier of node.specifiers) {
+      if (
+        isTypeOnlyImport(node) ||
+        (isNodeOfType(specifier, "ImportSpecifier") && specifier.importKind === "type")
+      ) {
+        typeOnlyProviderNames.add(specifier.local.name);
+        continue;
+      }
       const isNamedStateHook =
         isNodeOfType(specifier, "ImportSpecifier") &&
         specifier.importKind !== "type" &&
@@ -85,5 +102,27 @@ export const isReadonlyNamedReactStateHook = (call: EsTreeNode, scopes: ScopeAna
       }
     }
   });
+  if (isClosed && typeOnlyProviderNames.size) {
+    const pendingScopes = [scopes.rootScope];
+    let currentScope = pendingScopes.pop();
+    while (currentScope && isClosed) {
+      pendingScopes.push(...currentScope.children);
+      for (const reference of currentScope.references) {
+        const identifier = reference.identifier;
+        if (
+          !isNodeOfType(identifier, "Identifier") ||
+          !typeOnlyProviderNames.has(identifier.name) ||
+          isTypeScriptTypePosition(identifier)
+        )
+          continue;
+        if (!reference.resolvedSymbol || !hasRuntimeValueBinding(reference.resolvedSymbol)) {
+          isClosed = false;
+          break;
+        }
+      }
+      currentScope = pendingScopes.pop();
+    }
+  }
+  closedReactStatePrograms.set(scopes, isClosed);
   return isClosed;
 };
