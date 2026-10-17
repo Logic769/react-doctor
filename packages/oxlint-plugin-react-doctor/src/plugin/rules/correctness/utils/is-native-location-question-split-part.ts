@@ -4,7 +4,8 @@ import { findTransparentExpressionRoot } from "../../../utils/find-transparent-e
 import { getResolvedStaticPropertyName } from "../../../utils/get-resolved-static-property-name.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { isProvenUnmodifiedGlobalNamespaceReference } from "../../../utils/is-proven-unmodified-global-namespace-reference.js";
-import { isTypeOnlyImport } from "../../../utils/is-type-only-import.js";
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
 import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
 import { isWithinAssignmentTarget } from "../../../utils/is-within-assignment-target.js";
 import type { RuleContext } from "../../../utils/rule-context.js";
@@ -37,11 +38,12 @@ const isNativeSearchRead = (node: EsTreeNode, scopes: ScopeAnalysis): boolean =>
   if (!isNodeOfType(location, "MemberExpression") || !isDirectMember(location, "location"))
     return false;
   const host = stripParenExpression(location.object);
+  if (!isNodeOfType(host, "Identifier") || host.name !== "window") return false;
+  const symbol = scopes.symbolFor(host);
   return (
-    isNodeOfType(host, "Identifier") &&
-    host.name === "window" &&
-    scopes.isGlobalReference(host) &&
-    isProvenUnmodifiedGlobalNamespaceReference(host, "window", scopes) &&
+    (scopes.isGlobalReference(host)
+      ? isProvenUnmodifiedGlobalNamespaceReference(host, "window", scopes)
+      : Boolean(symbol && isErasedTypeScriptBinding(symbol) && !hasRuntimeValueBinding(symbol))) &&
     !isWithinAssignmentTarget(search)
   );
 };
@@ -67,7 +69,12 @@ const hasClosedNativeProviders = (context: RuleContext): boolean => {
       isClosed = false;
       return false;
     }
-    if (isTypeScriptTypePosition(node)) return false;
+    if (
+      isTypeScriptTypePosition(node) ||
+      isNodeOfType(node, "TSInterfaceDeclaration") ||
+      isNodeOfType(node, "TSTypeAliasDeclaration")
+    )
+      return false;
     if (node.type.startsWith("TS")) {
       isClosed = false;
       return false;
@@ -76,14 +83,8 @@ const hasClosedNativeProviders = (context: RuleContext): boolean => {
       const reference = context.scopes.referenceFor(node);
       if (!reference) return;
       const symbol = reference.resolvedSymbol;
-      const declaration = symbol?.declarationNode;
-      const importDeclaration = declaration?.parent;
       if (
-        symbol?.kind === "ts-interface" ||
-        symbol?.kind === "ts-type-alias" ||
-        (isNodeOfType(declaration, "ImportSpecifier") && declaration.importKind === "type") ||
-        (isNodeOfType(importDeclaration, "ImportDeclaration") &&
-          isTypeOnlyImport(importDeclaration)) ||
+        (symbol && isErasedTypeScriptBinding(symbol) && node.name !== "window") ||
         NATIVE_LOCATION_PROTECTED_REFERENCE_NAMES.has(node.name)
       ) {
         isClosed = false;
