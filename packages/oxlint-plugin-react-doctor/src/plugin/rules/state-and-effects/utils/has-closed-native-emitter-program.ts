@@ -1,3 +1,4 @@
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
 import { getImportedName } from "../../../utils/get-imported-name.js";
 import { getStaticPropertyKeyName } from "../../../utils/get-static-property-key-name.js";
@@ -22,6 +23,18 @@ export const hasClosedNativeEmitterProgram = (scopes: ScopeAnalysis): boolean =>
   let reactProviderCount = 0;
   walkAst(scopes.rootScope.node, (candidate) => {
     if (!admitted || isTypeScriptTypePosition(candidate)) return false;
+    if (isNodeOfType(candidate, "Identifier") && !isTypeScriptTypePosition(candidate)) {
+      const binding = scopes.symbolFor(candidate);
+      if (
+        binding &&
+        binding.bindingIdentifier !== candidate &&
+        NATIVE_EMITTER_EXPOSED_GLOBAL_NAMES.has(candidate.name) &&
+        isErasedTypeScriptBinding(binding)
+      ) {
+        admitted = false;
+        return false;
+      }
+    }
     if (isNodeOfType(candidate, "ImportDeclaration") && !isTypeOnlyImport(candidate)) {
       const source = candidate.source.value;
       if (
