@@ -107,6 +107,7 @@ export const getClosedShopifyValidationHandler = (
     return null;
   const catchClause = tryStatement.handler;
   const headerSymbols = new Set<SymbolDescriptor>();
+  const headerReads = new Set<EsTreeNode>();
   for (const statement of statements.slice(
     SHOPIFY_FIRST_STATEMENT_INDEX,
     -SHOPIFY_VALIDATION_ARGUMENT_COUNT,
@@ -145,6 +146,7 @@ export const getClosedShopifyValidationHandler = (
     )
       return null;
     headerSymbols.add(symbol);
+    headerReads.add(declaration.init.left.object);
   }
   const validationStatement = tryStatement.block.body[SHOPIFY_FIRST_STATEMENT_INDEX];
   const gate = tryStatement.block.body[SHOPIFY_GATE_STATEMENT_INDEX];
@@ -308,10 +310,7 @@ export const getClosedShopifyValidationHandler = (
         isWithinAssignmentTarget(parent)
       )
         return false;
-      if (isMember(parent, "headers"))
-        return statements
-          .slice(SHOPIFY_FIRST_STATEMENT_INDEX, -SHOPIFY_VALIDATION_ARGUMENT_COUNT)
-          .some((statement) => isAstDescendant(parent, statement));
+      if (isMember(parent, "headers")) return headerReads.has(parent);
       return (
         isMember(parent, "body") &&
         isAstDescendant(parent, tryStatement.block) &&

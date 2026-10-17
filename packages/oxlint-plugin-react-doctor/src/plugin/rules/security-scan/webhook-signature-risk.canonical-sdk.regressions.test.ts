@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, expect, it } from "vite-plus/test";
+import { SHOPIFY_PROVIDER_TEST_MTIME_SECONDS } from "../../../test-utils/shopify-webhook-proof/constants.js";
 import type { ScannedFile } from "../../utils/file-scan.js";
 import { webhookSignatureRisk } from "./webhook-signature-risk.js";
 
@@ -615,10 +616,17 @@ describe("closed canonical SDK webhook validation gate", () => {
     withCase(selectedCase, (file, root) => {
       const providerPath = path.join(root, "server/client.js");
       const originalProvider = fs.readFileSync(providerPath, "utf8");
+      fs.utimesSync(
+        providerPath,
+        SHOPIFY_PROVIDER_TEST_MTIME_SECONDS,
+        SHOPIFY_PROVIDER_TEST_MTIME_SECONDS,
+      );
       const originalStat = fs.statSync(providerPath);
       expect(webhookSignatureRisk.scan?.(file)).toHaveLength(0);
       fs.writeFileSync(providerPath, originalProvider.replace("shopifyApi({", "forgedApi_({"));
       fs.utimesSync(providerPath, originalStat.atime, originalStat.mtime);
+      expect(fs.statSync(providerPath).size).toBe(originalStat.size);
+      expect(fs.statSync(providerPath).mtimeMs).toBe(originalStat.mtimeMs);
       expect(webhookSignatureRisk.scan?.(file)).toHaveLength(1);
       fs.writeFileSync(providerPath, originalProvider);
       expect(webhookSignatureRisk.scan?.(file)).toHaveLength(0);

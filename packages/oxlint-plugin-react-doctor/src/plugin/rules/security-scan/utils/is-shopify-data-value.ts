@@ -1,4 +1,4 @@
-import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
+import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { getImportedName } from "../../../utils/get-imported-name.js";
@@ -10,6 +10,11 @@ import {
   SHOPIFY_MAX_DATA_DEPTH,
   SHOPIFY_RAW_REPLACE_ARGUMENT_COUNT,
 } from "./shopify-webhook-constants.js";
+
+const readonlyReferenceProofsByScopes = new WeakMap<
+  ScopeAnalysis,
+  WeakMap<SymbolDescriptor, boolean>
+>();
 
 export const isShopifyDataValue = (
   value: EsTreeNode,
@@ -43,12 +48,18 @@ export const isShopifyDataValue = (
       getValueImportSource(symbol) !== SHOPIFY_API_MODULE
     )
       return true;
-    return (
-      symbol.kind === "const" &&
-      symbol.initializer !== null &&
-      symbol.references.every((reference) => reference.flag === "read") &&
-      readChild(symbol.initializer)
-    );
+    if (symbol.kind !== "const" || symbol.initializer === null) return false;
+    let readonlyBySymbol = readonlyReferenceProofsByScopes.get(scopes);
+    if (!readonlyBySymbol) {
+      readonlyBySymbol = new WeakMap();
+      readonlyReferenceProofsByScopes.set(scopes, readonlyBySymbol);
+    }
+    let hasReadonlyReferences = readonlyBySymbol.get(symbol);
+    if (hasReadonlyReferences === undefined) {
+      hasReadonlyReferences = symbol.references.every((reference) => reference.flag === "read");
+      readonlyBySymbol.set(symbol, hasReadonlyReferences);
+    }
+    return hasReadonlyReferences && readChild(symbol.initializer);
   }
   if (isNodeOfType(node, "ConditionalExpression"))
     return readChild(node.test) && readChild(node.consequent) && readChild(node.alternate);
