@@ -1,3 +1,5 @@
+import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
 import { getStaticPropertyKeyName } from "../../../utils/get-static-property-key-name.js";
 import { getStaticPropertyName } from "../../../utils/get-static-property-name.js";
@@ -14,6 +16,36 @@ export const hasClosedStateTupleProvider = (scopes: ScopeAnalysis): boolean => {
   if (cached !== undefined) return cached;
   let closed = true;
   walkAst(scopes.rootScope.node, (node) => {
+    if (isNodeOfType(node, "Identifier") && !isTypeScriptTypePosition(node)) {
+      const reference = findTransparentExpressionRoot(node);
+      const member = reference.parent;
+      const isGlobalCarrier = ["globalThis", "window", "self", "global"].includes(node.name);
+      const providerName = isGlobalCarrier
+        ? isNodeOfType(member, "MemberExpression") && member.object === reference
+          ? getStaticPropertyName(member)
+          : null
+        : node.name;
+      const hasOpaqueCarrierUse =
+        isGlobalCarrier &&
+        !(
+          isNodeOfType(member, "MemberExpression") &&
+          member.object === reference &&
+          getStaticPropertyName(member) !== null
+        ) &&
+        !(
+          isNodeOfType(member, "UnaryExpression") &&
+          (member.operator === "typeof" || member.operator === "void")
+        );
+      const symbol =
+        hasOpaqueCarrierUse ||
+        (providerName && ["Array", "Symbol", "Object", "Reflect"].includes(providerName))
+          ? scopes.symbolFor(node)
+          : null;
+      if (symbol && symbol.bindingIdentifier !== node && isErasedTypeScriptBinding(symbol)) {
+        closed = false;
+        return false;
+      }
+    }
     if (isTypeScriptTypePosition(node)) return false;
     if (
       STRING_STATE_TUPLE_PROVIDER_NAMES.some((name) =>
