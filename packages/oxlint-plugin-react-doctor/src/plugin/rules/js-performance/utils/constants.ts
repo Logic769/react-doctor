@@ -33,3 +33,6 @@ export const STRUCTURED_CLONE_GLOBAL_EXPOSURE_NAMES = new Set([
   "parent",
   "frames",
 ]);
+
+export const STRUCTURED_CLONE_SMALL_BRANCH_COUNT = 2;
+export const STRUCTURED_CLONE_LARGE_BRANCH_COUNT = 64;

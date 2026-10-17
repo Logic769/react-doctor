@@ -3,6 +3,7 @@ import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
 import { findEnclosingFunction } from "../../../utils/find-enclosing-function.js";
 import { findProgramRoot } from "../../../utils/find-program-root.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
+import { getResolvedStaticPropertyName } from "../../../utils/get-resolved-static-property-name.js";
 import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
 import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import { hasVisibleBindingNamed } from "../../../utils/has-visible-binding-named.js";
@@ -17,6 +18,8 @@ import {
   STRUCTURED_CLONE_GLOBAL_OBJECT_NAMES,
   STRUCTURED_CLONE_PROVIDER_NAMES,
 } from "./constants.js";
+
+const selfDefinitionClosureCache = new WeakMap<EsTreeNodeOfType<"MemberExpression">, boolean>();
 
 export const isStructuredCloneSelfDefinition = (
   expression: EsTreeNodeOfType<"CallExpression">,
@@ -89,6 +92,8 @@ export const isStructuredCloneSelfDefinition = (
     target.property.name !== "structuredClone"
   )
     return false;
+  const cachedClosure = selfDefinitionClosureCache.get(target);
+  if (cachedClosure !== undefined) return cachedClosure;
   const program = findProgramRoot(assignment);
   if (!program) return false;
   let isClosed = true;
@@ -106,6 +111,15 @@ export const isStructuredCloneSelfDefinition = (
       return false;
     }
     if (isTypeScriptTypePosition(node)) return false;
+    if (
+      (isNodeOfType(node, "MemberExpression") ||
+        (isNodeOfType(node, "Property") && isNodeOfType(node.parent, "ObjectPattern"))) &&
+      getResolvedStaticPropertyName(node, scopes, { allowConstTemplateLiteral: true }) ===
+        "constructor"
+    ) {
+      isClosed = false;
+      return false;
+    }
     if (
       !isNodeOfType(node, "Identifier") ||
       !STRUCTURED_CLONE_PROVIDER_NAMES.has(node.name) ||
@@ -163,5 +177,6 @@ export const isStructuredCloneSelfDefinition = (
     )
       isClosed = false;
   });
+  selfDefinitionClosureCache.set(target, isClosed);
   return isClosed;
 };
