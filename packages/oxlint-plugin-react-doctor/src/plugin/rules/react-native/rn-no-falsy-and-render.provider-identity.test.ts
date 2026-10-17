@@ -5,6 +5,42 @@ const source =
   'import { forwardRef } from "react";\nimport { View, Text } from "react-native";\ninterface CardProps { rate?: string; }\nexport const Card = forwardRef<View, CardProps>(({ rate }: CardProps, ref) => {\n  return <View>{rate && <Text>Rated</Text>}</View>;\n});\n';
 describe("explicit native string provider identity", () => {
   it.each([
+    {
+      prefix:
+        'const propertyName="constructor"; interface propertyName {} (()=>{})[propertyName]("globalThis.require(\'react\').forwardRef = render => render({rate:0}, null)")();',
+      expected: 1,
+    },
+    {
+      prefix:
+        "const propertyName=`constructor`; type propertyName=unknown; const {[propertyName]:factory}=(()=>{}); factory(\"globalThis.require('react').forwardRef = render => render({rate:0}, null)\")();",
+      expected: 1,
+    },
+    {
+      prefix: 'const propertyName="length"; interface propertyName {} void (()=>{})[propertyName];',
+      expected: 0,
+    },
+    {
+      prefix:
+        "const propertyName=`constructor`; (()=>{})[propertyName](\"globalThis.require('react').forwardRef = render => render({rate:0}, null)\")();",
+      expected: 1,
+    },
+    {
+      prefix:
+        "const propertyName=`constructor`; const {[propertyName]:factory}=(()=>{}); factory(\"globalThis.require('react').forwardRef = render => render({rate:0}, null)\")();",
+      expected: 1,
+    },
+    { prefix: "const propertyName=`length`; void (()=>{})[propertyName];", expected: 0 },
+    {
+      prefix:
+        'const propertyName="constructor"; (()=>{})[propertyName]("globalThis.require(\'react\').forwardRef = render => render({rate:0}, null)")();',
+      expected: 1,
+    },
+    {
+      prefix:
+        'const propertyName="constructor"; const {[propertyName]:factory}=(()=>{}); factory("globalThis.require(\'react\').forwardRef = render => render({rate:0}, null)")();',
+      expected: 1,
+    },
+    { prefix: 'const propertyName="length"; void (()=>{})[propertyName];', expected: 0 },
     { prefix: "require('react').forwardRef = render => render({rate:0}, null);", expected: 1 },
     {
       prefix: "globalThis.require('react').forwardRef = render => render({rate:0}, null);",

@@ -21,3 +21,8 @@ export const STRING_PROP_GLOBAL_CARRIER_NAMES: ReadonlySet<string> = new Set([
   "self",
   "global",
 ]);
+
+export const STRING_PROP_PROVIDER_ESCAPE_MEMBER_NAMES: ReadonlySet<string> = new Set([
+  "constructor",
+  "__proto__",
+]);
