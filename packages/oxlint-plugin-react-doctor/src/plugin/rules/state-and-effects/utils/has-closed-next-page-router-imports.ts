@@ -1,3 +1,4 @@
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
 import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
@@ -31,7 +32,8 @@ export const hasClosedNextPageRouterImports = (scopes: ScopeAnalysis): boolean =
         binding.bindingIdentifier !== node &&
         (NEXT_PAGE_REDIRECT_DYNAMIC_GLOBALS.has(node.name) ||
           NEXT_PAGE_REDIRECT_GLOBAL_OBJECTS.has(node.name)) &&
-        isErasedTypeScriptBinding(binding)
+        isErasedTypeScriptBinding(binding) &&
+        !hasRuntimeValueBinding(binding)
       ) {
         admitted = false;
         return false;
