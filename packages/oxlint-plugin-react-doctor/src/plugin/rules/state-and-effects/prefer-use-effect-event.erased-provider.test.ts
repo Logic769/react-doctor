@@ -73,6 +73,31 @@ const cases = [
     code: 'namespace require { export const marker = 1; } void require;import { useCallback, useEffect } from "react"; export const Example = ({ active, value }) => { const leaf = useCallback(() => "ready", []); const callback = useCallback(() => leaf(), [leaf]); useEffect(() => { const timer = setTimeout(() => callback(), 0); return () => clearTimeout(timer); }, [callback, active]); return null; };',
     expected: 0,
   },
+  {
+    name: "rejects opaque runtime imported provider exposure",
+    code: 'import React from "react";function rewrite(){mutate(React);}rewrite();declare const require: any;import { useCallback, useEffect } from "react"; export const Example = ({ active, value }) => { const leaf = useCallback(() => "ready", []); const callback = useCallback(() => leaf(), [leaf]); useEffect(() => { const timer = setTimeout(() => callback(), 0); return () => clearTimeout(timer); }, [callback, active]); return null; };',
+    expected: 1,
+  },
+  {
+    name: "rejects imported provider exposure beneath inner interface",
+    code: 'import React from "react";function rewrite(){interface React{}mutate(React);}rewrite();declare const require: any;import { useCallback, useEffect } from "react"; export const Example = ({ active, value }) => { const leaf = useCallback(() => "ready", []); const callback = useCallback(() => leaf(), [leaf]); useEffect(() => { const timer = setTimeout(() => callback(), 0); return () => clearTimeout(timer); }, [callback, active]); return null; };',
+    expected: 1,
+  },
+  {
+    name: "rejects imported provider exposure beneath inner type alias",
+    code: 'import React from "react";function rewrite(){type React=unknown;mutate(React);}rewrite();declare const require: any;import { useCallback, useEffect } from "react"; export const Example = ({ active, value }) => { const leaf = useCallback(() => "ready", []); const callback = useCallback(() => leaf(), [leaf]); useEffect(() => { const timer = setTimeout(() => callback(), 0); return () => clearTimeout(timer); }, [callback, active]); return null; };',
+    expected: 1,
+  },
+  {
+    name: "rejects imported provider exposure beneath erased namespace",
+    code: 'import React from "react";namespace ProofScope{namespace React{}mutate(React);}declare const require: any;import { useCallback, useEffect } from "react"; export const Example = ({ active, value }) => { const leaf = useCallback(() => "ready", []); const callback = useCallback(() => leaf(), [leaf]); useEffect(() => { const timer = setTimeout(() => callback(), 0); return () => clearTimeout(timer); }, [callback, active]); return null; };',
+    expected: 1,
+  },
+  {
+    name: "preserves genuine inner runtime provider shadow",
+    code: 'import React from "react";function rewrite(){const React={};interface React{}mutate(React);}rewrite();declare const require: any;import { useCallback, useEffect } from "react"; export const Example = ({ active, value }) => { const leaf = useCallback(() => "ready", []); const callback = useCallback(() => leaf(), [leaf]); useEffect(() => { const timer = setTimeout(() => callback(), 0); return () => clearTimeout(timer); }, [callback, active]); return null; };',
+    expected: 0,
+  },
 ];
 
 describe("erased runtime provider admission", () => {
