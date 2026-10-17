@@ -78,6 +78,31 @@ const cases = [
     code: 'namespace require { export const marker = 1; } void require;import { useState } from "react";\nexport const Example = (input: unknown) => {\nconst [resultSize, setResultSize] = useState("");\n\nreturn <section>{resultSize && <output>{resultSize}</output>}</section>;\n};',
     expected: 0,
   },
+  {
+    name: "rejects opaque runtime imported provider exposure",
+    code: 'import React from "react";function rewrite(){mutate(React);}rewrite();declare const require: any;import { useState } from "react";\nexport const Example = (input: unknown) => {\nconst [resultSize, setResultSize] = useState("");\n\nreturn <section>{resultSize && <output>{resultSize}</output>}</section>;\n};',
+    expected: 1,
+  },
+  {
+    name: "rejects imported provider exposure beneath inner interface",
+    code: 'import React from "react";function rewrite(){interface React{}mutate(React);}rewrite();declare const require: any;import { useState } from "react";\nexport const Example = (input: unknown) => {\nconst [resultSize, setResultSize] = useState("");\n\nreturn <section>{resultSize && <output>{resultSize}</output>}</section>;\n};',
+    expected: 1,
+  },
+  {
+    name: "rejects imported provider exposure beneath inner type alias",
+    code: 'import React from "react";function rewrite(){type React=unknown;mutate(React);}rewrite();declare const require: any;import { useState } from "react";\nexport const Example = (input: unknown) => {\nconst [resultSize, setResultSize] = useState("");\n\nreturn <section>{resultSize && <output>{resultSize}</output>}</section>;\n};',
+    expected: 1,
+  },
+  {
+    name: "rejects imported provider exposure beneath erased namespace",
+    code: 'import React from "react";namespace ProofScope{namespace React{}mutate(React);}declare const require: any;import { useState } from "react";\nexport const Example = (input: unknown) => {\nconst [resultSize, setResultSize] = useState("");\n\nreturn <section>{resultSize && <output>{resultSize}</output>}</section>;\n};',
+    expected: 1,
+  },
+  {
+    name: "preserves genuine inner runtime provider shadow",
+    code: 'import React from "react";function rewrite(){const React={};interface React{}mutate(React);}rewrite();declare const require: any;import { useState } from "react";\nexport const Example = (input: unknown) => {\nconst [resultSize, setResultSize] = useState("");\n\nreturn <section>{resultSize && <output>{resultSize}</output>}</section>;\n};',
+    expected: 0,
+  },
 ];
 
 describe("erased runtime provider admission", () => {
