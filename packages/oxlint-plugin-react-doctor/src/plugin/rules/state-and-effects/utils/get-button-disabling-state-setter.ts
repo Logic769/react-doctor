@@ -1,3 +1,6 @@
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
+import { isTypeOnlyImport } from "../../../utils/is-type-only-import.js";
+import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
 import type { SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
 import { findEnclosingFunction } from "../../../utils/find-enclosing-function.js";
@@ -17,6 +20,7 @@ import { collectUseStateBindings } from "./collect-use-state-bindings.js";
 import {
   DISABLING_STATE_SETTER_NAME_PATTERN,
   DISABLING_STATE_TUPLE_SLOT_COUNT,
+  DISABLING_STATE_UNSUPPORTED_PROVIDER_GLOBAL_NAMES,
 } from "./constants.js";
 
 interface ButtonDisablingStateSetterInput {
@@ -26,6 +30,8 @@ interface ButtonDisablingStateSetterInput {
   firstAwaitStart: number;
   context: RuleContext;
 }
+
+const unsupportedProviderPrograms = new WeakMap<RuleContext["scopes"], boolean>();
 
 export const getButtonDisablingStateSetter = ({
   eventAttribute,
@@ -53,17 +59,45 @@ export const getButtonDisablingStateSetter = ({
   const componentFunction = findEnclosingFunction(eventAttribute);
   if (!isFunctionLike(componentFunction) || !isNodeOfType(componentFunction.body, "BlockStatement"))
     return null;
-  let hasUnsupportedOwnerSyntax = false;
-  walkAst(componentFunction.body, (node) => {
-    if (
-      (isNodeOfType(node, "TSEnumDeclaration") && !node.declare) ||
-      (isNodeOfType(node, "Identifier") &&
-        node.name === "eval" &&
-        context.scopes.isGlobalReference(node))
-    )
-      hasUnsupportedOwnerSyntax = true;
-  });
-  if (hasUnsupportedOwnerSyntax) return null;
+  let hasUnsupportedProviderSyntax = unsupportedProviderPrograms.get(context.scopes);
+  if (hasUnsupportedProviderSyntax === undefined) {
+    hasUnsupportedProviderSyntax = false;
+    walkAst(context.scopes.rootScope.node, (node) => {
+      if (hasUnsupportedProviderSyntax || isTypeScriptTypePosition(node)) return false;
+      if (
+        (isNodeOfType(node, "TSEnumDeclaration") && !node.declare) ||
+        isNodeOfType(node, "TSModuleDeclaration") ||
+        isNodeOfType(node, "TSImportEqualsDeclaration") ||
+        isNodeOfType(node, "TSExportAssignment") ||
+        isNodeOfType(node, "TSParameterProperty") ||
+        isNodeOfType(node, "Decorator") ||
+        isNodeOfType(node, "WithStatement") ||
+        isNodeOfType(node, "ImportExpression") ||
+        (isNodeOfType(node, "ImportDeclaration") &&
+          (node.source.value === "node:module" || node.source.value === "module") &&
+          !isTypeOnlyImport(node))
+      ) {
+        hasUnsupportedProviderSyntax = true;
+        return false;
+      }
+      if (
+        isNodeOfType(node, "Identifier") &&
+        DISABLING_STATE_UNSUPPORTED_PROVIDER_GLOBAL_NAMES.has(node.name)
+      ) {
+        const binding = context.scopes.symbolFor(node);
+        if (
+          binding?.bindingIdentifier !== node &&
+          (context.scopes.isGlobalReference(node) ||
+            Boolean(binding && isErasedTypeScriptBinding(binding)))
+        ) {
+          hasUnsupportedProviderSyntax = true;
+          return false;
+        }
+      }
+    });
+    unsupportedProviderPrograms.set(context.scopes, hasUnsupportedProviderSyntax);
+  }
+  if (hasUnsupportedProviderSyntax) return null;
   const stateSymbol = context.scopes.symbolFor(stateReference);
   if (!stateSymbol || stateSymbol.kind !== "const") return null;
   const binding = collectUseStateBindings(componentFunction.body, context.scopes).find(
