@@ -19,7 +19,7 @@ import {
   INTERVAL_UNSUPPORTED_PROPERTY_NAMES,
   INTERVAL_ZERO_PARAMETER_COUNT,
 } from "./native-interval-effect/constants.js";
-import type { SymbolDescriptor } from "../../../semantic/scope-analysis.js";
+import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
 import { findEnclosingFunction } from "../../../utils/find-enclosing-function.js";
@@ -29,6 +29,7 @@ import { getImportedName } from "../../../utils/get-imported-name.js";
 import { getResolvedStaticPropertyName } from "../../../utils/get-resolved-static-property-name.js";
 import { getValueImportSource } from "../../../utils/get-value-import-declaration.js";
 import { isAstDescendant } from "../../../utils/is-ast-descendant.js";
+import { isLiteralVoidExpression } from "../../../utils/is-literal-void-expression.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { isNodeReachableWithinFunction } from "../../../utils/is-node-reachable-within-function.js";
 import { isReactHookResultReference } from "../../../utils/is-react-hook-result-reference.js";
@@ -40,6 +41,14 @@ export interface NativeIntervalEffectCallback {
   callback: EsTreeNodeOfType<"ArrowFunctionExpression">;
   cleanup: EsTreeNodeOfType<"ArrowFunctionExpression">;
 }
+
+interface IntervalProgramFacts {
+  supported: boolean;
+  blockedNames: ReadonlySet<string>;
+}
+
+const intervalProgramFactsByAnalysis = new WeakMap<ScopeAnalysis, IntervalProgramFacts>();
+const closedDispatcherReferencesBySymbol = new WeakMap<SymbolDescriptor, boolean>();
 
 const isDirectCallCallee = (node: EsTreeNode): boolean => {
   const root = findTransparentExpressionRoot(node);
@@ -104,33 +113,31 @@ const hasClosedReactProvider = (symbol: SymbolDescriptor): boolean =>
     );
   });
 
-const hasSupportedIntervalProgram = (
-  anchor: EsTreeNode,
-  protectedNames: ReadonlySet<string>,
+const collectIntervalProgramFacts = (
+  program: EsTreeNode,
   context: RuleContext,
-): boolean => {
-  const program = findProgramRoot(anchor);
-  if (!program) return false;
+): IntervalProgramFacts => {
+  const blockedNames = new Set<string>();
+  const unsupported = { supported: false, blockedNames };
   const pendingScopes = [context.scopes.rootScope];
   const symbols: SymbolDescriptor[] = [];
-  const sensitiveNames = new Set(protectedNames);
+  const providerNames = new Set<string>();
   while (pendingScopes.length > 0) {
     const scope = pendingScopes.pop();
     if (!scope) break;
     if (scope.kind === "with" || scope.kind === "ts-module" || scope.kind === "ts-enum")
-      return false;
+      return unsupported;
     pendingScopes.push(...scope.children);
     symbols.push(...scope.symbols);
     for (const symbol of scope.symbols) {
-      if (getValueImportSource(symbol) === "react") sensitiveNames.add(symbol.name);
+      if (getValueImportSource(symbol) === "react") providerNames.add(symbol.name);
     }
   }
   for (const symbol of symbols) {
-    if (sensitiveNames.has(symbol.name) && INTERVAL_ERASED_SYMBOL_KINDS.has(symbol.kind))
-      return false;
+    if (INTERVAL_ERASED_SYMBOL_KINDS.has(symbol.kind)) blockedNames.add(symbol.name);
     if (symbol.kind !== "import") continue;
     const source = getValueImportSource(symbol);
-    if (!source && sensitiveNames.has(symbol.name)) return false;
+    if (!source) blockedNames.add(symbol.name);
     const importedName = getImportedName(symbol.declarationNode);
     if (
       source === "react" &&
@@ -140,8 +147,11 @@ const hasSupportedIntervalProgram = (
           (EFFECT_HOOK_NAMES.has(importedName) || INTERVAL_STATE_HOOK_NAMES.has(importedName)),
         ))
     ) {
-      if (!hasClosedReactProvider(symbol)) return false;
+      if (!hasClosedReactProvider(symbol)) return unsupported;
     }
+  }
+  for (const providerName of providerNames) {
+    if (blockedNames.has(providerName)) return unsupported;
   }
   let supported = true;
   walkAst(program, (node) => {
@@ -200,7 +210,26 @@ const hasSupportedIntervalProgram = (
     }
     return undefined;
   });
-  return supported;
+  return { supported, blockedNames };
+};
+
+const hasSupportedIntervalProgram = (
+  anchor: EsTreeNode,
+  protectedNames: ReadonlySet<string>,
+  context: RuleContext,
+): boolean => {
+  const program = findProgramRoot(anchor);
+  if (!program) return false;
+  let facts = intervalProgramFactsByAnalysis.get(context.scopes);
+  if (!facts) {
+    facts = collectIntervalProgramFacts(program, context);
+    intervalProgramFactsByAnalysis.set(context.scopes, facts);
+  }
+  if (!facts.supported) return false;
+  for (const protectedName of protectedNames) {
+    if (facts.blockedNames.has(protectedName)) return false;
+  }
+  return true;
 };
 
 const isSupportedEffectPrefix = (
@@ -208,6 +237,8 @@ const isSupportedEffectPrefix = (
   protectedNames: Set<string>,
   context: RuleContext,
 ): boolean => {
+  if (isNodeOfType(node, "ExpressionStatement") && isLiteralVoidExpression(node.expression))
+    return true;
   if (
     !isNodeOfType(node, "VariableDeclaration") ||
     node.declarations.length !== INTERVAL_SINGLE_BINDING_COUNT
@@ -263,14 +294,22 @@ const hasClosedStateDispatchers = (
       declaration.id.elements[INTERVAL_STATE_DISPATCHER_INDEX] !== symbol.bindingIdentifier ||
       findEnclosingFunction(declaration) !== owner ||
       !declaration.init ||
-      !isValueReactCall(declaration.init, INTERVAL_STATE_HOOK_NAMES, context) ||
-      !symbol.references.every(
+      !isValueReactCall(declaration.init, INTERVAL_STATE_HOOK_NAMES, context)
+    ) {
+      supported = false;
+      return false;
+    }
+    let referencesAreClosed = closedDispatcherReferencesBySymbol.get(symbol);
+    if (referencesAreClosed === undefined) {
+      referencesAreClosed = symbol.references.every(
         (reference) =>
           reference.flag === "read" &&
           isDirectCallCallee(reference.identifier) &&
           isAstDescendant(reference.identifier, owner),
-      )
-    ) {
+      );
+      closedDispatcherReferencesBySymbol.set(symbol, referencesAreClosed);
+    }
+    if (!referencesAreClosed) {
       supported = false;
       return false;
     }
@@ -359,26 +398,34 @@ export const getNativeIntervalEffectCallback = (
   )
     return null;
   if (isNodeOfType(cleanup.body, "BlockStatement")) {
+    const cleanupStatements = cleanup.body.body.filter(
+      (statement) =>
+        !isNodeOfType(statement, "ExpressionStatement") ||
+        !isLiteralVoidExpression(statement.expression),
+    );
     if (
-      !cleanup.body.body.every(
-        (statement) =>
-          isNodeOfType(statement, "ExpressionStatement") &&
-          (statement.expression === release ||
-            (isNodeOfType(statement.expression, "AssignmentExpression") &&
-              statement.expression.operator === "=" &&
-              isNodeOfType(statement.expression.left, "Identifier") &&
-              isNodeOfType(statement.expression.right, "Literal") &&
-              typeof statement.expression.right.value === "boolean" &&
-              protectedNames.has(statement.expression.left.name)) ||
-            (isNodeOfType(statement.expression, "CallExpression") &&
-              !statement.expression.optional &&
-              statement.expression.arguments.length === INTERVAL_ZERO_PARAMETER_COUNT &&
-              isNodeOfType(statement.expression.callee, "MemberExpression") &&
-              !statement.expression.callee.optional &&
-              isNodeOfType(statement.expression.callee.object, "Identifier") &&
-              protectedNames.has(statement.expression.callee.object.name) &&
-              getResolvedStaticPropertyName(statement.expression.callee, context.scopes) ===
-                "abort")),
+      !cleanupStatements.every(
+        (statement, statementIndex) =>
+          (isNodeOfType(statement, "ReturnStatement") &&
+            statementIndex === cleanupStatements.length - INTERVAL_SINGLE_BINDING_COUNT &&
+            Boolean(statement.argument && stripParenExpression(statement.argument) === release)) ||
+          (isNodeOfType(statement, "ExpressionStatement") &&
+            (statement.expression === release ||
+              (isNodeOfType(statement.expression, "AssignmentExpression") &&
+                statement.expression.operator === "=" &&
+                isNodeOfType(statement.expression.left, "Identifier") &&
+                isNodeOfType(statement.expression.right, "Literal") &&
+                typeof statement.expression.right.value === "boolean" &&
+                protectedNames.has(statement.expression.left.name)) ||
+              (isNodeOfType(statement.expression, "CallExpression") &&
+                !statement.expression.optional &&
+                statement.expression.arguments.length === INTERVAL_ZERO_PARAMETER_COUNT &&
+                isNodeOfType(statement.expression.callee, "MemberExpression") &&
+                !statement.expression.callee.optional &&
+                isNodeOfType(statement.expression.callee.object, "Identifier") &&
+                protectedNames.has(statement.expression.callee.object.name) &&
+                getResolvedStaticPropertyName(statement.expression.callee, context.scopes) ===
+                  "abort"))),
       )
     )
       return null;

@@ -24,6 +24,8 @@ export const INTERVAL_UNSUPPORTED_PROPERTY_NAMES = new Set([
   "constructor",
   "prototype",
   "__proto__",
+  "__defineGetter__",
+  "__defineSetter__",
 ]);
 export const INTERVAL_RUNTIME_TS_NODE_TYPES = new Set([
   "TSImportEqualsDeclaration",
