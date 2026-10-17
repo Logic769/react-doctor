@@ -314,6 +314,8 @@ export const LIBRARY_SNIPPET_POOL = [
 
 // Module scope — SSR hazards, guard aliases, contexts, caches, styled.
 export const MODULE_SCOPE_SNIPPET_POOL = [
+  `import { useState as useTimerState, useEffect as useTimerEffect } from "react"; export const useFuzzTimer = (revision, load) => { const [value, setValue] = useTimerState(""); useTimerEffect(() => { const timer = setInterval(async () => { const next = await load(revision); setValue(next); }, 1000); return () => clearInterval(timer); }, [revision, load]); return value; };`,
+  `import { useState as useTimerState, useEffect as useTimerEffect } from "react"; export const useFuzzCancelledTimer = (revision, load) => { const [value, setValue] = useTimerState(""); useTimerEffect(() => { let cancelled = false; const timer = setInterval(async () => { const next = await load(revision); if (cancelled) return; setValue(next); }, 1000); return () => { cancelled = true; clearInterval(timer); }; }, [revision, load]); return value; };`,
   `import { create as createFuzzZustandStore } from "zustand"; export const useFuzzZustandStore = createFuzzZustandStore(() => ({ items: [] })); export const fuzzZustandSelection = useFuzzZustandStore((state) => ({ items: state.items }));`,
   `import { create as createFuzzZustandTarget } from "zustand"; const useFuzzZustandTarget = createFuzzZustandTarget(() => ({ value: 0, other: 0 })); export const FuzzZustandWholeStoreTarget = () => { const { value: fuzzZustandValue } = useFuzzZustandTarget(); return <output>{fuzzZustandValue}</output>; };`,
   `import { create as createFuzzZustandGetStore } from "zustand"; const useFuzzZustandGetStore = createFuzzZustandGetStore((_set, get) => ({ count: get().count }));`,
