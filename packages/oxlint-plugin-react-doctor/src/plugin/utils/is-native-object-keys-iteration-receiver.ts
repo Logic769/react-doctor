@@ -1,7 +1,9 @@
 import type { ScopeAnalysis, SymbolDescriptor } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
 import { getResolvedStaticPropertyName } from "./get-resolved-static-property-name.js";
-import { getValueImportDeclaration } from "./get-value-import-declaration.js";
+import { hasRuntimeValueBinding } from "./has-runtime-value-binding.js";
+import { isErasedTypeScriptBinding } from "./is-erased-typescript-binding.js";
+import { isMemberMutationTarget } from "./is-member-mutation-target.js";
 import { isFunctionLike } from "./is-function-like.js";
 import { isInlineFunctionExpression } from "./is-inline-function-expression.js";
 import { isNodeOfType } from "./is-node-of-type.js";
@@ -20,11 +22,28 @@ import {
 } from "./native-object-keys-iteration/constants.js";
 import { walkAst } from "./walk-ast.js";
 
-const supportedProgramByScope = new WeakMap<ScopeAnalysis, Map<string, boolean>>();
+const supportedProgramByScope = new WeakMap<ScopeAnalysis, boolean>();
+const readonlyInputs = new WeakMap<SymbolDescriptor, boolean>();
 
-const hasSupportedNativeKeysProgram = (scopes: ScopeAnalysis, inputName: string): boolean => {
-  let cachedNames = supportedProgramByScope.get(scopes);
-  const cached = cachedNames?.get(inputName);
+const isNativeObjectReference = (identifier: EsTreeNode, scopes: ScopeAnalysis): boolean => {
+  if (!isNodeOfType(identifier, "Identifier") || identifier.name !== "Object") return false;
+  if (scopes.isGlobalReference(identifier)) return true;
+  const symbol = scopes.referenceFor(identifier)?.resolvedSymbol;
+  return Boolean(symbol && isErasedTypeScriptBinding(symbol) && !hasRuntimeValueBinding(symbol));
+};
+
+const isReadonlyInput = (input: SymbolDescriptor): boolean => {
+  const cached = readonlyInputs.get(input);
+  if (cached !== undefined) return cached;
+  const readonly = input.references.every(
+    (reference) => reference.flag === "read" && !isMemberMutationTarget(reference.identifier),
+  );
+  readonlyInputs.set(input, readonly);
+  return readonly;
+};
+
+const hasSupportedNativeKeysProgram = (scopes: ScopeAnalysis): boolean => {
+  const cached = supportedProgramByScope.get(scopes);
   if (cached !== undefined) return cached;
   let supported = true;
   walkAst(scopes.rootScope.node, (node) => {
@@ -32,14 +51,6 @@ const hasSupportedNativeKeysProgram = (scopes: ScopeAnalysis, inputName: string)
     if (
       NATIVE_KEYS_UNSUPPORTED_PROGRAM_NODE_TYPES.has(node.type) ||
       ("declare" in node && node.declare === true)
-    ) {
-      supported = false;
-      return false;
-    }
-    if (
-      (isNodeOfType(node, "TSInterfaceDeclaration") ||
-        isNodeOfType(node, "TSTypeAliasDeclaration")) &&
-      (node.id.name === inputName || node.id.name === "Object")
     ) {
       supported = false;
       return false;
@@ -89,15 +100,13 @@ const hasSupportedNativeKeysProgram = (scopes: ScopeAnalysis, inputName: string)
     const symbol = reference.resolvedSymbol;
     if (
       NATIVE_KEYS_UNSUPPORTED_GLOBAL_NAMES.has(node.name) ||
-      symbol?.kind === "ts-interface" ||
-      symbol?.kind === "ts-type-alias" ||
-      (symbol?.kind === "import" && getValueImportDeclaration(symbol) === null) ||
+      (symbol && isErasedTypeScriptBinding(symbol) && !isNativeObjectReference(node, scopes)) ||
       isProvenGlobalObjectReference(node, scopes)
     ) {
       supported = false;
       return false;
     }
-    if (node.name !== "Object" || !scopes.isGlobalReference(node)) return;
+    if (!isNativeObjectReference(node, scopes)) return;
     const member = node.parent;
     const call = member?.parent;
     if (
@@ -116,11 +125,7 @@ const hasSupportedNativeKeysProgram = (scopes: ScopeAnalysis, inputName: string)
     )
       supported = false;
   });
-  if (!cachedNames) {
-    cachedNames = new Map();
-    supportedProgramByScope.set(scopes, cachedNames);
-  }
-  cachedNames.set(inputName, supported);
+  supportedProgramByScope.set(scopes, supported);
   return supported;
 };
 
@@ -221,7 +226,7 @@ export const isNativeObjectKeysIterationReceiver = (
     receiver.callee.optional ||
     !isNodeOfType(receiver.callee.object, "Identifier") ||
     receiver.callee.object.name !== "Object" ||
-    !scopes.isGlobalReference(receiver.callee.object) ||
+    !isNativeObjectReference(receiver.callee.object, scopes) ||
     !isNodeOfType(receiver.callee.property, "Identifier") ||
     receiver.callee.property.name !== "keys"
   )
@@ -229,11 +234,7 @@ export const isNativeObjectKeysIterationReceiver = (
   const argument = receiver.arguments[0];
   if (!isNodeOfType(argument, "Identifier")) return false;
   const input = scopes.referenceFor(argument)?.resolvedSymbol;
-  if (
-    !input ||
-    !input.references.every((reference) => reference.flag === "read") ||
-    !isOwnedIterationInput(receiver, input, scopes)
-  )
+  if (!input || !isReadonlyInput(input) || !isOwnedIterationInput(receiver, input, scopes))
     return false;
-  return hasSupportedNativeKeysProgram(scopes, argument.name);
+  return hasSupportedNativeKeysProgram(scopes);
 };

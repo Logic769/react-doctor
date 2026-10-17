@@ -1,4 +1,5 @@
 // rule: js-set-map-lookups
+// verdict: pass
 // weakness: iteration-provenance
 // source: independently authored native key lifetime control
 

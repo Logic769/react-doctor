@@ -594,7 +594,7 @@ const cases = [
         },
       },
     },
-    expectedCount: 1,
+    expectedCount: 0,
   },
   {
     name: "type-only-Object-import",
@@ -610,7 +610,7 @@ const cases = [
         },
       },
     },
-    expectedCount: 1,
+    expectedCount: 0,
   },
   {
     name: "reflective-native-keys-write",
