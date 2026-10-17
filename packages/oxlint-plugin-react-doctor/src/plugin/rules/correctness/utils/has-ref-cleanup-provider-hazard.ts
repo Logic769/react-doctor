@@ -4,6 +4,7 @@ import { findTransparentExpressionRoot } from "../../../utils/find-transparent-e
 import { getImportedName } from "../../../utils/get-imported-name.js";
 import { getResolvedStaticPropertyName } from "../../../utils/get-resolved-static-property-name.js";
 import { getStaticPropertyName } from "../../../utils/get-static-property-name.js";
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import {
   isProvenGlobalObjectReference,
@@ -17,6 +18,17 @@ export const hasRefCleanupProviderHazard = (scopes: ScopeAnalysis): boolean => {
   let hasHazard = false;
   walkAst(scopes.rootScope.node, (child: EsTreeNode) => {
     if (hasHazard || isTypeScriptTypePosition(child)) return false;
+    let isErasedGlobalObject = false;
+    if (isNodeOfType(child, "Identifier") && scopes.referenceFor(child)) {
+      const providerSymbol = scopes.symbolFor(child);
+      if (providerSymbol && isErasedTypeScriptBinding(providerSymbol)) {
+        if (["require", "ResizeObserver", "Object", "Reflect", "Function"].includes(child.name)) {
+          hasHazard = true;
+          return false;
+        }
+        isErasedGlobalObject = ["globalThis", "window", "global", "self"].includes(child.name);
+      }
+    }
     if (isNodeOfType(child, "ImportDeclaration")) {
       if (
         !isTypeOnlyImport(child) &&
@@ -68,13 +80,13 @@ export const hasRefCleanupProviderHazard = (scopes: ScopeAnalysis): boolean => {
         return false;
       }
     }
-    if (!isProvenGlobalObjectReference(child, scopes)) return;
+    if (!isProvenGlobalObjectReference(child, scopes) && !isErasedGlobalObject) return;
     const root = findTransparentExpressionRoot(child);
     const member = root.parent;
     if (
       !isNodeOfType(child, "Identifier") ||
       child.name !== "window" ||
-      !scopes.isGlobalReference(child) ||
+      (!scopes.isGlobalReference(child) && !isErasedGlobalObject) ||
       !isNodeOfType(member, "MemberExpression") ||
       member.object !== root ||
       member.computed ||
