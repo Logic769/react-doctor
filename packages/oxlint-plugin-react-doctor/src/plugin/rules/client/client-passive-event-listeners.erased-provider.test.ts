@@ -33,6 +33,21 @@ const cases = [
     code: 'declare const globalThis:any;const world=globalThis;world.require("react").useCallback = () => () => undefined;import React from "react";\n\nconst Panel = () => {\n  const handleWheel = React.useCallback((event: WheelEvent) => { event.preventDefault(); }, []);\n  React.useEffect(() => {\n    document.addEventListener("wheel", handleWheel);\n    return () => document.removeEventListener("wheel", handleWheel);\n  }, [handleWheel]);\n  return null;\n};\n',
     expected: 1,
   },
+  {
+    name: "rejects type-only import-equals provider rewrites",
+    code: 'import type require = require("provider-types");require("react").useCallback = () => () => undefined;import React from "react";\n\nconst Panel = () => {\n  const handleWheel = React.useCallback((event: WheelEvent) => { event.preventDefault(); }, []);\n  React.useEffect(() => {\n    document.addEventListener("wheel", handleWheel);\n    return () => document.removeEventListener("wheel", handleWheel);\n  }, [handleWheel]);\n  return null;\n};\n',
+    expected: 1,
+  },
+  {
+    name: "preserves genuine import-equals value binding",
+    code: 'import require = require("provider-values");require("react").useCallback = () => () => undefined;import React from "react";\n\nconst Panel = () => {\n  const handleWheel = React.useCallback((event: WheelEvent) => { event.preventDefault(); }, []);\n  React.useEffect(() => {\n    document.addEventListener("wheel", handleWheel);\n    return () => document.removeEventListener("wheel", handleWheel);\n  }, [handleWheel]);\n  return null;\n};\n',
+    expected: 0,
+  },
+  {
+    name: "preserves genuine value binding with merged interface",
+    code: 'const require = () => ({}); interface require {}require("react").useCallback = () => () => undefined;import React from "react";\n\nconst Panel = () => {\n  const handleWheel = React.useCallback((event: WheelEvent) => { event.preventDefault(); }, []);\n  React.useEffect(() => {\n    document.addEventListener("wheel", handleWheel);\n    return () => document.removeEventListener("wheel", handleWheel);\n  }, [handleWheel]);\n  return null;\n};\n',
+    expected: 0,
+  },
 ];
 
 describe("erased runtime provider admission", () => {

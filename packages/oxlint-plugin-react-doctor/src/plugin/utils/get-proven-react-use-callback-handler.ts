@@ -1,3 +1,4 @@
+import { hasRuntimeValueBinding } from "./has-runtime-value-binding.js";
 import { isErasedTypeScriptBinding } from "./is-erased-typescript-binding.js";
 import {
   PASSIVE_CALLBACK_ARGUMENT_COUNT,
@@ -64,7 +65,12 @@ const hasUnsupportedProviderExecution = (node: EsTreeNode, scopes: ScopeAnalysis
           ].includes(providerName))
           ? scopes.symbolFor(candidate)
           : null;
-      if (symbol && symbol.bindingIdentifier !== candidate && isErasedTypeScriptBinding(symbol)) {
+      if (
+        symbol &&
+        symbol.bindingIdentifier !== candidate &&
+        isErasedTypeScriptBinding(symbol) &&
+        !hasRuntimeValueBinding(symbol)
+      ) {
         hasUnsupportedExecution = true;
         return false;
       }
