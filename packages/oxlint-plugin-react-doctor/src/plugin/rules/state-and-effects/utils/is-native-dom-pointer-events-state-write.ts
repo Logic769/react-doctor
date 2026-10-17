@@ -119,6 +119,12 @@ const hasClosedDocumentProvider = (
         ? getResolvedStaticPropertyName(node, context.scopes)
         : null;
     if (
+      (isNodeOfType(node, "Identifier") &&
+        node.name === "document" &&
+        binding &&
+        context.scopes.referenceFor(node) &&
+        isErasedTypeScriptBinding(binding) &&
+        !hasRuntimeValueBinding(binding)) ||
       isProvenGlobalObjectReference(node, context.scopes) ||
       [
         "Document",
