@@ -15,6 +15,7 @@ import { getStaticPropertyName } from "../../utils/get-static-property-name.js";
 import { getImportedName } from "../../utils/get-imported-name.js";
 import { getValueImportSource } from "../../utils/get-value-import-declaration.js";
 import { isBindingAssignmentTarget } from "../../utils/is-binding-assignment-target.js";
+import { isErasedTypeScriptBinding } from "../../utils/is-erased-typescript-binding.js";
 import { isFunctionLike } from "../../utils/is-function-like.js";
 import { isMemberMutationTarget } from "../../utils/is-member-mutation-target.js";
 import { isNodeOfType } from "../../utils/is-node-of-type.js";
@@ -124,6 +125,21 @@ export const findLocalHelperRenderOwner = (
   let hasProviderHazard = false;
   walkAst(context.scopes.rootScope.node, (node) => {
     if (hasProviderHazard) return false;
+    if (
+      isNodeOfType(node, "Identifier") &&
+      OPAQUE_PROVIDER_GLOBALS.has(node.name) &&
+      !isTypeScriptTypePosition(node)
+    ) {
+      const providerSymbol = context.scopes.symbolFor(node);
+      if (
+        providerSymbol &&
+        context.scopes.referenceFor(node) &&
+        isErasedTypeScriptBinding(providerSymbol)
+      ) {
+        hasProviderHazard = true;
+        return false;
+      }
+    }
     if (
       isNodeOfType(node, "WithStatement") ||
       isNodeOfType(node, "ImportExpression") ||
