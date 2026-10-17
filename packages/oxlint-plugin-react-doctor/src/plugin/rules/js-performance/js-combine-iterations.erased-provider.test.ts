@@ -63,6 +63,31 @@ const cases = [
     code: 'const Object = {defineProperty: () => null, getPrototypeOf: () => ({})}; interface Object {}Object.defineProperty({}, "unrelated", {value: 42});import { Optional } from "@ephox/katamari"; const result = Optional.from(value).filter(item => item.active).map(item => item.label);',
     expected: 0,
   },
+  {
+    name: "rejects empty namespace provider masking",
+    code: 'namespace Object {}Object.defineProperty({}, "unrelated", {value: 42});import { Optional } from "@ephox/katamari"; const result = Optional.from(value).filter(item => item.active).map(item => item.label);',
+    expected: 1,
+  },
+  {
+    name: "rejects type-only namespace provider masking",
+    code: 'namespace Object { export interface Marker {} }Object.defineProperty({}, "unrelated", {value: 42});import { Optional } from "@ephox/katamari"; const result = Optional.from(value).filter(item => item.active).map(item => item.label);',
+    expected: 1,
+  },
+  {
+    name: "rejects nested type-only namespace provider masking",
+    code: 'namespace Object { export namespace Nested { export type Marker = unknown; } }Object.defineProperty({}, "unrelated", {value: 42});import { Optional } from "@ephox/katamari"; const result = Optional.from(value).filter(item => item.active).map(item => item.label);',
+    expected: 1,
+  },
+  {
+    name: "preserves an inert empty namespace",
+    code: 'namespace Object {}import { Optional } from "@ephox/katamari"; const result = Optional.from(value).filter(item => item.active).map(item => item.label);',
+    expected: 0,
+  },
+  {
+    name: "preserves a genuine runtime namespace",
+    code: 'namespace Object { export const marker = 1; } void Object;import { Optional } from "@ephox/katamari"; const result = Optional.from(value).filter(item => item.active).map(item => item.label);',
+    expected: 0,
+  },
 ];
 
 describe("erased runtime provider admission", () => {
