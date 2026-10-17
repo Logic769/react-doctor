@@ -1,4 +1,4 @@
-import type { SymbolDescriptor } from "../../../semantic/scope-analysis.js";
+import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
 import type { RuleContext } from "../../../utils/rule-context.js";
@@ -7,9 +7,13 @@ import { findTransparentExpressionRoot } from "../../../utils/find-transparent-e
 import { findProgramRoot } from "../../../utils/find-program-root.js";
 import { getResolvedStaticPropertyName } from "../../../utils/get-resolved-static-property-name.js";
 import { getImportedName } from "../../../utils/get-imported-name.js";
+import { getRequireCallSource } from "../../../utils/get-require-call-source.js";
 import { getStaticPropertyKeyName } from "../../../utils/get-static-property-key-name.js";
 import { getStaticPropertyName } from "../../../utils/get-static-property-name.js";
 import { isFunctionLike } from "../../../utils/is-function-like.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
+import { isMemberMutationTarget } from "../../../utils/is-member-mutation-target.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { isReactApiCall } from "../../../utils/is-react-api-call.js";
 import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
@@ -47,6 +51,16 @@ interface ControllerRecordCertificate {
 interface ControllerRecordInsertion {
   key: EsTreeNode;
 }
+
+const supportedPrograms = new WeakMap<ScopeAnalysis, boolean>();
+const controllerRecordCertificates = new WeakMap<ScopeAnalysis, WeakMap<EsTreeNode, boolean>>();
+
+const isRuntimeGlobalReference = (identifier: EsTreeNode, context: RuleContext): boolean => {
+  if (context.scopes.isGlobalReference(identifier)) return true;
+  const reference = context.scopes.referenceFor(identifier);
+  const symbol = reference?.resolvedSymbol;
+  return Boolean(symbol && isErasedTypeScriptBinding(symbol) && !hasRuntimeValueBinding(symbol));
+};
 
 const canonicalReactCall = (node: EsTreeNode, name: string, context: RuleContext): boolean => {
   if (
@@ -123,7 +137,7 @@ const nativeConstruction = (
   isNodeOfType(node, "NewExpression") &&
   isNodeOfType(node.callee, "Identifier") &&
   node.callee.name === name &&
-  context.scopes.isGlobalReference(node.callee);
+  isRuntimeGlobalReference(node.callee, context);
 
 const emptyNativeConstruction = (
   node: EsTreeNode | null | undefined,
@@ -929,6 +943,8 @@ const hasComputedProviderUse = (member: EsTreeNode, context: RuleContext): boole
 };
 
 const supportedProgram = (program: EsTreeNode, context: RuleContext): boolean => {
+  const cached = supportedPrograms.get(context.scopes);
+  if (cached !== undefined) return cached;
   let supported = true;
   walkAst(program, (node) => {
     if (!supported) return false;
@@ -950,10 +966,10 @@ const supportedProgram = (program: EsTreeNode, context: RuleContext): boolean =>
         supported = false;
       if (
         node.name === "eval" ||
-        symbol?.kind === "ts-interface" ||
-        symbol?.kind === "ts-type-alias" ||
+        ((symbol?.kind === "ts-interface" || symbol?.kind === "ts-type-alias") &&
+          !(NATIVE_PROVIDER_NAMES.has(node.name) && isRuntimeGlobalReference(node, context))) ||
         (NATIVE_PROVIDER_NAMES.has(node.name) &&
-          !symbol &&
+          isRuntimeGlobalReference(node, context) &&
           (!isNodeOfType(node.parent, "NewExpression") ||
             node.parent.callee !== node ||
             node.name === "Function"))
@@ -968,6 +984,13 @@ const supportedProgram = (program: EsTreeNode, context: RuleContext): boolean =>
       });
       if (
         REFLECTION_PROPERTY_NAMES.has(name ?? "") ||
+        (isNodeOfType(node, "MemberExpression") &&
+          isMemberMutationTarget(node) &&
+          (name === "useState" ||
+            name === "useRef" ||
+            name === "useEffect" ||
+            name === "useCallback") &&
+          isLoadedReactProvider(node.object, context)) ||
         (isNodeOfType(node, "MemberExpression") &&
           node.computed &&
           name === null &&
@@ -1008,10 +1031,38 @@ const supportedProgram = (program: EsTreeNode, context: RuleContext): boolean =>
       }
     }
   });
+  supportedPrograms.set(context.scopes, supported);
   return supported;
 };
 
-export const isOwnedControllerRecordReset = (write: EsTreeNode, context: RuleContext): boolean => {
+const isLoadedReactProvider = (expression: EsTreeNode, context: RuleContext): boolean => {
+  let current = stripParenExpression(expression);
+  const visitedSymbols = new Set<SymbolDescriptor>();
+  while (true) {
+    if (isNodeOfType(current, "Identifier")) {
+      const symbol = resolveConstIdentifierAlias(current, context.scopes);
+      if (symbol?.kind !== "const" || !symbol.initializer || visitedSymbols.has(symbol))
+        return false;
+      visitedSymbols.add(symbol);
+      current = stripParenExpression(symbol.initializer);
+      continue;
+    }
+    if (isNodeOfType(current, "MemberExpression") && getStaticPropertyName(current) === "default") {
+      current = stripParenExpression(current.object);
+      continue;
+    }
+    return (
+      isNodeOfType(current, "CallExpression") &&
+      !current.optional &&
+      isNodeOfType(current.callee, "Identifier") &&
+      current.callee.name === "require" &&
+      isRuntimeGlobalReference(current.callee, context) &&
+      getRequireCallSource(current) === "react"
+    );
+  }
+};
+
+const certifyOwnedControllerRecordReset = (write: EsTreeNode, context: RuleContext): boolean => {
   if (!isNodeOfType(write, "CallExpression") || write.arguments.length !== SINGLE_ARGUMENT_COUNT)
     return false;
   const [emptyState] = write.arguments;
@@ -1255,4 +1306,17 @@ const functionBindingSymbol = (
   if (isNodeOfType(parent, "VariableDeclarator") && isNodeOfType(parent.id, "Identifier"))
     return context.scopes.symbolFor(parent.id);
   return null;
+};
+
+export const isOwnedControllerRecordReset = (write: EsTreeNode, context: RuleContext): boolean => {
+  let results = controllerRecordCertificates.get(context.scopes);
+  if (!results) {
+    results = new WeakMap();
+    controllerRecordCertificates.set(context.scopes, results);
+  }
+  const cached = results.get(write);
+  if (cached !== undefined) return cached;
+  const result = certifyOwnedControllerRecordReset(write, context);
+  results.set(write, result);
+  return result;
 };
