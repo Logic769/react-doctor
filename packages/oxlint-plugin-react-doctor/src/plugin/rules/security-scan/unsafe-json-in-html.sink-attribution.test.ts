@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import { runScanRule } from "../../../test-utils/run-scan-rule.js";
+import { HTML_JSON_STRINGIFY_LOOKAHEAD_CHARS } from "../../constants/security-scan.js";
 import { unsafeJsonInHtml } from "./unsafe-json-in-html.js";
 
 interface HtmlSinkAttributionCase {
@@ -9,7 +10,90 @@ interface HtmlSinkAttributionCase {
   readonly expectedLocations: readonly (readonly number[])[];
 }
 
+const nestedAttributePrefix = "choose(<i data-label={JSON.stringify(label)} />, ";
+const htmlAttributePrefix = "export const view = <div dangerouslySetInnerHTML={{__html:";
 const cases: readonly HtmlSinkAttributionCase[] = [
+  {
+    name: "own-serialization-at-existing-lookahead-boundary",
+    code: `${htmlAttributePrefix}${nestedAttributePrefix}${" ".repeat(HTML_JSON_STRINGIFY_LOOKAHEAD_CHARS - nestedAttributePrefix.length)}JSON.stringify(payload))}}/>;`,
+    relativePath: "src/view.tsx",
+    expectedLocations: [[1, 26]],
+  },
+  {
+    name: "own-serialization-beyond-existing-lookahead-boundary",
+    code: `${htmlAttributePrefix}${nestedAttributePrefix}${" ".repeat(HTML_JSON_STRINGIFY_LOOKAHEAD_CHARS - nestedAttributePrefix.length + 1)}JSON.stringify(payload))}}/>;`,
+    relativePath: "src/view.tsx",
+    expectedLocations: [],
+  },
+  {
+    name: "own-serialization-preserves-call-whitespace-after-name-window",
+    code: `${htmlAttributePrefix}${nestedAttributePrefix}JSON.stringify${" ".repeat(HTML_JSON_STRINGIFY_LOOKAHEAD_CHARS)}(payload))}}/>;`,
+    relativePath: "src/view.tsx",
+    expectedLocations: [[1, 26]],
+  },
+  {
+    name: "own-serialization-after-nested-non-html-attribute",
+    code: "export const view = <div dangerouslySetInnerHTML={{ __html: choose(<div data-label={JSON.stringify(label)} />, JSON.stringify(payload)) }} />;",
+    relativePath: "src/view.tsx",
+    expectedLocations: [[1, 26]],
+  },
+  {
+    name: "nested-spread-attribute-does-not-taint-outer-html",
+    code: 'export const view = <div dangerouslySetInnerHTML={{ __html: "Ready", ignored: <div {...{ label: JSON.stringify(payload) }} /> }} />;',
+    relativePath: "src/view.tsx",
+    expectedLocations: [],
+  },
+  {
+    name: "nested-html-attribute-owns-its-serialization",
+    code: 'export const view = <div dangerouslySetInnerHTML={{ __html: "Ready", ignored: <div dangerouslySetInnerHTML={{ __html: JSON.stringify(payload) }} /> }} />;',
+    relativePath: "src/view.tsx",
+    expectedLocations: [[1, 84]],
+  },
+  {
+    name: "nested-non-html-attribute-does-not-taint-outer-html",
+    code: 'export const view = <div dangerouslySetInnerHTML={{ __html: "Ready", ignored: <div data-label={JSON.stringify(payload)} /> }} />;',
+    relativePath: "src/view.tsx",
+    expectedLocations: [],
+  },
+  {
+    name: "nested-both-dynamic-attributes-keep-own-locations",
+    code: "export const view = <div dangerouslySetInnerHTML={{ __html: JSON.stringify(outer), ignored: <div dangerouslySetInnerHTML={{ __html: JSON.stringify(inner) }} /> }} />;",
+    relativePath: "src/view.tsx",
+    expectedLocations: [
+      [1, 26],
+      [1, 98],
+    ],
+  },
+  {
+    name: "nested-escaped-html-attribute-stays-quiet",
+    code: 'export const view = <div dangerouslySetInnerHTML={{ __html: "Ready", ignored: <div dangerouslySetInnerHTML={{ __html: escapeHtml(JSON.stringify(payload)) }} /> }} />;',
+    relativePath: "src/view.tsx",
+    expectedLocations: [],
+  },
+  {
+    name: "outer-escape-wrapper-does-not-sanitize-nested-html",
+    code: "export const view = <div dangerouslySetInnerHTML={{ __html: escapeHtml(<div dangerouslySetInnerHTML={{ __html: JSON.stringify(payload) }} />) }} />;",
+    relativePath: "src/view.tsx",
+    expectedLocations: [[1, 77]],
+  },
+  {
+    name: "nested-html-through-non-html-attribute-keeps-own-location",
+    code: 'export const view = <div dangerouslySetInnerHTML={{ __html: "Ready", ignored: <div title={<div dangerouslySetInnerHTML={{ __html: JSON.stringify(payload) }} />} /> }} />;',
+    relativePath: "src/view.tsx",
+    expectedLocations: [[1, 96]],
+  },
+  {
+    name: "nested-namespaced-attribute-does-not-taint-outer-html",
+    code: 'export const view = <div dangerouslySetInnerHTML={{ __html: "Ready", ignored: <div data:label={JSON.stringify(payload)} /> }} />;',
+    relativePath: "src/view.tsx",
+    expectedLocations: [],
+  },
+  {
+    name: "nested-html-without-matched-object-shape-stays-outside-contract",
+    code: 'export const view = <div dangerouslySetInnerHTML={{ __html: "Ready", ignored: <div dangerouslySetInnerHTML={JSON.stringify(payload)} /> }} />;',
+    relativePath: "src/view.tsx",
+    expectedLocations: [],
+  },
   {
     name: "closed-static-attribute-before-unrelated-serialization",
     code: 'export const view = <div dangerouslySetInnerHTML={{ __html: "Ready" }} />;\nexport const serialized = JSON.stringify(payload);',
