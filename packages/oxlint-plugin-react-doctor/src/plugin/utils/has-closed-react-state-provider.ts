@@ -1,3 +1,4 @@
+import { hasRuntimeValueBinding } from "./has-runtime-value-binding.js";
 import { isErasedTypeScriptBinding } from "./is-erased-typescript-binding.js";
 import type { ScopeAnalysis, SymbolDescriptor } from "../semantic/scope-analysis.js";
 import type { EsTreeNodeOfType } from "./es-tree-node-of-type.js";
@@ -51,7 +52,12 @@ const hasClosedReactImports = (scopes: ScopeAnalysis): boolean => {
         (providerName && ["Function", "require", "module", "React"].includes(providerName))
           ? scopes.symbolFor(node)
           : null;
-      if (symbol && symbol.bindingIdentifier !== node && isErasedTypeScriptBinding(symbol)) {
+      if (
+        symbol &&
+        symbol.bindingIdentifier !== node &&
+        isErasedTypeScriptBinding(symbol) &&
+        !hasRuntimeValueBinding(symbol)
+      ) {
         closed = false;
         return false;
       }
