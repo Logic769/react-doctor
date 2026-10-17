@@ -1,3 +1,4 @@
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
 import { getStaticPropertyName } from "../../../utils/get-static-property-name.js";
@@ -20,6 +21,17 @@ export const hasClosedTransitionTupleProvider = (scopes: ScopeAnalysis): boolean
   if (cached !== undefined) return cached;
   let closed = true;
   walkAst(scopes.rootScope.node, (node) => {
+    if (
+      isNodeOfType(node, "Identifier") &&
+      !isTypeScriptTypePosition(node) &&
+      ["Array", "Symbol", "globalThis", "window", "self", "global"].includes(node.name)
+    ) {
+      const symbol = scopes.symbolFor(node);
+      if (symbol && symbol.bindingIdentifier !== node && isErasedTypeScriptBinding(symbol)) {
+        closed = false;
+        return false;
+      }
+    }
     if (!closed || isTypeScriptTypePosition(node)) return false;
     if (
       NATIVE_TRANSITION_TUPLE_PROVIDER_NAMES.some((name) =>
