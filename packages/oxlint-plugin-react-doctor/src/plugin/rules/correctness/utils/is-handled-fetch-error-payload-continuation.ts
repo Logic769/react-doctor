@@ -1,6 +1,12 @@
+import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
 import { findEnclosingFunction } from "../../../utils/find-enclosing-function.js";
+import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
+import { getStaticPropertyName } from "../../../utils/get-static-property-name.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
+import { isProvenGlobalNamespaceReference } from "../../../utils/is-proven-global-namespace-reference.js";
 import { getStaticKeyName } from "../../../utils/get-static-key-name.js";
 import { getStaticPropertyKeyName } from "../../../utils/get-static-property-key-name.js";
 import { isFunctionLike } from "../../../utils/is-function-like.js";
@@ -12,6 +18,9 @@ import type { RuleContext } from "../../../utils/rule-context.js";
 import { walkAst } from "../../../utils/walk-ast.js";
 import {
   FETCH_ERROR_PAYLOAD_RESTRICTED_ANCESTOR_TYPES,
+  FETCH_ERROR_PAYLOAD_GLOBAL_CARRIER_NAMES,
+  FETCH_ERROR_PAYLOAD_GLOBAL_CARRIER_PROPERTIES,
+  FETCH_ERROR_PAYLOAD_REQUIRE_CARRIER_PROPERTIES,
   FETCH_ERROR_PAYLOAD_RUNTIME_TYPESCRIPT_TYPES,
 } from "./constants.js";
 
@@ -20,6 +29,13 @@ interface FetchErrorPayloadContinuationInput {
   responseBinding: EsTreeNodeOfType<"Identifier">;
   context: RuleContext;
 }
+
+interface FetchErrorPayloadProviderEvidence {
+  readonly supportedProgram: boolean;
+  readonly toastSymbolIds: ReadonlySet<number>;
+}
+
+const providerEvidenceCache = new WeakMap<ScopeAnalysis, FetchErrorPayloadProviderEvidence>();
 
 export const isHandledFetchErrorPayloadContinuation = ({
   consumption,
@@ -159,93 +175,185 @@ export const isHandledFetchErrorPayloadContinuation = ({
   }
   let program: EsTreeNode = owner;
   while (program.parent) program = program.parent;
-  let supportedProgram = true;
-  const toastSymbolIds = new Set<number>();
-  walkAst(program, (node) => {
-    if (!supportedProgram) return false;
-    if (
-      node.type === "WithStatement" ||
-      (FETCH_ERROR_PAYLOAD_RUNTIME_TYPESCRIPT_TYPES.has(node.type) &&
-        !("declare" in node && node.declare === true))
-    ) {
-      supportedProgram = false;
-      return false;
-    }
-    if (isTypeScriptTypePosition(node)) return false;
-    if (
-      isNodeOfType(node, "Identifier") &&
-      node.name === "eval" &&
-      context.scopes.referenceFor(node)
-    ) {
-      const symbol = context.scopes.symbolFor(node);
-      const importDeclaration = symbol?.declarationNode.parent;
-      const isErasedBinding = Boolean(
-        symbol &&
-        (symbol.kind === "ts-interface" ||
-          symbol.kind === "ts-type-alias" ||
-          (symbol.kind === "import" &&
-            isNodeOfType(importDeclaration, "ImportDeclaration") &&
-            (isTypeOnlyImport(importDeclaration) ||
-              (isNodeOfType(symbol.declarationNode, "ImportSpecifier") &&
-                symbol.declarationNode.importKind === "type")))),
-      );
-      if (context.scopes.isGlobalReference(node) || isErasedBinding) {
+  let providerEvidence = providerEvidenceCache.get(context.scopes);
+  if (!providerEvidence) {
+    let supportedProgram = true;
+    const toastSymbolIds = new Set<number>();
+    const typeOnlySonnerNames = new Set<string>();
+    walkAst(program, (node) => {
+      if (!supportedProgram) return false;
+      if (
+        node.type === "WithStatement" ||
+        (FETCH_ERROR_PAYLOAD_RUNTIME_TYPESCRIPT_TYPES.has(node.type) &&
+          !("declare" in node && node.declare === true))
+      ) {
         supportedProgram = false;
         return false;
       }
-    }
-    if (!isNodeOfType(node, "ImportDeclaration") || node.source.value !== "sonner") return;
-    for (const specifier of node.specifiers) {
-      let selectedToast = false;
-      if (isNodeOfType(specifier, "ImportSpecifier")) {
-        const importedName = getStaticKeyName(specifier.imported);
-        selectedToast = importedName === "toast";
-        if (!selectedToast && importedName !== "default") continue;
-      }
-      const symbol = context.scopes.symbolFor(specifier.local);
-      if (!symbol || symbol.bindingIdentifier !== specifier.local) {
-        supportedProgram = false;
-        return false;
-      }
-      const runtimeReferences = symbol.references.filter(
-        (reference) => !isTypeScriptTypePosition(reference.identifier),
-      );
-      const typeOnly =
-        isTypeOnlyImport(node) ||
-        (isNodeOfType(specifier, "ImportSpecifier") && specifier.importKind === "type");
-      if (typeOnly || !selectedToast) {
-        if (runtimeReferences.length > 0) {
+      if (isTypeScriptTypePosition(node)) return false;
+      if (
+        isNodeOfType(node, "Identifier") &&
+        node.name === "eval" &&
+        context.scopes.referenceFor(node)
+      ) {
+        const symbol = context.scopes.symbolFor(node);
+        const isErasedBinding = Boolean(
+          symbol && isErasedTypeScriptBinding(symbol) && !hasRuntimeValueBinding(symbol),
+        );
+        if (context.scopes.isGlobalReference(node) || isErasedBinding) {
           supportedProgram = false;
           return false;
         }
-        continue;
       }
-      toastSymbolIds.add(symbol.id);
-      for (const reference of runtimeReferences) {
-        if (reference.flag !== "read" || isWithinAssignmentTarget(reference.identifier)) {
-          supportedProgram = false;
-          return false;
-        }
-        let callee: EsTreeNode = reference.identifier;
-        const member = callee.parent;
+      if (isNodeOfType(node, "ImportExpression")) {
         if (
-          isNodeOfType(member, "MemberExpression") &&
-          member.object === callee &&
-          !member.optional &&
-          !member.computed &&
-          isNodeOfType(member.property, "Identifier")
+          !isNodeOfType(node.source, "Literal") ||
+          typeof node.source.value !== "string" ||
+          node.source.value === "sonner"
         ) {
-          callee = member;
-        }
-        const call = callee.parent;
-        if (!isNodeOfType(call, "CallExpression") || call.callee !== callee || call.optional) {
           supportedProgram = false;
           return false;
         }
       }
+      if (
+        isNodeOfType(node, "CallExpression") &&
+        isProvenGlobalNamespaceReference(node.callee, "require", context.scopes)
+      ) {
+        const source = node.arguments[0];
+        if (!isNodeOfType(source, "Literal") || source.value === "sonner") {
+          supportedProgram = false;
+          return false;
+        }
+      }
+      if (!isNodeOfType(node, "ImportDeclaration") || node.source.value !== "sonner") return;
+      for (const specifier of node.specifiers) {
+        let selectedToast = false;
+        if (isNodeOfType(specifier, "ImportSpecifier")) {
+          const importedName = getStaticKeyName(specifier.imported);
+          selectedToast = importedName === "toast";
+          if (!selectedToast && importedName !== "default") continue;
+        }
+        const symbol = context.scopes.symbolFor(specifier.local);
+        if (!symbol || symbol.bindingIdentifier !== specifier.local) {
+          supportedProgram = false;
+          return false;
+        }
+        const runtimeReferences = symbol.references.filter(
+          (reference) => !isTypeScriptTypePosition(reference.identifier),
+        );
+        const typeOnly =
+          isTypeOnlyImport(node) ||
+          (isNodeOfType(specifier, "ImportSpecifier") && specifier.importKind === "type");
+        if (typeOnly) typeOnlySonnerNames.add(specifier.local.name);
+        if (typeOnly || !selectedToast) {
+          if (runtimeReferences.length > 0) {
+            supportedProgram = false;
+            return false;
+          }
+          continue;
+        }
+        toastSymbolIds.add(symbol.id);
+        for (const reference of runtimeReferences) {
+          if (reference.flag !== "read" || isWithinAssignmentTarget(reference.identifier)) {
+            supportedProgram = false;
+            return false;
+          }
+          let callee: EsTreeNode = reference.identifier;
+          const member = callee.parent;
+          if (
+            isNodeOfType(member, "MemberExpression") &&
+            member.object === callee &&
+            !member.optional &&
+            !member.computed &&
+            isNodeOfType(member.property, "Identifier")
+          ) {
+            if (
+              member.property.name === "__defineGetter__" ||
+              member.property.name === "__defineSetter__"
+            ) {
+              supportedProgram = false;
+              return false;
+            }
+            callee = member;
+          }
+          const call = callee.parent;
+          if (!isNodeOfType(call, "CallExpression") || call.callee !== callee || call.optional) {
+            supportedProgram = false;
+            return false;
+          }
+        }
+      }
+    });
+    const pendingScopes = [context.scopes.rootScope];
+    while (supportedProgram && pendingScopes.length > 0) {
+      const scope = pendingScopes.pop();
+      if (!scope) break;
+      for (const childScope of scope.children) pendingScopes.push(childScope);
+      for (const reference of scope.references) {
+        const identifier = reference.identifier;
+        if (!isNodeOfType(identifier, "Identifier") || isTypeScriptTypePosition(identifier))
+          continue;
+        const symbol = reference.resolvedSymbol;
+        const erasedOnly = Boolean(
+          symbol && isErasedTypeScriptBinding(symbol) && !hasRuntimeValueBinding(symbol),
+        );
+        if (typeOnlySonnerNames.has(identifier.name) && erasedOnly) {
+          supportedProgram = false;
+          break;
+        }
+        if (
+          !(erasedOnly || context.scopes.isGlobalReference(identifier)) ||
+          (identifier.name !== "require" &&
+            !FETCH_ERROR_PAYLOAD_GLOBAL_CARRIER_NAMES.has(identifier.name))
+        ) {
+          continue;
+        }
+        let expression = findTransparentExpressionRoot(identifier);
+        let parent = expression.parent;
+        if (isNodeOfType(parent, "UnaryExpression") && ["typeof", "void"].includes(parent.operator))
+          continue;
+        if (isNodeOfType(parent, "MemberExpression") && parent.object === expression) {
+          const propertyName = getStaticPropertyName(parent);
+          if (
+            propertyName !== null &&
+            !(
+              identifier.name === "require"
+                ? FETCH_ERROR_PAYLOAD_REQUIRE_CARRIER_PROPERTIES
+                : FETCH_ERROR_PAYLOAD_GLOBAL_CARRIER_PROPERTIES
+            ).has(propertyName)
+          ) {
+            continue;
+          }
+          expression = findTransparentExpressionRoot(parent);
+          parent = expression.parent;
+          if (
+            isNodeOfType(parent, "UnaryExpression") &&
+            ["typeof", "void"].includes(parent.operator)
+          )
+            continue;
+          if (propertyName !== "require") {
+            supportedProgram = false;
+            break;
+          }
+        }
+        if (isNodeOfType(parent, "CallExpression") && parent.callee === expression) {
+          const source = parent.arguments[0];
+          if (
+            isNodeOfType(source, "Literal") &&
+            typeof source.value === "string" &&
+            source.value !== "sonner"
+          )
+            continue;
+        }
+        supportedProgram = false;
+        break;
+      }
     }
-  });
-  if (!supportedProgram) return false;
+    providerEvidence = { supportedProgram, toastSymbolIds };
+    providerEvidenceCache.set(context.scopes, providerEvidence);
+  }
+  if (!providerEvidence.supportedProgram) return false;
+  const { toastSymbolIds } = providerEvidence;
   const errorReferences = errorSymbol.references.filter(
     (reference) =>
       !isTypeScriptTypePosition(reference.identifier) &&

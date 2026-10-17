@@ -10,6 +10,151 @@ interface ErrorPayloadContinuationCase {
 
 const cases: ErrorPayloadContinuationCase[] = [
   {
+    name: "review-inherited-descriptor-getter-write",
+    code: 'import {toast} from "sonner";export const load=async(commit:(value:unknown)=>void)=>{toast.__defineGetter__("error",()=>commit);const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 1,
+  },
+  {
+    name: "review-inherited-descriptor-setter-write",
+    code: 'import {toast} from "sonner";export const load=async(commit:(value:unknown)=>void)=>{toast.__defineSetter__("error",commit);const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 1,
+  },
+  {
+    name: "review-ordinary-toast-method-control",
+    code: 'import {toast} from "sonner";export const load=async(commit:(value:unknown)=>void)=>{toast.success("saved");const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 0,
+  },
+  {
+    name: "review-inherited-descriptor-read-control",
+    code: 'import {toast} from "sonner";export const load=async(commit:(value:unknown)=>void)=>{toast.__lookupGetter__("error");const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 0,
+  },
+  {
+    name: "review-canonical",
+    code: 'import {toast} from "sonner";export const load=async(commit:(value:unknown)=>void)=>{const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 0,
+  },
+  {
+    name: "review-merged-toast-interface",
+    code: 'import {toast} from "sonner";interface toast {}export const load=async(commit:(value:unknown)=>void)=>{const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 0,
+  },
+  {
+    name: "review-masked-toast-write",
+    code: 'import {toast} from "sonner";export const load=async(commit:(value:unknown)=>void)=>{const rewrite=()=>{interface toast{};toast.error=commit;};rewrite();const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 1,
+  },
+  {
+    name: "review-plain-toast-write",
+    code: 'import {toast} from "sonner";export const load=async(commit:(value:unknown)=>void)=>{const rewrite=()=>{toast.error=commit;};rewrite();const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 1,
+  },
+  {
+    name: "review-masked-response-write",
+    code: 'import {toast} from "sonner";export const load=async(commit:(value:unknown)=>void)=>{const response=await fetch("/api/records");const rewrite=()=>{interface response{};response.ok=true;};rewrite();if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 1,
+  },
+  {
+    name: "review-plain-response-write",
+    code: 'import {toast} from "sonner";export const load=async(commit:(value:unknown)=>void)=>{const response=await fetch("/api/records");const rewrite=()=>{response.ok=true;};rewrite();if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 1,
+  },
+  {
+    name: "review-masked-error-escape",
+    code: 'import {toast} from "sonner";export const load=async(commit:(value:unknown)=>void)=>{const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error); {interface error{}; return error;}};',
+    expectedCount: 1,
+  },
+  {
+    name: "review-global-loader-write",
+    code: 'import {toast} from "sonner";export const load=async(commit:(value:unknown)=>void)=>{require("sonner").toast.error=commit;const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 1,
+  },
+  {
+    name: "review-declared-require-provider-write",
+    code: 'import {toast} from "sonner";declare const require:any;export const load=async(commit:(value:unknown)=>void)=>{require("sonner").toast.error=commit;const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 1,
+  },
+  {
+    name: "review-genuine-local-loader",
+    code: 'import {toast} from "sonner";export const load=async(commit:(value:unknown)=>void)=>{const require=(_name:string)=>({toast:{error:commit}});require("sonner").toast.error=commit;const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 0,
+  },
+  {
+    name: "review-foreign-global-loader",
+    code: 'import {toast} from "sonner";export const load=async(commit:(value:unknown)=>void)=>{require("foreign-module");const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 0,
+  },
+  {
+    name: "review-foreign-erased-loader",
+    code: 'import {toast} from "sonner";declare const require:any;export const load=async(commit:(value:unknown)=>void)=>{require("foreign-module");const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 0,
+  },
+  {
+    name: "review-inert-erased-loader",
+    code: 'import {toast} from "sonner";declare const require:any;export const load=async(commit:(value:unknown)=>void)=>{void require;typeof require;const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 0,
+  },
+  {
+    name: "review-global-carrier-provider-write",
+    code: 'import {toast} from "sonner";export const load=async(commit:(value:unknown)=>void)=>{globalThis.require("sonner").toast.error=commit;const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 1,
+  },
+  {
+    name: "review-erased-global-carrier-provider-write",
+    code: 'import {toast} from "sonner";declare const globalThis:any;export const load=async(commit:(value:unknown)=>void)=>{globalThis.require("sonner").toast.error=commit;const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 1,
+  },
+  {
+    name: "review-global-carrier-alias-write",
+    code: 'import {toast} from "sonner";export const load=async(commit:(value:unknown)=>void)=>{const world=globalThis;world.require("sonner").toast.error=commit;const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 1,
+  },
+  {
+    name: "review-erased-global-carrier-alias-write",
+    code: 'import {toast} from "sonner";declare const globalThis:any;export const load=async(commit:(value:unknown)=>void)=>{const world=globalThis;world.require("sonner").toast.error=commit;const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 1,
+  },
+  {
+    name: "review-erased-unrelated-carrier-member",
+    code: 'import {toast} from "sonner";declare const globalThis:any;export const load=async(commit:(value:unknown)=>void)=>{void globalThis.unrelated;const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 0,
+  },
+  {
+    name: "review-foreign-erased-carrier-loader",
+    code: 'import {toast} from "sonner";declare const globalThis:any;export const load=async(commit:(value:unknown)=>void)=>{globalThis.require("foreign-module");const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 0,
+  },
+  {
+    name: "review-inert-erased-carrier",
+    code: 'import {toast} from "sonner";declare const globalThis:any;export const load=async(commit:(value:unknown)=>void)=>{void globalThis;typeof globalThis;void globalThis.require;const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 0,
+  },
+  {
+    name: "review-masked-type-only-sonner-alias",
+    code: 'import {toast} from "sonner";import type * as notifications from "sonner";export const load=async(commit:(value:unknown)=>void)=>{const rewrite=()=>{interface notifications{};notifications.toast.error=commit;};rewrite();const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 1,
+  },
+  {
+    name: "review-unmasked-type-only-sonner-alias",
+    code: 'import {toast} from "sonner";import type * as notifications from "sonner";export const load=async(commit:(value:unknown)=>void)=>{const rewrite=()=>{notifications.toast.error=commit;};rewrite();const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 1,
+  },
+  {
+    name: "review-genuine-shadow-type-only-sonner-alias",
+    code: 'import {toast} from "sonner";import type * as notifications from "sonner";export const load=async(commit:(value:unknown)=>void)=>{const rewrite=()=>{const notifications={toast:{error:commit}};interface notifications{};notifications.toast.error=commit;};rewrite();const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 0,
+  },
+  {
+    name: "review-sonner-dynamic-import-provider-write",
+    code: 'import {toast} from "sonner";export const load=async(commit:(value:unknown)=>void)=>{const notifications=await import("sonner");notifications.toast.error=commit;const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 1,
+  },
+  {
+    name: "review-foreign-dynamic-import",
+    code: 'import {toast} from "sonner";export const load=async()=>{await import("foreign-module");const response=await fetch("/api/records");if(response.ok)return;const {error}=await response.json();toast.error(error);};',
+    expectedCount: 0,
+  },
+  {
     name: "deliberate-error-only-continuation",
     code: 'import { toast } from "sonner";\nexport const loadRecord = async () => {\n  const response = await fetch("/api/records"); if (response.ok) { const payload = await response.json(); return { record: payload.record }; } const { error } = await response.json(); toast.error(error);\n};\n',
     expectedCount: 0,

@@ -16,3 +16,28 @@ export const FETCH_ERROR_PAYLOAD_RUNTIME_TYPESCRIPT_TYPES = new Set([
   "TSExportAssignment",
   "TSParameterProperty",
 ]);
+
+export const FETCH_ERROR_PAYLOAD_GLOBAL_CARRIER_NAMES = new Set([
+  "globalThis",
+  "window",
+  "self",
+  "global",
+]);
+
+export const FETCH_ERROR_PAYLOAD_GLOBAL_CARRIER_PROPERTIES = new Set([
+  "globalThis",
+  "window",
+  "self",
+  "global",
+  "require",
+  "eval",
+]);
+
+export const FETCH_ERROR_PAYLOAD_REQUIRE_CARRIER_PROPERTIES = new Set([
+  "call",
+  "apply",
+  "bind",
+  "cache",
+  "main",
+  "extensions",
+]);
