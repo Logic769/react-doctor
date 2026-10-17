@@ -10,6 +10,36 @@ interface NativeBooleanPayloadCase {
 
 const nativeBooleanPayloadCases: NativeBooleanPayloadCase[] = [
   {
+    name: "erased-interface-global-provider",
+    source:
+      'interface globalThis {} globalThis.Boolean=customBoolean;import React from "react";import {useMediaQuery} from "./media";const Panel=({enabled,onChange})=>{const media=useMediaQuery("query");const value=Boolean(enabled)&&media;React.useEffect(()=>{onChange(value);},[value,onChange]);return null;};',
+    diagnosticCount: 1,
+  },
+  {
+    name: "erased-ambient-global-provider",
+    source:
+      'declare const globalThis: any; globalThis.Boolean=customBoolean;import React from "react";import {useMediaQuery} from "./media";const Panel=({enabled,onChange})=>{const media=useMediaQuery("query");const value=Boolean(enabled)&&media;React.useEffect(()=>{onChange(value);},[value,onChange]);return null;};',
+    diagnosticCount: 1,
+  },
+  {
+    name: "type-only-import-global-provider",
+    source:
+      'import type {window} from "./types"; window.Boolean=customBoolean;import React from "react";import {useMediaQuery} from "./media";const Panel=({enabled,onChange})=>{const media=useMediaQuery("query");const value=Boolean(enabled)&&media;React.useEffect(()=>{onChange(value);},[value,onChange]);return null;};',
+    diagnosticCount: 1,
+  },
+  {
+    name: "inert-erased-global-provider",
+    source:
+      'interface globalThis {}import React from "react";import {useMediaQuery} from "./media";const Panel=({enabled,onChange})=>{const media=useMediaQuery("query");const value=Boolean(enabled)&&media;React.useEffect(()=>{onChange(value);},[value,onChange]);return null;};',
+    diagnosticCount: 0,
+  },
+  {
+    name: "real-local-global-provider",
+    source:
+      'const globalThis={Boolean: customBoolean};globalThis.Boolean=otherBoolean;import React from "react";import {useMediaQuery} from "./media";const Panel=({enabled,onChange})=>{const media=useMediaQuery("query");const value=Boolean(enabled)&&media;React.useEffect(()=>{onChange(value);},[value,onChange]);return null;};',
+    diagnosticCount: 0,
+  },
+  {
     name: "external-direct",
     source:
       "import React from 'react';\nimport {useMediaQuery} from './use-media-query';\nconst Panel=({enabled,onChange})=>{\n const media=useMediaQuery('(max-width: 600px)');\n \n const value=media;\n React.useEffect(()=>{onChange(value);},[value,onChange]);\n return null;\n};\n",
