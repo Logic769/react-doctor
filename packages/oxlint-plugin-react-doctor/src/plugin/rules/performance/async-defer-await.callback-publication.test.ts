@@ -243,6 +243,86 @@ const cases: CallbackPublicationCase[] = [
     code: "export const runView = async (execute, consume, render) => { const sink = {}; const paint = () => render(sink); const result = await execute({paint, ...{paint: () => null}}); if (sink.url) return null; return result; };\n",
     expectedCount: 1,
   },
+  {
+    name: "object-interface-after-value",
+    code: 'export const runView = async (execute) => {  const sink = {}; interface sink {}  const paint = () => { sink.url="/next"; };  const result = await execute({paint}); if(sink.url) return null; return result; };',
+    expectedCount: 0,
+  },
+  {
+    name: "object-type-alias-after-value",
+    code: 'export const runView = async (execute) => {  const sink = {}; type sink = unknown;  const paint = () => { sink.url="/next"; };  const result = await execute({paint}); if(sink.url) return null; return result; };',
+    expectedCount: 0,
+  },
+  {
+    name: "callback-interface-after-value",
+    code: 'export const runView = async (execute) => {  const sink = {};   const paint = () => { sink.url="/next"; }; interface paint {} const result = await execute({paint}); if(sink.url) return null; return result; };',
+    expectedCount: 0,
+  },
+  {
+    name: "both-type-space-names",
+    code: 'export const runView = async (execute) => {  const sink = {}; interface sink {}  const paint = () => { sink.url="/next"; }; type paint = unknown; const result = await execute({paint}); if(sink.url) return null; return result; };',
+    expectedCount: 0,
+  },
+  {
+    name: "object-interface-before-value",
+    code: 'export const runView = async (execute) => { interface sink {} const sink = {};   const paint = () => { sink.url="/next"; };  const result = await execute({paint}); if(sink.url) return null; return result; };',
+    expectedCount: 0,
+  },
+  {
+    name: "callback-interface-before-value",
+    code: 'export const runView = async (execute) => {  const sink = {};  interface paint {} const paint = () => { sink.url="/next"; };  const result = await execute({paint}); if(sink.url) return null; return result; };',
+    expectedCount: 0,
+  },
+  {
+    name: "inner-type-resolves-outer-object",
+    code: 'export const runView = async (execute) => {  const sink = {};   const paint = () => { interface sink {} sink.url="/next"; };  const result = await execute({paint}); if(sink.url) return null; return result; };',
+    expectedCount: 0,
+  },
+  {
+    name: "typed-inner-object-remains-independent",
+    code: 'export const runView = async (execute) => {  const sink = {};   const paint = () => { const sink={}; interface sink {} sink.url="/next"; };  const result = await execute({paint}); if(sink.url) return null; return result; };',
+    expectedCount: 1,
+  },
+  {
+    name: "typed-unrelated-property-remains-independent",
+    code: 'export const runView = async (execute) => {  const sink = {}; interface sink {}  const paint = () => { sink.other="/next"; };  const result = await execute({paint}); if(sink.url) return null; return result; };',
+    expectedCount: 1,
+  },
+  {
+    name: "callback-write-under-erased-name",
+    code: 'export const runView = async (execute) => {  const sink = {};   const paint = () => { sink.url="/next"; }; interface paint {} paint = replacement; const result = await execute({paint}); if(sink.url) return null; return result; };',
+    expectedCount: 1,
+  },
+  {
+    name: "callback-pattern-write-under-erased-name",
+    code: 'export const runView = async (execute) => {  const sink = {};   const paint = () => { sink.url="/next"; }; interface paint {} [paint] = replacements; const result = await execute({paint}); if(sink.url) return null; return result; };',
+    expectedCount: 1,
+  },
+  {
+    name: "typed-callback-alias-remains-unsupported",
+    code: 'export const runView = async (execute) => {  const sink = {};   const paint = () => { sink.url="/next"; }; const alias=paint; interface alias {} const result = await execute({paint: alias}); if(sink.url) return null; return result; };',
+    expectedCount: 1,
+  },
+  {
+    name: "typed-mutable-callback-remains-unsupported",
+    code: 'export const runView = async (execute) => {  const sink = {};   let paint = () => { sink.url="/next"; }; interface paint {} const result = await execute({paint}); if(sink.url) return null; return result; };',
+    expectedCount: 1,
+  },
+  {
+    name: "typed-nonempty-object-remains-unsupported",
+    code: 'export const runView = async (execute) => {  const sink = {url:null}; interface sink {}  const paint = () => { sink.url="/next"; };  const result = await execute({paint}); if(sink.url) return null; return result; };',
+    expectedCount: 1,
+  },
+  {
+    name: "typed-shadowed-callback-remains-independent",
+    code: 'export const runView=async(execute)=>{const sink={}; const paint=()=>{sink.url="/next"}; {const paint=()=>null;interface paint{};const result=await execute({paint});if(sink.url)return null;return result}};',
+    expectedCount: 1,
+  },
+  {
+    name: "inner-type-resolves-outer-callback",
+    code: 'export const runView=async(execute)=>{const sink={};const paint=()=>{sink.url="/next"};{interface paint{};const result=await execute({paint});if(sink.url)return null;return result}};',
+    expectedCount: 0,
+  },
 ];
 describe("awaited callback guard-object publication", () => {
   it.each(cases)("$name", ({ code, expectedCount }) => {

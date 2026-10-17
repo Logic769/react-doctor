@@ -1,4 +1,5 @@
-import type { SymbolDescriptor } from "../../../semantic/scope-analysis.js";
+import { findRuntimeValueSymbol } from "../../../utils/find-runtime-value-symbol.js";
+import type { ReferenceDescriptor, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
 import { findEnclosingFunction } from "../../../utils/find-enclosing-function.js";
@@ -28,6 +29,7 @@ export const awaitedCallbacksMayPublishGuardObject = (
 ): boolean => {
   const owner = findEnclosingFunction(guard);
   if (!isFunctionLike(owner)) return false;
+  const referencesByRuntimeSymbol = new Map<SymbolDescriptor, ReferenceDescriptor[]>();
   let supportsLexicalProof = true;
   walkAst(owner.body, (node) => {
     if (!supportsLexicalProof) return false;
@@ -42,6 +44,13 @@ export const awaitedCallbacksMayPublishGuardObject = (
       return false;
     }
     if (isTypeScriptTypePosition(node)) return false;
+    const reference = context.scopes.referenceFor(node);
+    const runtimeSymbol = reference && findRuntimeValueSymbol(node, context.scopes);
+    if (reference && runtimeSymbol) {
+      const references = referencesByRuntimeSymbol.get(runtimeSymbol) ?? [];
+      references.push(reference);
+      referencesByRuntimeSymbol.set(runtimeSymbol, references);
+    }
     if (
       !isNodeOfType(node, "Identifier") ||
       node.name !== "eval" ||
@@ -65,7 +74,7 @@ export const awaitedCallbacksMayPublishGuardObject = (
   if (!supportsLexicalProof) return false;
   const resolveOwnConst = (identifier: EsTreeNode, before: EsTreeNode): SymbolDescriptor | null => {
     if (!isNodeOfType(identifier, "Identifier")) return null;
-    const symbol = context.scopes.symbolFor(identifier);
+    const symbol = findRuntimeValueSymbol(identifier, context.scopes);
     if (
       !symbol ||
       !getDirectConstInitializer(symbol) ||
@@ -76,7 +85,7 @@ export const awaitedCallbacksMayPublishGuardObject = (
     )
       return null;
     if (
-      symbol.references.some((reference) => {
+      (referencesByRuntimeSymbol.get(symbol) ?? []).some((reference) => {
         if (reference.flag !== "read") return true;
         const root = findTransparentExpressionRoot(reference.identifier);
         const consumer = root.parent;
@@ -125,7 +134,7 @@ export const awaitedCallbacksMayPublishGuardObject = (
       if (publishes) return false;
       if (isTypeScriptTypePosition(node)) return false;
       if (!isNodeOfType(node, "Identifier")) return;
-      const symbol = context.scopes.symbolFor(node);
+      const symbol = findRuntimeValueSymbol(node, context.scopes);
       const properties = symbol && guardProperties.get(symbol);
       if (!properties || !isNodeReachableWithinFunction(node, context)) return;
       const root = findTransparentExpressionRoot(node);
