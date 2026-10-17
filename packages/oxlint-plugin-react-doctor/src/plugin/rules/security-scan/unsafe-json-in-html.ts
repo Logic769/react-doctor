@@ -1,5 +1,6 @@
 import { defineRule } from "../../utils/define-rule.js";
 import type { ScanFinding } from "../../utils/file-scan.js";
+import { collectJsxHtmlAttributeEnds } from "./utils/collect-jsx-html-attribute-ends.js";
 import { findMatchingBracket } from "./utils/find-matching-bracket.js";
 import { getLocationAtIndex } from "./utils/get-location-at-index.js";
 import { isProductionSourcePath } from "./utils/is-production-source-path.js";
@@ -70,11 +71,23 @@ export const unsafeJsonInHtml = defineRule({
     const content = getScannableContent(file);
     if (!content.includes("JSON.stringify")) return [];
 
+    let htmlAttributeEnds: Map<number, number> | undefined;
     const findings: ScanFinding[] = [];
     const seenIndices = new Set<number>();
     for (const [patternIndex, pattern] of SINK_JSON_STRINGIFY_PATTERNS.entries()) {
       pattern.lastIndex = 0;
       for (let match = pattern.exec(content); match !== null; match = pattern.exec(content)) {
+        if (patternIndex !== INLINE_SCRIPT_PATTERN_INDEX) {
+          htmlAttributeEnds ??= collectJsxHtmlAttributeEnds(file);
+          const attributeEndIndex = htmlAttributeEnds.get(match.index);
+          if (
+            attributeEndIndex !== undefined &&
+            match.index + match[0].length > attributeEndIndex
+          ) {
+            pattern.lastIndex = attributeEndIndex;
+            continue;
+          }
+        }
         // An escape/serializer helper wrapping the call escapes the output.
         const beforeStringify = match[0].replace(JSON_STRINGIFY_TOKEN_PATTERN, "");
         if (ESCAPE_WRAPPER_PATTERN.test(beforeStringify)) continue;
