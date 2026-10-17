@@ -387,6 +387,10 @@ describe("hook-use-state omitted setters", () => {
   it.each([
     `declare const require: any; require("react").useState = customHook;`,
     `import type require = require("./types"); require("react").useState = customHook;`,
+    `namespace require {} require("react").useState=customHook;`,
+    `namespace require {export interface Loader {}} require("react").useState=customHook;`,
+    `namespace require {type Loader=unknown;} require("react").useState=customHook;`,
+    `namespace require {export namespace Shape {export interface Loader {}}} require("react").useState=customHook;`,
     `declare function require(source: string): any; require("react").useState = customHook;`,
     `interface Object {} Object.defineProperty(provider, "useState", {value: customHook});`,
     `type Reflect = unknown; Reflect.set(provider, "useState", customHook);`,
@@ -412,6 +416,9 @@ describe("hook-use-state omitted setters", () => {
     `const require = () => ({}); require("metadata");`,
     `const require = () => ({useState: customHook}); interface require {} require("react").useState = customHook;`,
     `interface require {} const require = () => ({useState: customHook}); require("react").useState = customHook;`,
+    `namespace require {export const provider={useState:customHook};} require.provider.useState=customHook;`,
+    `function require(){return {useState:customHook};} namespace require {export interface Loader {}} require("react").useState=customHook;`,
+    `namespace require {export const provider={useState:customHook};} namespace require {export interface Loader {}} require.provider.useState=customHook;`,
     `const Object = {defineProperty() {}}; interface Object {} Object.defineProperty(provider, "useState", {value: customHook});`,
   ])("allows unused erased declarations and real local loaders: %s", (metadata) => {
     const result = runRule(

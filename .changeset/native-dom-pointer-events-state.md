@@ -9,3 +9,5 @@ Avoid state-mutation warnings for string pointer-events writes on closed native 
 Keep native DOM provider replacements unsupported when erased TypeScript declarations mask the runtime constructor binding.
 
 Recognize erased type-only import equals bindings while preserving genuine local runtime values merged with interfaces.
+
+Recognize empty and type-only namespaces without treating instantiated namespace values as native globals.

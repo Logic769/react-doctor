@@ -10,6 +10,21 @@ interface NativeDomWriteCase {
 
 const cases: ReadonlyArray<NativeDomWriteCase> = [
   {
+    name: "type-only-namespace-provider",
+    code: 'namespace Document {export namespace Shape {export interface Marker {}}}\nDocument.prototype.getElementById=customLookup;\nimport {useEffect,useState} from "react";export const Panel=()=>{const[host,setHost]=useState(null);useEffect(()=>{const node=document.getElementById("host");if(node)setHost(node);},[]);useEffect(()=>{if(!host)return;host.style.pointerEvents="none";},[host]);return <div/>;};',
+    expected: 1,
+  },
+  {
+    name: "empty-namespace-provider",
+    code: 'namespace Document {}\nDocument.prototype.getElementById=customLookup;\nimport {useEffect,useState} from "react";export const Panel=()=>{const[host,setHost]=useState(null);useEffect(()=>{const node=document.getElementById("host");if(node)setHost(node);},[]);useEffect(()=>{if(!host)return;host.style.pointerEvents="none";},[host]);return <div/>;};',
+    expected: 1,
+  },
+  {
+    name: "runtime-namespace-provider",
+    code: 'namespace Document {export const prototype={getElementById:customLookup};}\nDocument.prototype.getElementById=customLookup;\nimport {useEffect,useState} from "react";export const Panel=()=>{const[host,setHost]=useState(null);useEffect(()=>{const node=document.getElementById("host");if(node)setHost(node);},[]);useEffect(()=>{if(!host)return;host.style.pointerEvents="none";},[host]);return <div/>;};',
+    expected: 0,
+  },
+  {
     name: "type-import-equals-provider",
     code: 'import type Document = require("./types");Document.prototype.getElementById=customLookup;\nimport {useEffect,useState} from "react";export const Panel=()=>{const[host,setHost]=useState(null);useEffect(()=>{const node=document.getElementById("host");if(node)setHost(node);},[]);useEffect(()=>{if(!host)return;host.style.pointerEvents="none";},[host]);return <div/>;};',
     expected: 1,
