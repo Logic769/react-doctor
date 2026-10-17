@@ -1,3 +1,4 @@
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import { OBSERVER_SNAPSHOT_UNSUPPORTED_PROPERTIES } from "../../../constants/dom.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
 import { getGlobalRequireModuleSource } from "../../../utils/get-global-require-module-source.js";
@@ -25,6 +26,28 @@ export const hasClosedObserverSnapshotProviderHazard = ({
   const { scopes } = context;
   let hasHazard = false;
   walkAst(scopes.rootScope.node, (candidate) => {
+    if (
+      isNodeOfType(candidate, "Identifier") &&
+      !isTypeScriptTypePosition(candidate) &&
+      [
+        "Object",
+        "Reflect",
+        "Function",
+        "require",
+        "module",
+        "process",
+        "globalThis",
+        "window",
+        "self",
+        "global",
+      ].includes(candidate.name)
+    ) {
+      const symbol = scopes.symbolFor(candidate);
+      if (symbol && symbol.bindingIdentifier !== candidate && isErasedTypeScriptBinding(symbol)) {
+        hasHazard = true;
+        return false;
+      }
+    }
     if (hasHazard || isTypeScriptTypePosition(candidate)) return false;
     if (
       isNodeOfType(candidate, "WithStatement") ||
