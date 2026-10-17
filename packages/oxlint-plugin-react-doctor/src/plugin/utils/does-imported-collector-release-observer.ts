@@ -1,3 +1,4 @@
+import { hasRuntimeValueBinding } from "./has-runtime-value-binding.js";
 import { isErasedTypeScriptBinding } from "./is-erased-typescript-binding.js";
 import {
   analyzeScopes,
@@ -82,7 +83,12 @@ const hasClosedNativeEnvironment = (
       ].includes(node.name)
     ) {
       const symbol = scopes.symbolFor(node);
-      if (symbol && symbol.bindingIdentifier !== node && isErasedTypeScriptBinding(symbol)) {
+      if (
+        symbol &&
+        symbol.bindingIdentifier !== node &&
+        isErasedTypeScriptBinding(symbol) &&
+        !hasRuntimeValueBinding(symbol)
+      ) {
         isClosed = false;
         return false;
       }

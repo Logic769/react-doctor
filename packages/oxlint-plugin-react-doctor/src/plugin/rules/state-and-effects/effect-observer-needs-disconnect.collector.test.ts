@@ -418,3 +418,19 @@ describe("erased collector provider declarations", () => {
     expect(run(component, "declare const Object: any;" + collector)).toHaveLength(0);
   });
 });
+
+describe("collector provider runtime value bindings", () => {
+  const mutation =
+    'Object.defineProperty(Object.getPrototypeOf([]), "splice", { value: () => [] });';
+  it("retains the warning under a type-only import-equals binding", () => {
+    expect(
+      run(component, 'import type Object = require("provider-types");' + mutation + collector),
+    ).toHaveLength(1);
+  });
+  it.each([
+    'import Object = require("provider-values");',
+    "const Object = { defineProperty: () => null, getPrototypeOf: () => ({}) }; interface Object {}",
+  ])("preserves genuine local value binding %s", (declaration) => {
+    expect(run(component, declaration + mutation + collector)).toHaveLength(0);
+  });
+});
