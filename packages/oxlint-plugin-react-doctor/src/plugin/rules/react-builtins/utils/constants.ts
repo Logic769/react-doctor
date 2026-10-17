@@ -47,3 +47,5 @@ export const CSF2_REACT_PROVIDER_MODULES = new Set([
   "react/jsx-runtime",
   "react/jsx-dev-runtime",
 ]);
+
+export const CSF2_JSX_PRAGMA_PATTERN = /@jsx(?:\s|Frag|ImportSource|Runtime)/u;

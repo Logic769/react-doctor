@@ -1,4 +1,5 @@
-import type { SymbolDescriptor } from "../../../semantic/scope-analysis.js";
+import { parseSync } from "oxc-parser";
+import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
 import { findEnclosingFunction } from "../../../utils/find-enclosing-function.js";
@@ -25,11 +26,18 @@ import { walkAst } from "../../../utils/walk-ast.js";
 import {
   CSF2_BIND_ARGUMENT_COUNT,
   CSF2_FORBIDDEN_PROPERTY_NAMES,
+  CSF2_JSX_PRAGMA_PATTERN,
   CSF2_REACT_PROVIDER_MODULES,
   CSF2_SINGLE_ROLE_COUNT,
   CSF2_UNSUPPORTED_GLOBAL_NAMES,
   CSF2_UNSUPPORTED_TYPESCRIPT_NODES,
 } from "./constants.js";
+
+const statementIndicesByProgram = new WeakMap<
+  EsTreeNodeOfType<"Program">,
+  ReadonlyMap<EsTreeNode, number>
+>();
+const dataUseProofsByScopes = new WeakMap<ScopeAnalysis, WeakMap<EsTreeNode, boolean>>();
 
 const isReadonlyValueSymbol = (symbol: SymbolDescriptor): boolean =>
   symbol.references.every(
@@ -91,11 +99,25 @@ const readOrdinaryObject = (node: EsTreeNode): EsTreeNodeOfType<"ObjectExpressio
 };
 
 const hasClosedUnknownComputedDataUse = (node: EsTreeNode, context: RuleContext): boolean => {
+  let proofs = dataUseProofsByScopes.get(context.scopes);
+  if (!proofs) {
+    proofs = new WeakMap();
+    dataUseProofsByScopes.set(context.scopes, proofs);
+  }
+  const cached = proofs.get(node);
+  if (cached !== undefined) return cached;
   const pending = [node];
   const visited = new Set<EsTreeNode>();
+  let closed = true;
   while (pending.length) {
     const current = pending.pop();
     if (!current || visited.has(current)) continue;
+    const currentProof = proofs.get(current);
+    if (currentProof === true) continue;
+    if (currentProof === false) {
+      closed = false;
+      break;
+    }
     visited.add(current);
     const root = findTransparentExpressionRoot(current);
     const parent = root.parent;
@@ -120,7 +142,10 @@ const hasClosedUnknownComputedDataUse = (node: EsTreeNode, context: RuleContext)
     }
     if (isNodeOfType(parent, "MemberExpression") && parent.object === root) {
       const propertyName = getResolvedStaticPropertyName(parent, context.scopes);
-      if (propertyName === null || CSF2_FORBIDDEN_PROPERTY_NAMES.has(propertyName)) return false;
+      if (propertyName === null || CSF2_FORBIDDEN_PROPERTY_NAMES.has(propertyName)) {
+        closed = false;
+        break;
+      }
       pending.push(parent);
       continue;
     }
@@ -135,16 +160,22 @@ const hasClosedUnknownComputedDataUse = (node: EsTreeNode, context: RuleContext)
         !getDirectConstInitializer(symbol) ||
         !isReadonlyValueSymbol(symbol) ||
         isNodeOfType(parent.parent?.parent, "ExportNamedDeclaration")
-      )
-        return false;
+      ) {
+        closed = false;
+        break;
+      }
       for (const reference of symbol.references) {
         if (!isTypeScriptTypePosition(reference.identifier)) pending.push(reference.identifier);
       }
       continue;
     }
-    return false;
+    closed = false;
+    break;
   }
-  return true;
+  if (closed) {
+    for (const visitedNode of visited) proofs.set(visitedNode, true);
+  } else proofs.set(node, false);
+  return closed;
 };
 
 const hasClosedProgramProviders = (
@@ -155,7 +186,19 @@ const hasClosedProgramProviders = (
   context: RuleContext,
 ): boolean => {
   const source = context.sourceCode?.getText?.();
-  if (source === undefined || /@jsx(?:\s|Frag|ImportSource|Runtime)/u.test(source)) return false;
+  if (source === undefined) return false;
+  if (CSF2_JSX_PRAGMA_PATTERN.test(source)) {
+    try {
+      const parsed = parseSync("csf2-template.tsx", source, { astType: "ts", lang: "tsx" });
+      if (
+        parsed.errors.some((error) => error.severity === "Error") ||
+        parsed.comments.some((comment) => CSF2_JSX_PRAGMA_PATTERN.test(comment.value))
+      )
+        return false;
+    } catch {
+      return false;
+    }
+  }
   let closed = true;
   walkAst(program, (node) => {
     if (!closed) return false;
@@ -305,11 +348,12 @@ const hasMetadataComponent = (
 const hasClosedStoryArgs = (
   story: SymbolDescriptor,
   program: EsTreeNodeOfType<"Program">,
+  statementIndices: ReadonlyMap<EsTreeNode, number>,
 ): boolean => {
   const exportStatement = story.declarationNode.parent?.parent;
   if (!isNodeOfType(exportStatement, "ExportNamedDeclaration")) return false;
-  const programStatements: ReadonlyArray<EsTreeNode> = program.body;
-  const declarationIndex = programStatements.indexOf(exportStatement);
+  const declarationIndex = statementIndices.get(exportStatement);
+  if (declarationIndex === undefined) return false;
   let assignments = 0;
   for (const reference of story.references) {
     const identifier = reference.identifier;
@@ -317,6 +361,7 @@ const hasClosedStoryArgs = (
     const member = identifier.parent;
     const assignment = member?.parent;
     const statement = assignment?.parent;
+    const statementIndex = statement ? statementIndices.get(statement) : undefined;
     if (
       !isNodeOfType(member, "MemberExpression") ||
       member.object !== identifier ||
@@ -328,7 +373,8 @@ const hasClosedStoryArgs = (
       assignment.operator !== "=" ||
       !isNodeOfType(statement, "ExpressionStatement") ||
       statement.parent !== program ||
-      programStatements.indexOf(statement) <= declarationIndex ||
+      statementIndex === undefined ||
+      statementIndex <= declarationIndex ||
       !readOrdinaryObject(assignment.right)
     )
       return false;
@@ -399,7 +445,15 @@ export const isCsf2BoundTemplateForwarding = (
   const program = findProgramRoot(attribute);
   if (!isNodeOfType(program, "Program") || !hasMetadataComponent(program, component, context))
     return false;
-  const programStatements: ReadonlyArray<EsTreeNode> = program.body;
+  let statementIndices = statementIndicesByProgram.get(program);
+  if (!statementIndices) {
+    const indices = new Map<EsTreeNode, number>();
+    for (const [index, statement] of program.body.entries()) {
+      if (!indices.has(statement)) indices.set(statement, index);
+    }
+    statementIndices = indices;
+    statementIndicesByProgram.set(program, statementIndices);
+  }
   const bindMembers = new Set<EsTreeNode>();
   for (const reference of template.references) {
     const identifier = reference.identifier;
@@ -427,12 +481,16 @@ export const isCsf2BoundTemplateForwarding = (
     const story = readTopLevelConst(bound.id, context, true);
     const storyStatement = story?.declarationNode.parent?.parent;
     const templateStatement = declaration.parent;
+    const storyIndex = storyStatement ? statementIndices.get(storyStatement) : undefined;
+    const templateIndex = templateStatement ? statementIndices.get(templateStatement) : undefined;
     if (
       !story ||
       !isNodeOfType(storyStatement, "ExportNamedDeclaration") ||
       !isNodeOfType(templateStatement, "VariableDeclaration") ||
-      programStatements.indexOf(storyStatement) <= programStatements.indexOf(templateStatement) ||
-      !hasClosedStoryArgs(story, program)
+      storyIndex === undefined ||
+      templateIndex === undefined ||
+      storyIndex <= templateIndex ||
+      !hasClosedStoryArgs(story, program, statementIndices)
     )
       return false;
     bindMembers.add(member);
