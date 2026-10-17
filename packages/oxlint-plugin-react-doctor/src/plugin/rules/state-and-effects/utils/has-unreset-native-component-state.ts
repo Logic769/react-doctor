@@ -1,3 +1,4 @@
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
 import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
 import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import type { Reference } from "eslint-scope";
@@ -57,7 +58,8 @@ const hasSupportedStateWitnessProgram = (context: RuleContext): boolean => {
           "self",
           "global",
         ].includes(node.name) &&
-        isErasedTypeScriptBinding(binding)
+        isErasedTypeScriptBinding(binding) &&
+        !hasRuntimeValueBinding(binding)
       ) {
         isSupported = false;
         return false;
