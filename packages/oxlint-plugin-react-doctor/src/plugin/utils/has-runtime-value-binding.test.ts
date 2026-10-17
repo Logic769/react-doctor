@@ -6,6 +6,57 @@ import { hasRuntimeValueBinding } from "./has-runtime-value-binding.js";
 
 describe("hasRuntimeValueBinding", () => {
   it.each([
+    { code: "namespace candidate {}", expected: false, nested: false },
+    { code: "namespace candidate { interface Marker {} }", expected: false, nested: false },
+    { code: "namespace candidate { export interface Marker {} }", expected: false, nested: false },
+    { code: "namespace candidate { type Marker = string; }", expected: false, nested: false },
+    {
+      code: "namespace candidate { export type Marker = string; }",
+      expected: false,
+      nested: false,
+    },
+    {
+      code: "namespace candidate { export namespace Nested { export interface Marker {} } }",
+      expected: false,
+      nested: false,
+    },
+    { code: "namespace candidate { export const marker = 0; }", expected: true, nested: false },
+    { code: "namespace candidate { const marker = 0; }", expected: true, nested: false },
+    { code: "namespace candidate { export function marker() {} }", expected: true, nested: false },
+    { code: "namespace candidate { export class Marker {} }", expected: true, nested: false },
+    { code: "namespace candidate { export enum Marker { Value } }", expected: true, nested: false },
+    {
+      code: "namespace candidate { export namespace Nested { export const marker = 0; } }",
+      expected: true,
+      nested: false,
+    },
+    {
+      code: "namespace candidate { type Marker = string; export const marker = 0; }",
+      expected: true,
+      nested: false,
+    },
+    { code: "namespace candidate {;}", expected: true, nested: false },
+    {
+      code: "namespace candidate { declare const marker: unknown; }",
+      expected: true,
+      nested: false,
+    },
+    {
+      code: "namespace candidate { export declare const marker: unknown; }",
+      expected: true,
+      nested: false,
+    },
+    { code: "namespace candidate { import Alias = Some.Value; }", expected: false, nested: false },
+    {
+      code: "namespace candidate { export import Alias = Some.Value; }",
+      expected: true,
+      nested: false,
+    },
+    {
+      code: "function candidate() {} namespace candidate { export interface Marker {} }",
+      expected: true,
+      nested: false,
+    },
     { code: "interface candidate {}", expected: false, nested: false },
     { code: "type candidate = unknown;", expected: false, nested: false },
     { code: "declare const candidate: unknown;", expected: false, nested: false },
