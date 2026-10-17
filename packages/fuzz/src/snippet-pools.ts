@@ -185,6 +185,7 @@ export const STATE_SNIPPET_POOL = [
   `const lazyMapRef = useRef<Map<string, string> | undefined>(undefined); if (!lazyMapRef.current) lazyMapRef.current = new Map(); const lazyMapSize = lazyMapRef.current.size;`,
   `const fuzzWriteOnlyFocusControl = { refs: { toggle: createRef(), close: createRef(), slider: createRef() }, setFocus: () => {}, loseFocus: () => {} }; const fuzzWriteOnlyFocusNode = <button ref={fuzzWriteOnlyFocusControl.refs.toggle}>Open</button>;`,
   `const fuzzObservedTarget = createRef(); useEffect(() => handle(fuzzObservedTarget), [fuzzObservedTarget]);`,
+  `const fuzzMappedRefs = [1, 2].map(() => createRef()); useEffect(() => { void fuzzMappedRefs[0].current; }, [fuzzMappedRefs]); const fuzzMappedRefNode = <div ref={fuzzMappedRefs[0]} />;`,
   `const handleRef = useRef(handle); handleRef.current = handle;`,
   `const [copied, setCopied] = useState(false);`,
   `const [cache] = useState(new Map());`,
