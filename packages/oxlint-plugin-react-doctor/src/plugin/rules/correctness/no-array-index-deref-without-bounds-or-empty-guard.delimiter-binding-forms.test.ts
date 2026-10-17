@@ -33,6 +33,21 @@ const scenarios = [
     code: 'import type String = require("provider-types");String.prototype.split = () => [];export const readDelimitedLabel = (value: number) => { const text = value.toString(); const position = text.indexOf("."); return <span>{position !== -1 ? text.split(".")[1].length : 0}</span>; };',
     expected: 1,
   },
+  {
+    name: "erased namespace cannot mask mutation: namespace String {}",
+    code: 'namespace String {}String.prototype.split = () => [];export const readDelimitedLabel = (value: number) => { const text = value.toString(); const position = text.indexOf("."); return <span>{position !== -1 ? text.split(".")[1].length : 0}</span>; };',
+    expected: 1,
+  },
+  {
+    name: "erased namespace cannot mask mutation: namespace String { export interface Marker {} }",
+    code: 'namespace String { export interface Marker {} }String.prototype.split = () => [];export const readDelimitedLabel = (value: number) => { const text = value.toString(); const position = text.indexOf("."); return <span>{position !== -1 ? text.split(".")[1].length : 0}</span>; };',
+    expected: 1,
+  },
+  {
+    name: "erased namespace cannot mask mutation: namespace String { export namespace Nested { export interface Marker {} } }",
+    code: 'namespace String { export namespace Nested { export interface Marker {} } }String.prototype.split = () => [];export const readDelimitedLabel = (value: number) => { const text = value.toString(); const position = text.indexOf("."); return <span>{position !== -1 ? text.split(".")[1].length : 0}</span>; };',
+    expected: 1,
+  },
 ];
 const options = {
   filename: "src/binding-forms.tsx",
