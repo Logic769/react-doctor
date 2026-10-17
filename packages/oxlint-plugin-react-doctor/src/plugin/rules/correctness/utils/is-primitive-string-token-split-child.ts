@@ -1,11 +1,11 @@
 import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import { getDirectConstInitializer } from "../../../utils/get-direct-const-initializer.js";
-import { getImportDeclarationForSymbol } from "../../../utils/get-import-declaration-for-symbol.js";
 import { getResolvedStaticPropertyName } from "../../../utils/get-resolved-static-property-name.js";
 import { getStaticKeyName } from "../../../utils/get-static-key-name.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
-import { isTypeOnlyImport } from "../../../utils/is-type-only-import.js";
 import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
 import { isWithinAssignmentTarget } from "../../../utils/is-within-assignment-target.js";
 import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
@@ -22,14 +22,25 @@ import {
   PRIMITIVE_SPLIT_CHILD_UNSUPPORTED_GLOBAL_NAMES,
 } from "./constants.js";
 
-const isReadonlyBinding = (symbol: SymbolDescriptor): boolean =>
-  symbol.references.every(
+const readonlyBindings = new WeakMap<SymbolDescriptor, boolean>();
+const stringParameters = new WeakMap<SymbolDescriptor, boolean>();
+const primitiveDictionaries = new WeakMap<SymbolDescriptor, boolean>();
+const unsupportedProviders = new WeakMap<ScopeAnalysis, boolean>();
+const unsupportedTextRows = new WeakMap<EsTreeNode, boolean>();
+
+const isReadonlyBinding = (symbol: SymbolDescriptor): boolean => {
+  const cached = readonlyBindings.get(symbol);
+  if (cached !== undefined) return cached;
+  const readonly = symbol.references.every(
     (reference) =>
       isTypeScriptTypePosition(reference.identifier) ||
       (reference.flag === "read" && !isWithinAssignmentTarget(reference.identifier)),
   );
+  readonlyBindings.set(symbol, readonly);
+  return readonly;
+};
 
-const hasStringParameterAnnotation = (symbol: SymbolDescriptor): boolean => {
+const isReadonlyStringParameter = (symbol: SymbolDescriptor): boolean => {
   if (symbol.kind !== "parameter" || !isReadonlyBinding(symbol)) return false;
   const identifier = symbol.bindingIdentifier;
   if (!isNodeOfType(identifier, "Identifier")) return false;
@@ -66,6 +77,14 @@ const hasStringParameterAnnotation = (symbol: SymbolDescriptor): boolean => {
   );
 };
 
+const hasStringParameterAnnotation = (symbol: SymbolDescriptor): boolean => {
+  const cached = stringParameters.get(symbol);
+  if (cached !== undefined) return cached;
+  const supported = isReadonlyStringParameter(symbol);
+  stringParameters.set(symbol, supported);
+  return supported;
+};
+
 const isDirectLiteralSplit = (expression: EsTreeNode): boolean =>
   isNodeOfType(expression, "CallExpression") &&
   !expression.optional &&
@@ -78,12 +97,8 @@ const isDirectLiteralSplit = (expression: EsTreeNode): boolean =>
   isNodeOfType(expression.arguments[PRIMITIVE_SPLIT_CHILD_FIRST_INDEX], "Literal") &&
   typeof expression.arguments[PRIMITIVE_SPLIT_CHILD_FIRST_INDEX].value === "string";
 
-const isClosedPrimitiveDictionaryAccess = (node: EsTreeNode, scopes: ScopeAnalysis): boolean => {
-  if (!isNodeOfType(node, "MemberExpression")) return false;
-  const receiver = stripParenExpression(node.object);
-  if (!isNodeOfType(receiver, "Identifier")) return false;
-  const symbol = scopes.symbolFor(receiver);
-  if (!symbol || !isReadonlyBinding(symbol)) return false;
+const isClosedPrimitiveDictionary = (symbol: SymbolDescriptor): boolean => {
+  if (!isReadonlyBinding(symbol)) return false;
   const initializer = getDirectConstInitializer(symbol);
   if (
     !isNodeOfType(initializer, "ObjectExpression") ||
@@ -125,7 +140,22 @@ const isClosedPrimitiveDictionaryAccess = (node: EsTreeNode, scopes: ScopeAnalys
   });
 };
 
+const isClosedPrimitiveDictionaryAccess = (node: EsTreeNode, scopes: ScopeAnalysis): boolean => {
+  if (!isNodeOfType(node, "MemberExpression")) return false;
+  const receiver = stripParenExpression(node.object);
+  if (!isNodeOfType(receiver, "Identifier")) return false;
+  const symbol = scopes.symbolFor(receiver);
+  if (!symbol) return false;
+  const cached = primitiveDictionaries.get(symbol);
+  if (cached !== undefined) return cached;
+  const supported = isClosedPrimitiveDictionary(symbol);
+  primitiveDictionaries.set(symbol, supported);
+  return supported;
+};
+
 const hasUnsupportedPrimitiveProvider = (scopes: ScopeAnalysis): boolean => {
+  const cached = unsupportedProviders.get(scopes);
+  if (cached !== undefined) return cached;
   let unsupported = false;
   walkAst(scopes.rootScope.node, (node) => {
     if (unsupported) return false;
@@ -158,14 +188,8 @@ const hasUnsupportedPrimitiveProvider = (scopes: ScopeAnalysis): boolean => {
     }
     if (!isNodeOfType(node, "Identifier") || !scopes.referenceFor(node)) return undefined;
     const symbol = scopes.symbolFor(node);
-    const imported = symbol ? getImportDeclarationForSymbol(symbol) : null;
     if (
-      symbol?.kind === "ts-interface" ||
-      symbol?.kind === "ts-type-alias" ||
-      (imported &&
-        (isTypeOnlyImport(imported) ||
-          (isNodeOfType(symbol?.declarationNode, "ImportSpecifier") &&
-            symbol.declarationNode.importKind === "type"))) ||
+      (symbol && isErasedTypeScriptBinding(symbol) && !hasRuntimeValueBinding(symbol)) ||
       (PRIMITIVE_SPLIT_CHILD_UNSUPPORTED_GLOBAL_NAMES.has(node.name) &&
         scopes.isGlobalReference(node))
     ) {
@@ -174,10 +198,13 @@ const hasUnsupportedPrimitiveProvider = (scopes: ScopeAnalysis): boolean => {
     }
     return undefined;
   });
+  unsupportedProviders.set(scopes, unsupported);
   return unsupported;
 };
 
 const hasUnsupportedTextRow = (jsxElement: EsTreeNode): boolean => {
+  const cached = unsupportedTextRows.get(jsxElement);
+  if (cached !== undefined) return cached;
   let unsupported = false;
   walkAst(jsxElement, (node) => {
     if (unsupported) return false;
@@ -195,6 +222,7 @@ const hasUnsupportedTextRow = (jsxElement: EsTreeNode): boolean => {
     }
     return undefined;
   });
+  unsupportedTextRows.set(jsxElement, unsupported);
   return unsupported;
 };
 
