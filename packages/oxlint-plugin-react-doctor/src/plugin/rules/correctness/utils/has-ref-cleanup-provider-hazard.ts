@@ -5,6 +5,7 @@ import { getImportedName } from "../../../utils/get-imported-name.js";
 import { getResolvedStaticPropertyName } from "../../../utils/get-resolved-static-property-name.js";
 import { getStaticPropertyName } from "../../../utils/get-static-property-name.js";
 import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import {
   isProvenGlobalObjectReference,
@@ -21,7 +22,11 @@ export const hasRefCleanupProviderHazard = (scopes: ScopeAnalysis): boolean => {
     let isErasedGlobalObject = false;
     if (isNodeOfType(child, "Identifier") && scopes.referenceFor(child)) {
       const providerSymbol = scopes.symbolFor(child);
-      if (providerSymbol && isErasedTypeScriptBinding(providerSymbol)) {
+      if (
+        providerSymbol &&
+        isErasedTypeScriptBinding(providerSymbol) &&
+        !hasRuntimeValueBinding(providerSymbol)
+      ) {
         if (["require", "ResizeObserver", "Object", "Reflect", "Function"].includes(child.name)) {
           hasHazard = true;
           return false;
