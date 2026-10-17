@@ -53,6 +53,31 @@ const cases = [
     code: 'const require = () => ({}); interface require {}require("react").useState = () => [0, () => {}];import { useState } from "react";\nexport const Example = (input: unknown) => {\nconst [resultSize, setResultSize] = useState("");\n\nreturn <section>{resultSize && <output>{resultSize}</output>}</section>;\n};',
     expected: 0,
   },
+  {
+    name: "rejects empty namespace provider masking",
+    code: 'namespace require {}require("react").useState = () => [0, () => {}];import { useState } from "react";\nexport const Example = (input: unknown) => {\nconst [resultSize, setResultSize] = useState("");\n\nreturn <section>{resultSize && <output>{resultSize}</output>}</section>;\n};',
+    expected: 1,
+  },
+  {
+    name: "rejects type-only namespace provider masking",
+    code: 'namespace require { export interface Marker {} }require("react").useState = () => [0, () => {}];import { useState } from "react";\nexport const Example = (input: unknown) => {\nconst [resultSize, setResultSize] = useState("");\n\nreturn <section>{resultSize && <output>{resultSize}</output>}</section>;\n};',
+    expected: 1,
+  },
+  {
+    name: "rejects nested type-only namespace provider masking",
+    code: 'namespace require { export namespace Nested { export type Marker = unknown; } }require("react").useState = () => [0, () => {}];import { useState } from "react";\nexport const Example = (input: unknown) => {\nconst [resultSize, setResultSize] = useState("");\n\nreturn <section>{resultSize && <output>{resultSize}</output>}</section>;\n};',
+    expected: 1,
+  },
+  {
+    name: "preserves an inert empty namespace",
+    code: 'namespace require {}import { useState } from "react";\nexport const Example = (input: unknown) => {\nconst [resultSize, setResultSize] = useState("");\n\nreturn <section>{resultSize && <output>{resultSize}</output>}</section>;\n};',
+    expected: 0,
+  },
+  {
+    name: "preserves a genuine runtime namespace",
+    code: 'namespace require { export const marker = 1; } void require;import { useState } from "react";\nexport const Example = (input: unknown) => {\nconst [resultSize, setResultSize] = useState("");\n\nreturn <section>{resultSize && <output>{resultSize}</output>}</section>;\n};',
+    expected: 0,
+  },
 ];
 
 describe("erased runtime provider admission", () => {
