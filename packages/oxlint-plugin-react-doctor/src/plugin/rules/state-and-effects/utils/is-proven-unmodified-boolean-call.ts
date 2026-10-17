@@ -7,6 +7,7 @@ import { getStaticPropertyName } from "../../../utils/get-static-property-name.j
 import { isBindingAssignmentTarget } from "../../../utils/is-binding-assignment-target.js";
 import { isMemberMutationTarget } from "../../../utils/is-member-mutation-target.js";
 import { isNonEscapingReactApiReference } from "../../../utils/is-non-escaping-react-api-reference.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
 import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
@@ -91,7 +92,12 @@ export const isProvenUnmodifiedBooleanCall = (
     const binding = scopes.symbolFor(candidate);
     if (
       !scopes.isGlobalReference(candidate) &&
-      !(binding && scopes.referenceFor(candidate) && isErasedTypeScriptBinding(binding))
+      !(
+        binding &&
+        scopes.referenceFor(candidate) &&
+        isErasedTypeScriptBinding(binding) &&
+        !hasRuntimeValueBinding(binding)
+      )
     )
       return;
     if (

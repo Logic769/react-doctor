@@ -10,6 +10,36 @@ interface NativeBooleanPayloadCase {
 
 const nativeBooleanPayloadCases: NativeBooleanPayloadCase[] = [
   {
+    name: "type-only-namespace-provider",
+    source:
+      'namespace globalThis {export namespace Shape {export interface Marker {}}}\nglobalThis.Boolean=customBoolean;\nimport React from "react";import {useMediaQuery} from "./media";const Panel=({enabled,onChange})=>{const media=useMediaQuery("query");const value=Boolean(enabled)&&media;React.useEffect(()=>{onChange(value);},[value,onChange]);return null;};',
+    diagnosticCount: 1,
+  },
+  {
+    name: "empty-namespace-provider",
+    source:
+      'namespace globalThis {}\nglobalThis.Boolean=customBoolean;\nimport React from "react";import {useMediaQuery} from "./media";const Panel=({enabled,onChange})=>{const media=useMediaQuery("query");const value=Boolean(enabled)&&media;React.useEffect(()=>{onChange(value);},[value,onChange]);return null;};',
+    diagnosticCount: 1,
+  },
+  {
+    name: "runtime-namespace-provider",
+    source:
+      'namespace globalThis {export const marker=true;}\nglobalThis.Boolean=customBoolean;\nimport React from "react";import {useMediaQuery} from "./media";const Panel=({enabled,onChange})=>{const media=useMediaQuery("query");const value=Boolean(enabled)&&media;React.useEffect(()=>{onChange(value);},[value,onChange]);return null;};',
+    diagnosticCount: 0,
+  },
+  {
+    name: "type-import-equals-provider",
+    source:
+      'import type globalThis = require("./types");globalThis.Boolean=customBoolean;\nimport React from "react";import {useMediaQuery} from "./media";const Panel=({enabled,onChange})=>{const media=useMediaQuery("query");const value=Boolean(enabled)&&media;React.useEffect(()=>{onChange(value);},[value,onChange]);return null;};',
+    diagnosticCount: 1,
+  },
+  {
+    name: "local-interface-provider",
+    source:
+      'const globalThis={Boolean:customBoolean};interface globalThis {}globalThis.Boolean=customBoolean;\nimport React from "react";import {useMediaQuery} from "./media";const Panel=({enabled,onChange})=>{const media=useMediaQuery("query");const value=Boolean(enabled)&&media;React.useEffect(()=>{onChange(value);},[value,onChange]);return null;};',
+    diagnosticCount: 0,
+  },
+  {
     name: "erased-interface-global-provider",
     source:
       'interface globalThis {} globalThis.Boolean=customBoolean;import React from "react";import {useMediaQuery} from "./media";const Panel=({enabled,onChange})=>{const media=useMediaQuery("query");const value=Boolean(enabled)&&media;React.useEffect(()=>{onChange(value);},[value,onChange]);return null;};',
