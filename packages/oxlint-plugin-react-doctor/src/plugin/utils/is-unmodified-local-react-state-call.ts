@@ -16,6 +16,7 @@ import { getStaticPropertyName } from "./get-static-property-name.js";
 import { hasReactDefaultProviderMutation } from "./has-react-default-provider-mutation.js";
 import { hasPossibleStaticPropertyMutationOrEscape } from "./has-static-property-write-before.js";
 import { isBindingAssignmentTarget } from "./is-binding-assignment-target.js";
+import { hasRuntimeValueBinding } from "./has-runtime-value-binding.js";
 import { isErasedTypeScriptBinding } from "./is-erased-typescript-binding.js";
 import { isMemberMutationTarget } from "./is-member-mutation-target.js";
 import { isNodeOfType } from "./is-node-of-type.js";
@@ -110,7 +111,12 @@ export const isUnmodifiedLocalReactStateCall = (
     if (hasProviderHazard) return false;
     if (isNodeOfType(child, "Identifier") && PROVIDER_GLOBAL_NAMES.has(child.name)) {
       const binding = scopes.symbolFor(child);
-      if (binding && scopes.referenceFor(child) && isErasedTypeScriptBinding(binding)) {
+      if (
+        binding &&
+        scopes.referenceFor(child) &&
+        isErasedTypeScriptBinding(binding) &&
+        !hasRuntimeValueBinding(binding)
+      ) {
         hasProviderHazard = true;
         return false;
       }
