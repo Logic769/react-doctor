@@ -2,6 +2,28 @@ import { describe, expect, it } from "vite-plus/test";
 import { runRule } from "../../../test-utils/run-rule.js";
 import { noSetStateAfterAwaitInEffect } from "./no-set-state-after-await-in-effect.js";
 
+describe("erased native ref loader providers", () => {
+  const source =
+    'import {useEffect,useRef,useState} from "react"; const Panel=({id,load})=>{const[value,setValue]=useState(null);const sequence=useRef(0);const callback=async()=>{const snapshot=sequence.current;await load(id);if(snapshot===sequence.current)setValue(id);};const holder=useRef(callback);useEffect(()=>{holder.current=callback;},[callback]);useEffect(()=>{sequence.current++;callback();},[id]);return <output>{value}</output>;};';
+  it.each([
+    'declare const require: any; require("react").useRef=customRef;',
+    'declare function require(source: string): any; require("react").useRef=customRef;',
+    'declare const require: any; (require as any)("react").useRef=customRef;',
+  ])("retains a runtime provider replacement through %s", (exposure) => {
+    const result = runRule(noSetStateAfterAwaitInEffect, `${exposure}${source}`);
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(1);
+  });
+  it.each(["declare const require: any;", 'const require=()=>({});require("metadata");'])(
+    "allows inert declarations and real local loaders: %s",
+    (metadata) => {
+      const result = runRule(noSetStateAfterAwaitInEffect, `${metadata}${source}`);
+      expect(result.parseErrors).toEqual([]);
+      expect(result.diagnostics).toHaveLength(0);
+    },
+  );
+});
+
 describe("no-set-state-after-await-in-effect", () => {
   it("flags a declared-then-called inner async function that sets state after await", () => {
     const result = runRule(

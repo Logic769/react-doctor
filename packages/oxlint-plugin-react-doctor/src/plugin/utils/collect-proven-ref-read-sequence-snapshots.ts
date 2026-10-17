@@ -19,6 +19,7 @@ import { getImportedName } from "./get-imported-name.js";
 import { getStaticPropertyName } from "./get-static-property-name.js";
 import { hasReactDefaultProviderMutation } from "./has-react-default-provider-mutation.js";
 import { isBindingAssignmentTarget } from "./is-binding-assignment-target.js";
+import { isErasedTypeScriptBinding } from "./is-erased-typescript-binding.js";
 import { isFunctionLike } from "./is-function-like.js";
 import { isMemberMutationTarget } from "./is-member-mutation-target.js";
 import { isNodeOfType } from "./is-node-of-type.js";
@@ -302,6 +303,13 @@ export const collectProvenRefReadSequenceSnapshots = ({
   while (program.parent) program = program.parent;
   let hasEvalOrReactRequire = false;
   walkAst(program, (node) => {
+    if (isNodeOfType(node, "Identifier") && node.name === "require") {
+      const binding = context.scopes.symbolFor(node);
+      if (binding && context.scopes.referenceFor(node) && isErasedTypeScriptBinding(binding)) {
+        hasEvalOrReactRequire = true;
+        return false;
+      }
+    }
     if (!isNodeOfType(node, "CallExpression")) return;
     if (
       (isNodeOfType(node.callee, "Identifier") && node.callee.name === "eval") ||

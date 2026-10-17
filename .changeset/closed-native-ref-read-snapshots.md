@@ -5,3 +5,5 @@
 ---
 
 Avoid state-after-await warnings for readonly scalar snapshots of a closed native ref counter when a synchronous native effect increments it before any other statement and every callback invocation follows that increment.
+
+Preserve runtime React loader exposure checks when TypeScript-only ambient declarations erase the apparent loader binding.
