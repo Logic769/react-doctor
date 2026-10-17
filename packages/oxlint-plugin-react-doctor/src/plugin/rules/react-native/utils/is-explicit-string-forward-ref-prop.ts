@@ -1,3 +1,8 @@
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
+import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
+import { getStaticPropertyName } from "../../../utils/get-static-property-name.js";
+import { isProvenGlobalNamespaceReference } from "../../../utils/is-proven-global-namespace-reference.js";
 import type { ScopeAnalysis, ScopeDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
@@ -16,6 +21,8 @@ import {
   FORWARD_REF_MAX_PARAMETER_COUNT,
   SINGLE_STRING_PROP_DECLARATION_COUNT,
   STRING_PROP_RUNTIME_TYPESCRIPT_NODES,
+  STRING_PROP_PROVIDER_HAZARD_NAMES,
+  STRING_PROP_GLOBAL_CARRIER_NAMES,
 } from "./constants.js";
 
 export const isExplicitStringForwardRefProp = (
@@ -153,6 +160,54 @@ export const isExplicitStringForwardRefProp = (
       return false;
     }
     if (isTypeScriptTypePosition(node)) return false;
+    if (isNodeOfType(node, "Identifier")) {
+      const binding = scopes.symbolFor(node);
+      const reference = findTransparentExpressionRoot(node);
+      const parent = reference.parent;
+      const isCarrier = STRING_PROP_GLOBAL_CARRIER_NAMES.has(node.name);
+      const isCarrierMember =
+        isNodeOfType(parent, "MemberExpression") && parent.object === reference;
+      const memberName = isCarrierMember ? getStaticPropertyName(parent) : null;
+      const isHarmlessCarrierCheck =
+        isNodeOfType(parent, "UnaryExpression") &&
+        (parent.operator === "typeof" || parent.operator === "void");
+      const exposesProvider = isCarrier
+        ? isCarrierMember
+          ? memberName === null || STRING_PROP_PROVIDER_HAZARD_NAMES.includes(memberName)
+          : !isHarmlessCarrierCheck
+        : STRING_PROP_PROVIDER_HAZARD_NAMES.includes(node.name);
+      if (
+        exposesProvider &&
+        binding?.bindingIdentifier !== node &&
+        (scopes.isGlobalReference(node) ||
+          Boolean(
+            binding && isErasedTypeScriptBinding(binding) && !hasRuntimeValueBinding(binding),
+          ))
+      ) {
+        hasUnsupportedRuntime = true;
+        return false;
+      }
+    }
+    if (
+      isNodeOfType(node, "ImportExpression") ||
+      (isNodeOfType(node, "ImportDeclaration") &&
+        !isTypeOnlyImport(node) &&
+        (node.source.value === "module" || node.source.value === "node:module")) ||
+      (isNodeOfType(node, "MemberExpression") &&
+        (getStaticPropertyName(node) === "constructor" ||
+          getStaticPropertyName(node) === "__proto__")) ||
+      (isNodeOfType(node, "Property") &&
+        isNodeOfType(node.parent, "ObjectPattern") &&
+        (getStaticKeyName(node.key) === "constructor" ||
+          getStaticKeyName(node.key) === "__proto__")) ||
+      STRING_PROP_PROVIDER_HAZARD_NAMES.some((name) =>
+        isProvenGlobalNamespaceReference(node, name, scopes),
+      )
+    ) {
+      hasUnsupportedRuntime = true;
+      return false;
+    }
+
     if (
       isNodeOfType(node, "ImportDeclaration") &&
       node.source.value === declaration.source.value &&
@@ -211,14 +266,6 @@ export const isExplicitStringForwardRefProp = (
           }
         }
       }
-    }
-    if (
-      isNodeOfType(node, "Identifier") &&
-      node.name === "eval" &&
-      scopes.isGlobalReference(node)
-    ) {
-      hasUnsupportedRuntime = true;
-      return false;
     }
     return undefined;
   });

@@ -7,3 +7,17 @@ export const STRING_PROP_RUNTIME_TYPESCRIPT_NODES: ReadonlySet<string> = new Set
   "TSExportAssignment",
   "TSParameterProperty",
 ]);
+
+export const STRING_PROP_PROVIDER_HAZARD_NAMES: ReadonlyArray<string> = [
+  "React",
+  "require",
+  "module",
+  "Function",
+  "eval",
+];
+export const STRING_PROP_GLOBAL_CARRIER_NAMES: ReadonlySet<string> = new Set([
+  "globalThis",
+  "window",
+  "self",
+  "global",
+]);
