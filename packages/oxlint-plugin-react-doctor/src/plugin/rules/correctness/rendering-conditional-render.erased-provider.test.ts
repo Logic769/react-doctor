@@ -38,6 +38,21 @@ const cases = [
     code: 'declare const Array:any; declare const Symbol:any;Array.prototype[Symbol.iterator] = function* () { yield 0; yield () => {}; };import { useState } from "react";\nexport const Example = (input: unknown) => {\nconst [resultSize, setResultSize] = useState("");\n\nreturn <section>{resultSize && <output>{resultSize}</output>}</section>;\n};',
     expected: 1,
   },
+  {
+    name: "rejects type-only import-equals provider rewrites",
+    code: 'import type require = require("provider-types");require("react").useState = () => [0, () => {}];import { useState } from "react";\nexport const Example = (input: unknown) => {\nconst [resultSize, setResultSize] = useState("");\n\nreturn <section>{resultSize && <output>{resultSize}</output>}</section>;\n};',
+    expected: 1,
+  },
+  {
+    name: "preserves genuine import-equals value binding",
+    code: 'import require = require("provider-values");require("react").useState = () => [0, () => {}];import { useState } from "react";\nexport const Example = (input: unknown) => {\nconst [resultSize, setResultSize] = useState("");\n\nreturn <section>{resultSize && <output>{resultSize}</output>}</section>;\n};',
+    expected: 0,
+  },
+  {
+    name: "preserves genuine value binding with merged interface",
+    code: 'const require = () => ({}); interface require {}require("react").useState = () => [0, () => {}];import { useState } from "react";\nexport const Example = (input: unknown) => {\nconst [resultSize, setResultSize] = useState("");\n\nreturn <section>{resultSize && <output>{resultSize}</output>}</section>;\n};',
+    expected: 0,
+  },
 ];
 
 describe("erased runtime provider admission", () => {

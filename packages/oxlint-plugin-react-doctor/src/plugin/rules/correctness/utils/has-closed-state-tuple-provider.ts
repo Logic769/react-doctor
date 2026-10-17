@@ -1,3 +1,4 @@
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
 import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
@@ -41,7 +42,12 @@ export const hasClosedStateTupleProvider = (scopes: ScopeAnalysis): boolean => {
         (providerName && ["Array", "Symbol", "Object", "Reflect"].includes(providerName))
           ? scopes.symbolFor(node)
           : null;
-      if (symbol && symbol.bindingIdentifier !== node && isErasedTypeScriptBinding(symbol)) {
+      if (
+        symbol &&
+        symbol.bindingIdentifier !== node &&
+        isErasedTypeScriptBinding(symbol) &&
+        !hasRuntimeValueBinding(symbol)
+      ) {
         closed = false;
         return false;
       }
