@@ -7,9 +7,12 @@ import { getResolvedStaticPropertyName } from "../../../utils/get-resolved-stati
 import { getStaticKeyName } from "../../../utils/get-static-key-name.js";
 import { getStaticPropertyName } from "../../../utils/get-static-property-name.js";
 import { getValueImportDeclaration } from "../../../utils/get-value-import-declaration.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
 import { isWithinAssignmentTarget } from "../../../utils/is-within-assignment-target.js";
+import type { ResolvedCrossFileValueExport } from "../../../utils/resolve-cross-file-function-export.js";
 import { resolveCrossFileValueExportWithFilePath } from "../../../utils/resolve-cross-file-function-export.js";
 import { resolveModulePath } from "../../../utils/resolve-module-path.js";
 import type { RuleContext } from "../../../utils/rule-context.js";
@@ -29,7 +32,75 @@ interface ImportedBundledImageSourcesInput {
   bundledAssetSourcePattern: RegExp;
 }
 
-const isSupportedAssetProgram = (scopes: ScopeAnalysis): boolean => {
+interface ImportedAssetAliasIndex {
+  named: ReadonlyMap<string, ReadonlyMap<string, readonly SymbolDescriptor[]>>;
+  exposedModules: ReadonlySet<string>;
+}
+
+const runtimeBindingCounts = new WeakMap<ScopeAnalysis, ReadonlyMap<string, number>>();
+const importedAliasIndexes = new WeakMap<ScopeAnalysis, ImportedAssetAliasIndex>();
+
+const getRuntimeBindingCounts = (scopes: ScopeAnalysis): ReadonlyMap<string, number> => {
+  const cached = runtimeBindingCounts.get(scopes);
+  if (cached) return cached;
+  const counts = new Map<string, number>();
+  for (const symbol of scopes.rootScope.symbols) {
+    if (!isErasedTypeScriptBinding(symbol))
+      counts.set(symbol.name, (counts.get(symbol.name) ?? 0) + 1);
+  }
+  runtimeBindingCounts.set(scopes, counts);
+  return counts;
+};
+
+const getImportedAssetAliasIndex = (
+  filename: string,
+  scopes: ScopeAnalysis,
+): ImportedAssetAliasIndex => {
+  const cached = importedAliasIndexes.get(scopes);
+  if (cached) return cached;
+  const named = new Map<string, Map<string, SymbolDescriptor[]>>();
+  const exposedModules = new Set<string>();
+  for (const alias of scopes.rootScope.symbols) {
+    const declaration = getValueImportDeclaration(alias);
+    if (
+      !isNodeOfType(declaration, "ImportDeclaration") ||
+      typeof declaration.source.value !== "string"
+    )
+      continue;
+    const filePath = resolveModulePath(filename, declaration.source.value);
+    if (!filePath) continue;
+    const binding = alias.declarationNode;
+    if (!isNodeOfType(binding, "ImportSpecifier")) {
+      if (alias.references.some((reference) => !isTypeScriptTypePosition(reference.identifier)))
+        exposedModules.add(filePath);
+      continue;
+    }
+    const exportedName = getImportedName(binding);
+    if (!exportedName) continue;
+    let byExportName = named.get(filePath);
+    if (!byExportName) {
+      byExportName = new Map();
+      named.set(filePath, byExportName);
+    }
+    const aliases = byExportName.get(exportedName);
+    if (aliases) aliases.push(alias);
+    else byExportName.set(exportedName, [alias]);
+  }
+  const index = { named, exposedModules };
+  importedAliasIndexes.set(scopes, index);
+  return index;
+};
+
+const supportedAssetPrograms = new WeakMap<ScopeAnalysis, boolean>();
+const exporterAnalyses = new WeakMap<EsTreeNode, ScopeAnalysis>();
+const exportedMapKeys = new WeakMap<EsTreeNode, ReadonlySet<string> | null>();
+const importedMapKeys = new WeakMap<SymbolDescriptor, ReadonlySet<string> | null>();
+const importedMapProofs = new WeakMap<
+  ScopeAnalysis,
+  WeakMap<EsTreeNode, ReadonlySet<string> | null>
+>();
+
+const hasSupportedAssetProgram = (scopes: ScopeAnalysis): boolean => {
   let supported = true;
   walkAst(scopes.rootScope.node, (node) => {
     if (!supported) return false;
@@ -59,9 +130,7 @@ const isSupportedAssetProgram = (scopes: ScopeAnalysis): boolean => {
       return undefined;
     const symbol = scopes.symbolFor(node);
     if (
-      symbol?.kind === "ts-interface" ||
-      symbol?.kind === "ts-type-alias" ||
-      (symbol?.kind === "import" && !getValueImportDeclaration(symbol)) ||
+      (symbol && isErasedTypeScriptBinding(symbol) && !hasRuntimeValueBinding(symbol)) ||
       node.name === "arguments" ||
       (IMPORTED_IMAGE_UNSUPPORTED_GLOBAL_NAMES.has(node.name) && scopes.isGlobalReference(node))
     ) {
@@ -89,6 +158,14 @@ const isSupportedAssetProgram = (scopes: ScopeAnalysis): boolean => {
       return false;
   }
   return true;
+};
+
+const isSupportedAssetProgram = (scopes: ScopeAnalysis): boolean => {
+  const cached = supportedAssetPrograms.get(scopes);
+  if (cached !== undefined) return cached;
+  const supported = hasSupportedAssetProgram(scopes);
+  supportedAssetPrograms.set(scopes, supported);
+  return supported;
 };
 
 const hasOnlyReadonlyMapMembers = (symbol: SymbolDescriptor, keys: ReadonlySet<string>): boolean =>
@@ -119,6 +196,156 @@ const isOnlyJsxImageReference = (symbol: SymbolDescriptor): boolean =>
       parent.name === identifier
     );
   });
+
+const findExportedBundledMapKeys = (
+  resolved: ResolvedCrossFileValueExport,
+  exportedName: string,
+  bundledAssetSourcePattern: RegExp,
+): ReadonlySet<string> | null => {
+  const object = resolved.exportedNode;
+  if (!isNodeOfType(object, "ObjectExpression")) return null;
+  const objectRoot = findTransparentExpressionRoot(object);
+  const declaration = objectRoot.parent;
+  if (
+    !isNodeOfType(declaration, "VariableDeclarator") ||
+    declaration.init !== objectRoot ||
+    !isNodeOfType(declaration.id, "Identifier") ||
+    declaration.id.name !== exportedName ||
+    !isNodeOfType(declaration.parent, "VariableDeclaration") ||
+    declaration.parent.kind !== "const" ||
+    !isNodeOfType(declaration.parent.parent, "ExportNamedDeclaration")
+  )
+    return null;
+  let exporterScopes = exporterAnalyses.get(resolved.programNode);
+  if (!exporterScopes) {
+    exporterScopes = analyzeScopes(resolved.programNode);
+    exporterAnalyses.set(resolved.programNode, exporterScopes);
+  }
+  const exportedMap = exporterScopes.symbolFor(declaration.id);
+  if (
+    !exportedMap ||
+    exporterScopes.scopeFor(declaration) !== exporterScopes.rootScope ||
+    !isSupportedAssetProgram(exporterScopes) ||
+    getRuntimeBindingCounts(exporterScopes).get(exportedName) !== IMPORTED_IMAGE_SINGLE_ITEM_COUNT
+  )
+    return null;
+  const keys = new Set<string>();
+  for (const property of object.properties) {
+    if (
+      !isNodeOfType(property, "Property") ||
+      property.computed ||
+      property.method ||
+      property.kind !== "init" ||
+      !isNodeOfType(stripParenExpression(property.value), "Identifier")
+    )
+      return null;
+    const propertyName = getStaticKeyName(property.key);
+    const asset = exporterScopes.symbolFor(stripParenExpression(property.value));
+    const assetImport = asset ? getValueImportDeclaration(asset) : null;
+    if (
+      propertyName === null ||
+      keys.has(propertyName) ||
+      !asset ||
+      !isNodeOfType(asset.declarationNode, "ImportDefaultSpecifier") ||
+      !isNodeOfType(assetImport, "ImportDeclaration") ||
+      typeof assetImport.source.value !== "string" ||
+      !bundledAssetSourcePattern.test(assetImport.source.value) ||
+      asset.references.some((reference) => {
+        if (isTypeScriptTypePosition(reference.identifier)) return false;
+        const root = findTransparentExpressionRoot(reference.identifier);
+        const parent = root.parent;
+        return (
+          reference.flag !== "read" ||
+          isWithinAssignmentTarget(reference.identifier) ||
+          !isNodeOfType(parent, "Property") ||
+          parent.parent !== object ||
+          (parent.value !== root && !(parent.shorthand && parent.key === root))
+        );
+      })
+    )
+      return null;
+    keys.add(propertyName);
+  }
+  if (!hasOnlyReadonlyMapMembers(exportedMap, keys)) return null;
+  return keys;
+};
+
+const getExportedBundledMapKeys = (
+  resolved: ResolvedCrossFileValueExport,
+  exportedName: string,
+  bundledAssetSourcePattern: RegExp,
+): ReadonlySet<string> | null => {
+  const cached = exportedMapKeys.get(resolved.exportedNode);
+  if (cached !== undefined) return cached;
+  const keys = findExportedBundledMapKeys(resolved, exportedName, bundledAssetSourcePattern);
+  exportedMapKeys.set(resolved.exportedNode, keys);
+  return keys;
+};
+
+const findImportedBundledMapKeys = (
+  map: SymbolDescriptor,
+  filename: string,
+  scopes: ScopeAnalysis,
+  bundledAssetSourcePattern: RegExp,
+): ReadonlySet<string> | null => {
+  const imported = getValueImportDeclaration(map);
+  if (
+    !isNodeOfType(map.declarationNode, "ImportSpecifier") ||
+    !isNodeOfType(imported, "ImportDeclaration") ||
+    typeof imported.source.value !== "string"
+  )
+    return null;
+  const exportedName = getImportedName(map.declarationNode);
+  if (!exportedName) return null;
+  const directPath = resolveModulePath(filename, imported.source.value);
+  const resolved = resolveCrossFileValueExportWithFilePath(
+    filename,
+    imported.source.value,
+    exportedName,
+  );
+  if (
+    !directPath ||
+    !resolved ||
+    resolved.filePath !== directPath ||
+    !isNodeOfType(resolved.exportedNode, "ObjectExpression")
+  )
+    return null;
+  let proofs = importedMapProofs.get(scopes);
+  if (!proofs) {
+    proofs = new WeakMap();
+    importedMapProofs.set(scopes, proofs);
+  }
+  const cached = proofs.get(resolved.exportedNode);
+  if (cached !== undefined) return cached;
+  const keys = getExportedBundledMapKeys(resolved, exportedName, bundledAssetSourcePattern);
+  if (!keys) return null;
+  const aliases = getImportedAssetAliasIndex(filename, scopes);
+  if (aliases.exposedModules.has(directPath)) {
+    proofs.set(resolved.exportedNode, null);
+    return null;
+  }
+  for (const alias of aliases.named.get(directPath)?.get(exportedName) ?? []) {
+    if (!hasOnlyReadonlyMapMembers(alias, keys)) {
+      proofs.set(resolved.exportedNode, null);
+      return null;
+    }
+  }
+  proofs.set(resolved.exportedNode, keys);
+  return keys;
+};
+
+const getImportedBundledMapKeys = (
+  map: SymbolDescriptor,
+  filename: string,
+  scopes: ScopeAnalysis,
+  bundledAssetSourcePattern: RegExp,
+): ReadonlySet<string> | null => {
+  const cached = importedMapKeys.get(map);
+  if (cached !== undefined) return cached;
+  const keys = findImportedBundledMapKeys(map, filename, scopes, bundledAssetSourcePattern);
+  importedMapKeys.set(map, keys);
+  return keys;
+};
 
 export const hasOnlyImportedBundledImageSources = ({
   specifier,
@@ -158,108 +385,14 @@ export const hasOnlyImportedBundledImageSources = ({
     if (!isNodeOfType(mapIdentifier, "Identifier")) return false;
     const key = getStaticPropertyName(member);
     const map = scopes.symbolFor(mapIdentifier);
-    const imported = map ? getValueImportDeclaration(map) : null;
-    if (
-      !key ||
-      !map ||
-      !isNodeOfType(map.declarationNode, "ImportSpecifier") ||
-      !isNodeOfType(imported, "ImportDeclaration") ||
-      typeof imported.source.value !== "string"
-    )
-      return false;
-    const exportedName = getImportedName(map.declarationNode);
-    if (!exportedName) return false;
-    const directPath = resolveModulePath(context.filename, imported.source.value);
-    const resolved = resolveCrossFileValueExportWithFilePath(
+    if (!key || !map) return false;
+    const keys = getImportedBundledMapKeys(
+      map,
       context.filename,
-      imported.source.value,
-      exportedName,
+      scopes,
+      bundledAssetSourcePattern,
     );
-    if (
-      !resolved ||
-      resolved.filePath !== directPath ||
-      !isNodeOfType(resolved.exportedNode, "ObjectExpression")
-    )
-      return false;
-    const object = resolved.exportedNode;
-    const objectRoot = findTransparentExpressionRoot(object);
-    const declaration = objectRoot.parent;
-    if (
-      !isNodeOfType(declaration, "VariableDeclarator") ||
-      declaration.init !== objectRoot ||
-      !isNodeOfType(declaration.id, "Identifier") ||
-      declaration.id.name !== exportedName ||
-      !isNodeOfType(declaration.parent, "VariableDeclaration") ||
-      declaration.parent.kind !== "const" ||
-      !isNodeOfType(declaration.parent.parent, "ExportNamedDeclaration")
-    )
-      return false;
-    const exporterScopes = analyzeScopes(resolved.programNode);
-    const exportedMap = exporterScopes.symbolFor(declaration.id);
-    if (
-      !exportedMap ||
-      exporterScopes.scopeFor(declaration) !== exporterScopes.rootScope ||
-      !isSupportedAssetProgram(exporterScopes) ||
-      exporterScopes.rootScope.symbols.filter((symbol) => symbol.name === exportedName).length !==
-        IMPORTED_IMAGE_SINGLE_ITEM_COUNT
-    )
-      return false;
-    const keys = new Set<string>();
-    for (const property of object.properties) {
-      if (
-        !isNodeOfType(property, "Property") ||
-        property.computed ||
-        property.method ||
-        property.kind !== "init" ||
-        !isNodeOfType(stripParenExpression(property.value), "Identifier")
-      )
-        return false;
-      const propertyName = getStaticKeyName(property.key);
-      const asset = exporterScopes.symbolFor(stripParenExpression(property.value));
-      const assetImport = asset ? getValueImportDeclaration(asset) : null;
-      if (
-        propertyName === null ||
-        keys.has(propertyName) ||
-        !asset ||
-        !isNodeOfType(asset.declarationNode, "ImportDefaultSpecifier") ||
-        !isNodeOfType(assetImport, "ImportDeclaration") ||
-        typeof assetImport.source.value !== "string" ||
-        !bundledAssetSourcePattern.test(assetImport.source.value) ||
-        asset.references.some((reference) => {
-          if (isTypeScriptTypePosition(reference.identifier)) return false;
-          const root = findTransparentExpressionRoot(reference.identifier);
-          const parent = root.parent;
-          return (
-            reference.flag !== "read" ||
-            isWithinAssignmentTarget(reference.identifier) ||
-            !isNodeOfType(parent, "Property") ||
-            parent.parent !== object ||
-            (parent.value !== root && !(parent.shorthand && parent.key === root))
-          );
-        })
-      )
-        return false;
-      keys.add(propertyName);
-    }
-    if (!keys.has(key) || !hasOnlyReadonlyMapMembers(exportedMap, keys)) return false;
-    for (const alias of scopes.rootScope.symbols) {
-      const aliasImport = getValueImportDeclaration(alias);
-      if (
-        !isNodeOfType(aliasImport, "ImportDeclaration") ||
-        typeof aliasImport.source.value !== "string" ||
-        resolveModulePath(context.filename, aliasImport.source.value) !== directPath
-      )
-        continue;
-      const binding = alias.declarationNode;
-      if (!isNodeOfType(binding, "ImportSpecifier")) {
-        if (alias.references.some((reference) => !isTypeScriptTypePosition(reference.identifier)))
-          return false;
-      } else if (
-        getImportedName(binding) === exportedName &&
-        !hasOnlyReadonlyMapMembers(alias, keys)
-      )
-        return false;
-    }
+    if (!keys?.has(key)) return false;
   }
   return true;
 };

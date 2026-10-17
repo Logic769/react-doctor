@@ -17,6 +17,7 @@ export const IMPORTED_IMAGE_UNSUPPORTED_GLOBAL_NAMES = new Set([
   "self",
   "global",
   "require",
+  "module",
 ]);
 export const IMPORTED_IMAGE_UNSUPPORTED_MEMBER_NAMES = new Set([
   "prototype",
