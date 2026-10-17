@@ -1,4 +1,4 @@
-import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
+import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
 import { getDirectConstInitializer } from "../../../utils/get-direct-const-initializer.js";
@@ -13,7 +13,9 @@ import { NO_VALUE_COUNT } from "./callback-map-snapshot/constants.js";
 import { getExternalReferenceKey } from "./has-equivalent-null-detach-action.js";
 import { isReadonlyCallbackMapSymbol as isReadonly } from "./is-readonly-callback-map-symbol.js";
 
-const hasReadonlyKeyPathAliases = (
+const readonlyKeyPaths = new WeakMap<SymbolDescriptor, Map<string, boolean>>();
+
+const proveReadonlyKeyPathAliases = (
   root: EsTreeNode,
   selectedPath: readonly string[],
   scopes: ScopeAnalysis,
@@ -68,6 +70,9 @@ const hasReadonlyKeyPathAliases = (
         }
         pendingSymbols.push(...aliases);
       } else if (
+        isNodeOfType(parent, "CallExpression") ||
+        isNodeOfType(parent, "NewExpression") ||
+        isNodeOfType(parent, "TaggedTemplateExpression") ||
         isNodeOfType(parent, "AssignmentExpression") ||
         isNodeOfType(parent, "LogicalExpression") ||
         isNodeOfType(parent, "ConditionalExpression") ||
@@ -84,6 +89,26 @@ const hasReadonlyKeyPathAliases = (
   return true;
 };
 
+const hasReadonlyKeyPathAliases = (
+  root: EsTreeNode,
+  selectedPath: readonly string[],
+  scopes: ScopeAnalysis,
+): boolean => {
+  const symbol = scopes.symbolFor(root);
+  if (!symbol) return false;
+  let paths = readonlyKeyPaths.get(symbol);
+  if (!paths) {
+    paths = new Map();
+    readonlyKeyPaths.set(symbol, paths);
+  }
+  const path = JSON.stringify(selectedPath);
+  const cached = paths.get(path);
+  if (cached !== undefined) return cached;
+  const readonly = proveReadonlyKeyPathAliases(root, selectedPath, scopes);
+  paths.set(path, readonly);
+  return readonly;
+};
+
 export const getStableCallbackMapKey = (
   key: EsTreeNode,
   callback: EsTreeNode,
@@ -98,15 +123,7 @@ export const getStableCallbackMapKey = (
   while (isNodeOfType(root, "MemberExpression")) root = stripParenExpression(root.object);
   if (!isNodeOfType(root, "Identifier")) return null;
   const equivalents = getEquivalentSymbols(root, scopes);
-  if (
-    !equivalents.length ||
-    equivalents.some(
-      (symbol) =>
-        !isReadonly(symbol) ||
-        symbol.references.some(({ identifier }) => isWithinAssignmentTarget(identifier)),
-    )
-  )
-    return null;
+  if (!equivalents.length || equivalents.some((symbol) => !isReadonly(symbol))) return null;
   for (const symbol of equivalents) {
     const initializer = symbol.initializer && stripParenExpression(symbol.initializer);
     if (

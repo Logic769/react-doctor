@@ -3,17 +3,81 @@ import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
 import { getImportedName } from "../../../utils/get-imported-name.js";
 import { getResolvedStaticPropertyName } from "../../../utils/get-resolved-static-property-name.js";
+import { getStaticStringExpression } from "../../../utils/get-static-string-expression.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
+import { isMemberMutationTarget } from "../../../utils/is-member-mutation-target.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { isImportedFromReact, isReactNamespaceImport } from "../../../utils/is-react-api-call.js";
 import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
 import { isWithinAssignmentTarget } from "../../../utils/is-within-assignment-target.js";
 import { walkAst } from "../../../utils/walk-ast.js";
 import {
+  NO_VALUE_COUNT,
+  SINGLE_VALUE_COUNT,
   UNSUPPORTED_PROVIDER_GLOBALS,
   UNSUPPORTED_PROVIDER_SELECTORS,
   UNSUPPORTED_RUNTIME_TYPES,
 } from "./callback-map-snapshot/constants.js";
 import { isReadonlyCallbackMapSymbol as isReadonly } from "./is-readonly-callback-map-symbol.js";
+
+const emptyPermissions: ReadonlySet<EsTreeNode> = new Set();
+const supportedPrograms = new WeakMap<ScopeAnalysis, WeakMap<ReadonlySet<EsTreeNode>, boolean>>();
+
+export const isRuntimeGlobalReference = (
+  identifier: EsTreeNode,
+  scopes: ScopeAnalysis,
+): boolean => {
+  if (scopes.isGlobalReference(identifier)) return true;
+  const symbol = scopes.symbolFor(identifier);
+  return Boolean(symbol && isErasedTypeScriptBinding(symbol) && !hasRuntimeValueBinding(symbol));
+};
+
+const hasReadonlyLoadedReactUse = (expression: EsTreeNode, scopes: ScopeAnalysis): boolean => {
+  let current = findTransparentExpressionRoot(expression);
+  while (isNodeOfType(current.parent, "MemberExpression") && current.parent.object === current) {
+    const member = current.parent;
+    if (getResolvedStaticPropertyName(member, scopes) === null || isMemberMutationTarget(member))
+      return false;
+    current = findTransparentExpressionRoot(member);
+  }
+  const parent = current.parent;
+  return (
+    isNodeOfType(parent, "ExpressionStatement") ||
+    (isNodeOfType(parent, "UnaryExpression") &&
+      (parent.operator === "typeof" || parent.operator === "void")) ||
+    (isNodeOfType(parent, "CallExpression") && parent.callee === current && !parent.optional)
+  );
+};
+
+const hasSupportedLoaderUse = (identifier: EsTreeNode, scopes: ScopeAnalysis): boolean => {
+  if (!isNodeOfType(identifier, "Identifier")) return false;
+  const root = findTransparentExpressionRoot(identifier);
+  if (
+    isNodeOfType(root.parent, "UnaryExpression") &&
+    (root.parent.operator === "typeof" || root.parent.operator === "void")
+  )
+    return true;
+  const callee =
+    identifier.name === "module" &&
+    isNodeOfType(root.parent, "MemberExpression") &&
+    root.parent.object === root &&
+    !root.parent.optional &&
+    getResolvedStaticPropertyName(root.parent, scopes) === "require"
+      ? findTransparentExpressionRoot(root.parent)
+      : root;
+  const call = callee.parent;
+  if (
+    !isNodeOfType(call, "CallExpression") ||
+    call.optional ||
+    call.callee !== callee ||
+    call.arguments.length !== SINGLE_VALUE_COUNT ||
+    (identifier.name === "module" && callee === root)
+  )
+    return false;
+  const source = getStaticStringExpression(call.arguments[NO_VALUE_COUNT]);
+  return Boolean(source && (source !== "react" || hasReadonlyLoadedReactUse(call, scopes)));
+};
 
 const isDirectInvocation = (node: EsTreeNode): boolean => {
   const expression = findTransparentExpressionRoot(node);
@@ -109,8 +173,15 @@ const hasClosedReactProvider = (
 
 export const hasSupportedCallbackMapProgram = (
   scopes: ScopeAnalysis,
-  allowedNodes: ReadonlySet<EsTreeNode> = new Set(),
+  allowedNodes: ReadonlySet<EsTreeNode> = emptyPermissions,
 ): boolean => {
+  let permissions = supportedPrograms.get(scopes);
+  if (!permissions) {
+    permissions = new WeakMap();
+    supportedPrograms.set(scopes, permissions);
+  }
+  const cached = permissions.get(allowedNodes);
+  if (cached !== undefined) return cached;
   let supported = true;
   const checkedReactSymbols = new Set<number>();
   walkAst(scopes.rootScope.node, (node) => {
@@ -123,12 +194,19 @@ export const hasSupportedCallbackMapProgram = (
     if (isNodeOfType(node, "Identifier")) {
       const reference = scopes.referenceFor(node);
       const symbol = reference?.resolvedSymbol;
+      const isRuntimeGlobal = reference && isRuntimeGlobalReference(node, scopes);
+      const isLoader = node.name === "require" || node.name === "module";
       if (
         reference &&
-        (symbol?.kind === "ts-interface" ||
-          symbol?.kind === "ts-type-alias" ||
+        ((isLoader && isRuntimeGlobal && !hasSupportedLoaderUse(node, scopes)) ||
+          (symbol &&
+            isErasedTypeScriptBinding(symbol) &&
+            !hasRuntimeValueBinding(symbol) &&
+            node.name !== "Map" &&
+            !isLoader &&
+            !allowedNodes.has(node)) ||
           (UNSUPPORTED_PROVIDER_GLOBALS.has(node.name) &&
-            (node.name === "eval" || scopes.isGlobalReference(node)) &&
+            (node.name === "eval" || isRuntimeGlobal) &&
             !allowedNodes.has(node)))
       )
         supported = false;
@@ -136,12 +214,7 @@ export const hasSupportedCallbackMapProgram = (
         checkedReactSymbols.add(symbol.id);
         if (!hasClosedReactProvider(node, scopes, allowedNodes)) supported = false;
       }
-      if (
-        reference &&
-        node.name === "Map" &&
-        scopes.isGlobalReference(node) &&
-        !isDirectInvocation(node)
-      )
+      if (reference && node.name === "Map" && isRuntimeGlobal && !isDirectInvocation(node))
         supported = false;
     }
     if (
@@ -163,5 +236,6 @@ export const hasSupportedCallbackMapProgram = (
     }
     return undefined;
   });
+  permissions.set(allowedNodes, supported);
   return supported;
 };

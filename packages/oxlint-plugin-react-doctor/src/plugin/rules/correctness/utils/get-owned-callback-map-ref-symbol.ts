@@ -7,6 +7,7 @@ import { isReactApiCall } from "../../../utils/is-react-api-call.js";
 import { resolveReactRefSymbol } from "../../../utils/react-ref-origin.js";
 import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
 import { NO_VALUE_COUNT, SINGLE_VALUE_COUNT } from "./callback-map-snapshot/constants.js";
+import { isRuntimeGlobalReference } from "./has-supported-callback-map-program.js";
 import { isReadonlyCallbackMapSymbol as isReadonly } from "./is-readonly-callback-map-symbol.js";
 
 export const getOwnedCallbackMapRefSymbol = (
@@ -58,9 +59,9 @@ export const getOwnedCallbackMapRefSymbol = (
     !isNodeOfType(allocation, "NewExpression") ||
     !isNodeOfType(allocation.callee, "Identifier") ||
     allocation.callee.name !== "Map" ||
-    !scopes.isGlobalReference(allocation.callee) ||
     allocation.arguments.length !== NO_VALUE_COUNT
   )
     return null;
+  if (!isRuntimeGlobalReference(allocation.callee, scopes)) return null;
   return refSymbol;
 };

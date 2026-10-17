@@ -21,11 +21,18 @@ import {
   readStoreAction,
   type NullDetachActionInput,
 } from "./has-equivalent-null-detach-action.js";
-import { hasSupportedCallbackMapProgram } from "./has-supported-callback-map-program.js";
+import {
+  hasSupportedCallbackMapProgram,
+  isRuntimeGlobalReference,
+} from "./has-supported-callback-map-program.js";
 import { isDiscardedCallbackMapFocusObservation } from "./is-discarded-callback-map-focus-observation.js";
 import { isReadonlyCallbackMapSymbol } from "./is-readonly-callback-map-symbol.js";
 
+const effectSelectorPermissions = new WeakMap<ScopeAnalysis, ReadonlySet<EsTreeNode>>();
+
 const getEffectSelectorPermissions = (scopes: ScopeAnalysis): ReadonlySet<EsTreeNode> => {
+  const cached = effectSelectorPermissions.get(scopes);
+  if (cached) return cached;
   const permissions = new Set<EsTreeNode>();
   walkAst(scopes.rootScope.node, (node) => {
     if (
@@ -48,7 +55,7 @@ const getEffectSelectorPermissions = (scopes: ScopeAnalysis): ReadonlySet<EsTree
       operand.operator !== "typeof" ||
       !isNodeOfType(operand.argument, "Identifier") ||
       operand.argument.name !== "window" ||
-      !scopes.isGlobalReference(operand.argument) ||
+      !isRuntimeGlobalReference(operand.argument, scopes) ||
       !isNodeOfType(comparison, "Literal") ||
       comparison.value !== "undefined"
     )
@@ -110,6 +117,7 @@ const getEffectSelectorPermissions = (scopes: ScopeAnalysis): ReadonlySet<EsTree
     permissions.add(layoutEffect);
     return undefined;
   });
+  effectSelectorPermissions.set(scopes, permissions);
   return permissions;
 };
 
