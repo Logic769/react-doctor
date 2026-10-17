@@ -2,7 +2,7 @@
 // weakness: alias-guard
 // source: independent synthetic native submit runtime binding control
 // verdict: pass
-import { Fragment } from "react";
+import "react";
 import { useNavigate } from "react-router-dom";
 export const Screen = () => {
   const navigate = useNavigate();

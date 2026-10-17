@@ -2,7 +2,7 @@
 // weakness: control-flow
 // source: independent synthetic closed submit provider control
 // verdict: pass
-import { Fragment } from "react";
+import "react";
 import { useNavigate } from "react-router-dom";
 export const Screen = () => {
   const navigate = useNavigate();
