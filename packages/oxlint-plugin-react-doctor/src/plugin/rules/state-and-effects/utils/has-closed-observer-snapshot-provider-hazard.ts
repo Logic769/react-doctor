@@ -1,3 +1,4 @@
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
 import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import { OBSERVER_SNAPSHOT_UNSUPPORTED_PROPERTIES } from "../../../constants/dom.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
@@ -43,7 +44,12 @@ export const hasClosedObserverSnapshotProviderHazard = ({
       ].includes(candidate.name)
     ) {
       const symbol = scopes.symbolFor(candidate);
-      if (symbol && symbol.bindingIdentifier !== candidate && isErasedTypeScriptBinding(symbol)) {
+      if (
+        symbol &&
+        symbol.bindingIdentifier !== candidate &&
+        isErasedTypeScriptBinding(symbol) &&
+        !hasRuntimeValueBinding(symbol)
+      ) {
         hasHazard = true;
         return false;
       }
