@@ -46,6 +46,10 @@ export const hasImportedNativeButtonControlPair = (
       if (!supported) return false;
       if (
         LABEL_NATIVE_BUTTON_RUNTIME_TYPES.has(node.type) ||
+        isNodeOfType(node, "ImportExpression") ||
+        (isNodeOfType(node, "Identifier") &&
+          node.name === "require" &&
+          scopes.referenceFor(node)) ||
         (isNodeOfType(node, "TSEnumDeclaration") && !node.declare) ||
         (isNodeOfType(node, "TSModuleDeclaration") && !node.declare) ||
         (isNodeOfType(node, "TSImportEqualsDeclaration") && node.importKind !== "type")

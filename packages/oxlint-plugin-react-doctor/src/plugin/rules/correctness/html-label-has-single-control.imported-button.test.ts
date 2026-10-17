@@ -20,6 +20,48 @@ afterEach(() => {
 });
 const cases: ImportedButtonCase[] = [
   {
+    name: "consumer-require-provider-escape",
+    code: 'import { Button } from "./button"; const controls = require("./button"); controls.Button.defaultProps = { asChild: true }; export const Example = () => <label><input /><Button><span>Pick</span></Button></label>;',
+    buttonCode:
+      'import { Slot } from "@radix-ui/react-slot"; export const Button = ({ asChild = false, ...props }) => { const Host = asChild ? Slot : "button"; return <Host {...props} />; };',
+    expectedCount: 0,
+  },
+  {
+    name: "consumer-require-alias-provider-escape",
+    code: 'import { Button } from "./button"; const load = require; const controls = load("./button"); controls.Button.defaultProps = { asChild: true }; export const Example = () => <label><input /><Button><span>Pick</span></Button></label>;',
+    buttonCode:
+      'import { Slot } from "@radix-ui/react-slot"; export const Button = ({ asChild = false, ...props }) => { const Host = asChild ? Slot : "button"; return <Host {...props} />; };',
+    expectedCount: 0,
+  },
+  {
+    name: "consumer-dynamic-import-provider-escape",
+    code: 'import { Button } from "./button"; import("./button").then(controls => { controls.Button.defaultProps = { asChild: true }; }); export const Example = () => <label><input /><Button><span>Pick</span></Button></label>;',
+    buttonCode:
+      'import { Slot } from "@radix-ui/react-slot"; export const Button = ({ asChild = false, ...props }) => { const Host = asChild ? Slot : "button"; return <Host {...props} />; };',
+    expectedCount: 0,
+  },
+  {
+    name: "provider-dynamic-self-import-escape",
+    code: 'import { Button } from "./button";  export const Example = () => <label><input /><Button><span>Pick</span></Button></label>;',
+    buttonCode:
+      'import { Slot } from "@radix-ui/react-slot"; export const Button = ({ asChild = false, ...props }) => { const Host = asChild ? Slot : "button"; return <Host {...props} />; };import("./button").then(controls => { controls.Button.defaultProps = { asChild: true }; });',
+    expectedCount: 0,
+  },
+  {
+    name: "local-loader-outside-static-profile",
+    code: 'import { Button } from "./button"; const require = () => ({ Button: () => <span /> }); void require; export const Example = () => <label><input /><Button /></label>;',
+    buttonCode: "export const Button = () => <button />;",
+    expectedCount: 0,
+    extraSources: { "format.ts": "export const format = (value) => value;" },
+  },
+  {
+    name: "unrelated-static-import-preserves-proof",
+    code: 'import { Button } from "./button"; import { format } from "./format"; void format; export const Example = () => <label><input /><Button /></label>;',
+    buttonCode: "export const Button = () => <button />;",
+    expectedCount: 1,
+    extraSources: { "format.ts": "export const format = (value) => value;" },
+  },
+  {
     name: "file-input-and-default-button",
     code: 'import { Button } from "./button";\n\nexport const Example = () => <label><input type="file" /><Button>Pick</Button></label>;\n',
     buttonCode:
