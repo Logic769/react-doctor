@@ -1,3 +1,4 @@
+import { hasRuntimeValueBinding } from "./has-runtime-value-binding.js";
 import { isErasedTypeScriptBinding } from "./is-erased-typescript-binding.js";
 import type { ScopeAnalysis, SymbolDescriptor } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
@@ -63,7 +64,8 @@ const hasClosedProviderProgram = (scopes: ScopeAnalysis): boolean => {
         [...UNSUPPORTED_PROVIDER_GLOBAL_NAMES, "globalThis", "window", "self", "global"].includes(
           node.name,
         ) &&
-        isErasedTypeScriptBinding(binding)
+        isErasedTypeScriptBinding(binding) &&
+        !hasRuntimeValueBinding(binding)
       ) {
         isClosed = false;
         return false;
