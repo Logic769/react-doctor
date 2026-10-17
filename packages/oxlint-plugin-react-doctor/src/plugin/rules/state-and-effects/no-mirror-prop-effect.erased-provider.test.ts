@@ -33,6 +33,46 @@ const cases = [
     code: 'declare const globalThis:any;const world=globalThis;world.require("react").useState = () => [0, () => {}];import React, {useState,useEffect,useLayoutEffect} from "react";  export const Panel = ({value, reset}) => { const [draft, writeDraft] = useState(value);  useEffect(()=>{writeDraft(value);},[value]); return <output>{draft}</output>; };',
     expected: 0,
   },
+  {
+    name: "rejects type-only import-equals provider rewrites",
+    code: 'import type require = require("provider-types");require("react").useState = () => [0, () => {}];import React, {useState,useEffect,useLayoutEffect} from "react";  export const Panel = ({value, reset}) => { const [draft, writeDraft] = useState(value);  useEffect(()=>{writeDraft(value);},[value]); return <output>{draft}</output>; };',
+    expected: 0,
+  },
+  {
+    name: "preserves genuine import-equals value binding",
+    code: 'import require = require("provider-values");require("react").useState = () => [0, () => {}];import React, {useState,useEffect,useLayoutEffect} from "react";  export const Panel = ({value, reset}) => { const [draft, writeDraft] = useState(value);  useEffect(()=>{writeDraft(value);},[value]); return <output>{draft}</output>; };',
+    expected: 1,
+  },
+  {
+    name: "preserves genuine value binding with merged interface",
+    code: 'const require = () => ({}); interface require {}require("react").useState = () => [0, () => {}];import React, {useState,useEffect,useLayoutEffect} from "react";  export const Panel = ({value, reset}) => { const [draft, writeDraft] = useState(value);  useEffect(()=>{writeDraft(value);},[value]); return <output>{draft}</output>; };',
+    expected: 1,
+  },
+  {
+    name: "rejects empty namespace provider masking",
+    code: 'namespace require {}require("react").useState = () => [0, () => {}];import React, {useState,useEffect,useLayoutEffect} from "react";  export const Panel = ({value, reset}) => { const [draft, writeDraft] = useState(value);  useEffect(()=>{writeDraft(value);},[value]); return <output>{draft}</output>; };',
+    expected: 0,
+  },
+  {
+    name: "rejects type-only namespace provider masking",
+    code: 'namespace require { export interface Marker {} }require("react").useState = () => [0, () => {}];import React, {useState,useEffect,useLayoutEffect} from "react";  export const Panel = ({value, reset}) => { const [draft, writeDraft] = useState(value);  useEffect(()=>{writeDraft(value);},[value]); return <output>{draft}</output>; };',
+    expected: 0,
+  },
+  {
+    name: "rejects nested type-only namespace provider masking",
+    code: 'namespace require { export namespace Nested { export type Marker = unknown; } }require("react").useState = () => [0, () => {}];import React, {useState,useEffect,useLayoutEffect} from "react";  export const Panel = ({value, reset}) => { const [draft, writeDraft] = useState(value);  useEffect(()=>{writeDraft(value);},[value]); return <output>{draft}</output>; };',
+    expected: 0,
+  },
+  {
+    name: "preserves an inert empty namespace",
+    code: 'namespace require {}import React, {useState,useEffect,useLayoutEffect} from "react";  export const Panel = ({value, reset}) => { const [draft, writeDraft] = useState(value);  useEffect(()=>{writeDraft(value);},[value]); return <output>{draft}</output>; };',
+    expected: 1,
+  },
+  {
+    name: "preserves a genuine runtime namespace",
+    code: 'namespace require { export const marker = 1; } void require;import React, {useState,useEffect,useLayoutEffect} from "react";  export const Panel = ({value, reset}) => { const [draft, writeDraft] = useState(value);  useEffect(()=>{writeDraft(value);},[value]); return <output>{draft}</output>; };',
+    expected: 1,
+  },
 ];
 
 describe("erased runtime provider admission", () => {
