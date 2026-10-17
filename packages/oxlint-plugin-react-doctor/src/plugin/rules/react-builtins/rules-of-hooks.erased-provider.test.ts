@@ -33,6 +33,21 @@ const cases = [
     code: "declare const globalThis:any;const world=globalThis;world.require(\"react-markdown\").default = () => null;import Markdown from 'react-markdown'; import {useState} from 'react'; function View(){return <Markdown components={{'count-item':()=>{const [count]=useState(0);return <span>{count}</span>;}}}/>;}",
     expected: 1,
   },
+  {
+    name: "rejects type-only import-equals provider rewrites",
+    code: "import type require = require(\"provider-types\");require(\"react-markdown\").default = () => null;import Markdown from 'react-markdown'; import {useState} from 'react'; function View(){return <Markdown components={{'count-item':()=>{const [count]=useState(0);return <span>{count}</span>;}}}/>;}",
+    expected: 1,
+  },
+  {
+    name: "preserves genuine import-equals value binding",
+    code: "import require = require(\"provider-values\");require(\"react-markdown\").default = () => null;import Markdown from 'react-markdown'; import {useState} from 'react'; function View(){return <Markdown components={{'count-item':()=>{const [count]=useState(0);return <span>{count}</span>;}}}/>;}",
+    expected: 0,
+  },
+  {
+    name: "preserves genuine value binding with merged interface",
+    code: "const require = () => ({}); interface require {}require(\"react-markdown\").default = () => null;import Markdown from 'react-markdown'; import {useState} from 'react'; function View(){return <Markdown components={{'count-item':()=>{const [count]=useState(0);return <span>{count}</span>;}}}/>;}",
+    expected: 0,
+  },
 ];
 
 describe("erased runtime provider admission", () => {

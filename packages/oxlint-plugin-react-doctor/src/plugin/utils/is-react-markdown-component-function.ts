@@ -1,3 +1,4 @@
+import { hasRuntimeValueBinding } from "./has-runtime-value-binding.js";
 import { getStaticPropertyName } from "./get-static-property-name.js";
 import { isErasedTypeScriptBinding } from "./is-erased-typescript-binding.js";
 import type { ScopeAnalysis, SymbolDescriptor } from "../semantic/scope-analysis.js";
@@ -63,7 +64,12 @@ const hasUnsupportedRuntime = (scopes: ScopeAnalysis): boolean => {
           ["Object", "Reflect", "Function", "require", "module", "process"].includes(providerName))
           ? scopes.symbolFor(node)
           : null;
-      if (symbol && symbol.bindingIdentifier !== node && isErasedTypeScriptBinding(symbol)) {
+      if (
+        symbol &&
+        symbol.bindingIdentifier !== node &&
+        isErasedTypeScriptBinding(symbol) &&
+        !hasRuntimeValueBinding(symbol)
+      ) {
         hasUnsupportedExposure = true;
         return false;
       }
