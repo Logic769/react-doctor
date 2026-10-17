@@ -17,12 +17,27 @@ import { hasReactDefaultProviderMutation } from "./has-react-default-provider-mu
 import { hasPossibleStaticPropertyMutationOrEscape } from "./has-static-property-write-before.js";
 import { isClosedLiteralObjectFreezeReference } from "./is-closed-literal-object-freeze-reference.js";
 import { isBindingAssignmentTarget } from "./is-binding-assignment-target.js";
+import { isErasedTypeScriptBinding } from "./is-erased-typescript-binding.js";
 import { isMemberMutationTarget } from "./is-member-mutation-target.js";
 import { isNodeOfType } from "./is-node-of-type.js";
 import { isNonEscapingReactApiReference } from "./is-non-escaping-react-api-reference.js";
 import { isProvenUnmodifiedReactApiCall } from "./is-proven-unmodified-react-api-call.js";
 import { stripParenExpression } from "./strip-paren-expression.js";
 import { walkAst } from "./walk-ast.js";
+
+const PROVIDER_GLOBAL_NAMES = new Set([
+  "require",
+  "module",
+  "process",
+  "Function",
+  "eval",
+  "Object",
+  "Reflect",
+  "globalThis",
+  "global",
+  "window",
+  "self",
+]);
 
 export const isUnmodifiedLocalReactStateCall = (
   call: EsTreeNode,
@@ -94,6 +109,13 @@ export const isUnmodifiedLocalReactStateCall = (
   let hasProviderHazard = false;
   walkAst(scopes.rootScope.node, (child) => {
     if (hasProviderHazard) return false;
+    if (isNodeOfType(child, "Identifier") && PROVIDER_GLOBAL_NAMES.has(child.name)) {
+      const binding = scopes.symbolFor(child);
+      if (binding && scopes.referenceFor(child) && isErasedTypeScriptBinding(binding)) {
+        hasProviderHazard = true;
+        return false;
+      }
+    }
     const dependency =
       getRuntimeStaticDependencySource(child) ?? getGlobalRequireModuleSource(child, scopes);
     if (
