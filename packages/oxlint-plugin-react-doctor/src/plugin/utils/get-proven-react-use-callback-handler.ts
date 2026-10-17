@@ -1,3 +1,4 @@
+import { isErasedTypeScriptBinding } from "./is-erased-typescript-binding.js";
 import {
   PASSIVE_CALLBACK_ARGUMENT_COUNT,
   PASSIVE_CALLBACK_ARGUMENT_INDEX,
@@ -28,6 +29,46 @@ const hasUnsupportedProviderExecution = (node: EsTreeNode, scopes: ScopeAnalysis
   if (!program) return true;
   let hasUnsupportedExecution = false;
   walkAst(program, (candidate) => {
+    if (isNodeOfType(candidate, "Identifier") && !isTypeScriptTypePosition(candidate)) {
+      const reference = findTransparentExpressionRoot(candidate);
+      const member = reference.parent;
+      const isGlobalCarrier = ["globalThis", "window", "self", "global"].includes(candidate.name);
+      const providerName = isGlobalCarrier
+        ? isNodeOfType(member, "MemberExpression") && member.object === reference
+          ? getStaticPropertyName(member)
+          : null
+        : candidate.name;
+      const hasOpaqueCarrierUse =
+        isGlobalCarrier &&
+        !(
+          isNodeOfType(member, "MemberExpression") &&
+          member.object === reference &&
+          getStaticPropertyName(member) !== null
+        ) &&
+        !(
+          isNodeOfType(member, "UnaryExpression") &&
+          (member.operator === "typeof" || member.operator === "void")
+        );
+      const symbol =
+        hasOpaqueCarrierUse ||
+        (providerName &&
+          [
+            "Function",
+            "require",
+            "module",
+            "Event",
+            "UIEvent",
+            "MouseEvent",
+            "WheelEvent",
+            "TouchEvent",
+          ].includes(providerName))
+          ? scopes.symbolFor(candidate)
+          : null;
+      if (symbol && symbol.bindingIdentifier !== candidate && isErasedTypeScriptBinding(symbol)) {
+        hasUnsupportedExecution = true;
+        return false;
+      }
+    }
     if (hasUnsupportedExecution) return false;
     if (isTypeScriptTypePosition(candidate)) return false;
     if (

@@ -1,0 +1,48 @@
+import { describe, expect, it } from "vite-plus/test";
+import { runRule } from "../../../test-utils/run-rule.js";
+import { clientPassiveEventListeners } from "./client-passive-event-listeners.js";
+
+const cases = [
+  {
+    name: "preserves an inert erased declaration",
+    code: 'declare const require: any;import React from "react";\n\nconst Panel = () => {\n  const handleWheel = React.useCallback((event: WheelEvent) => { event.preventDefault(); }, []);\n  React.useEffect(() => {\n    document.addEventListener("wheel", handleWheel);\n    return () => document.removeEventListener("wheel", handleWheel);\n  }, [handleWheel]);\n  return null;\n};\n',
+    expected: 0,
+  },
+  {
+    name: "rejects runtime provider rewriting after declare const require: any;",
+    code: 'declare const require: any;require("react").useCallback = () => () => undefined;import React from "react";\n\nconst Panel = () => {\n  const handleWheel = React.useCallback((event: WheelEvent) => { event.preventDefault(); }, []);\n  React.useEffect(() => {\n    document.addEventListener("wheel", handleWheel);\n    return () => document.removeEventListener("wheel", handleWheel);\n  }, [handleWheel]);\n  return null;\n};\n',
+    expected: 1,
+  },
+  {
+    name: "rejects runtime provider rewriting after interface require {}",
+    code: 'interface require {}require("react").useCallback = () => () => undefined;import React from "react";\n\nconst Panel = () => {\n  const handleWheel = React.useCallback((event: WheelEvent) => { event.preventDefault(); }, []);\n  React.useEffect(() => {\n    document.addEventListener("wheel", handleWheel);\n    return () => document.removeEventListener("wheel", handleWheel);\n  }, [handleWheel]);\n  return null;\n};\n',
+    expected: 1,
+  },
+  {
+    name: 'rejects runtime provider rewriting after import type require from "provider-types";',
+    code: 'import type require from "provider-types";require("react").useCallback = () => () => undefined;import React from "react";\n\nconst Panel = () => {\n  const handleWheel = React.useCallback((event: WheelEvent) => { event.preventDefault(); }, []);\n  React.useEffect(() => {\n    document.addEventListener("wheel", handleWheel);\n    return () => document.removeEventListener("wheel", handleWheel);\n  }, [handleWheel]);\n  return null;\n};\n',
+    expected: 1,
+  },
+  {
+    name: "rejects erased global carrier provider rewrites",
+    code: 'declare const globalThis:any;globalThis.require("react").useCallback = () => () => undefined;import React from "react";\n\nconst Panel = () => {\n  const handleWheel = React.useCallback((event: WheelEvent) => { event.preventDefault(); }, []);\n  React.useEffect(() => {\n    document.addEventListener("wheel", handleWheel);\n    return () => document.removeEventListener("wheel", handleWheel);\n  }, [handleWheel]);\n  return null;\n};\n',
+    expected: 1,
+  },
+  {
+    name: "rejects erased global carrier alias provider rewrites",
+    code: 'declare const globalThis:any;const world=globalThis;world.require("react").useCallback = () => () => undefined;import React from "react";\n\nconst Panel = () => {\n  const handleWheel = React.useCallback((event: WheelEvent) => { event.preventDefault(); }, []);\n  React.useEffect(() => {\n    document.addEventListener("wheel", handleWheel);\n    return () => document.removeEventListener("wheel", handleWheel);\n  }, [handleWheel]);\n  return null;\n};\n',
+    expected: 1,
+  },
+];
+
+describe("erased runtime provider admission", () => {
+  for (const scenario of cases) {
+    it(scenario.name, () => {
+      const result = runRule(clientPassiveEventListeners, scenario.code, {
+        filename: "provider-runtime.tsx",
+      });
+      expect(result.parseErrors).toEqual([]);
+      expect(result.diagnostics).toHaveLength(scenario.expected);
+    });
+  }
+});
