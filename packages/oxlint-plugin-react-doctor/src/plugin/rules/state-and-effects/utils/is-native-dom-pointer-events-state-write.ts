@@ -7,6 +7,7 @@ import { getResolvedStaticPropertyName } from "../../../utils/get-resolved-stati
 import { getRootIdentifier } from "../../../utils/get-root-identifier.js";
 import { getUninterruptedConstInitializer } from "../../../utils/get-uninterrupted-const-initializer.js";
 import { hasReactDefaultProviderMutation } from "../../../utils/has-react-default-provider-mutation.js";
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import { isBindingAssignmentTarget } from "../../../utils/is-binding-assignment-target.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import {
@@ -110,6 +111,7 @@ const hasClosedDocumentProvider = (
   walkAst(context.scopes.rootScope.node, (node) => {
     if (hasHazard) return false;
     if (isTypeScriptTypePosition(node)) return false;
+    const binding = isNodeOfType(node, "Identifier") ? context.scopes.symbolFor(node) : null;
     const resolvedPropertyName =
       isNodeOfType(node, "MemberExpression") ||
       (isNodeOfType(node, "Property") && isNodeOfType(node.parent, "ObjectPattern"))
@@ -126,8 +128,14 @@ const hasClosedDocumentProvider = (
         "HTMLElement",
         "SVGElement",
         "CSSStyleDeclaration",
-      ].some((namespaceName) =>
-        isProvenGlobalNamespaceReference(node, namespaceName, context.scopes),
+      ].some(
+        (namespaceName) =>
+          isProvenGlobalNamespaceReference(node, namespaceName, context.scopes) ||
+          (isNodeOfType(node, "Identifier") &&
+            node.name === namespaceName &&
+            Boolean(
+              binding && context.scopes.referenceFor(node) && isErasedTypeScriptBinding(binding),
+            )),
       ) ||
       ((isNodeOfType(node, "MemberExpression") ||
         (isNodeOfType(node, "Property") && isNodeOfType(node.parent, "ObjectPattern"))) &&

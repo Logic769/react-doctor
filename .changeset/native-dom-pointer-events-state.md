@@ -5,3 +5,5 @@
 ---
 
 Avoid state-mutation warnings for string pointer-events writes on closed native DOM lookup handles passed through readonly local aliases. Keep warnings for unknown or mixed feeds and unsupported handle uses.
+
+Keep native DOM provider replacements unsupported when erased TypeScript declarations mask the runtime constructor binding.

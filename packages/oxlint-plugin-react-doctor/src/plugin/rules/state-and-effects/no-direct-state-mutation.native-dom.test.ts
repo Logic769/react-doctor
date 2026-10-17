@@ -10,6 +10,31 @@ interface NativeDomWriteCase {
 
 const cases: ReadonlyArray<NativeDomWriteCase> = [
   {
+    name: "erased-interface-provider",
+    code: 'import {useEffect,useState} from "react";interface Document {} Document.prototype.getElementById=customLookup;export const Panel=()=>{const[host,setHost]=useState(null);useEffect(()=>{const node=document.getElementById("host");if(node)setHost(node);},[]);useEffect(()=>{if(!host)return;host.style.pointerEvents="none";},[host]);return <div/>;};',
+    expected: 1,
+  },
+  {
+    name: "erased-ambient-provider",
+    code: 'import {useEffect,useState} from "react";declare const Document: any;Document.prototype.getElementById=customLookup;export const Panel=()=>{const[host,setHost]=useState(null);useEffect(()=>{const node=document.getElementById("host");if(node)setHost(node);},[]);useEffect(()=>{if(!host)return;host.style.pointerEvents="none";},[host]);return <div/>;};',
+    expected: 1,
+  },
+  {
+    name: "type-only-import-provider",
+    code: 'import {useEffect,useState} from "react";import type {Document} from "./types";Document.prototype.getElementById=customLookup;export const Panel=()=>{const[host,setHost]=useState(null);useEffect(()=>{const node=document.getElementById("host");if(node)setHost(node);},[]);useEffect(()=>{if(!host)return;host.style.pointerEvents="none";},[host]);return <div/>;};',
+    expected: 1,
+  },
+  {
+    name: "inert-interface-provider",
+    code: 'import {useEffect,useState} from "react";interface Document {}export const Panel=()=>{const[host,setHost]=useState(null);useEffect(()=>{const node=document.getElementById("host");if(node)setHost(node);},[]);useEffect(()=>{if(!host)return;host.style.pointerEvents="none";},[host]);return <div/>;};',
+    expected: 0,
+  },
+  {
+    name: "real-local-constructor-provider",
+    code: 'import {useEffect,useState} from "react";class Document {} Document.prototype.localMetadata="stable";export const Panel=()=>{const[host,setHost]=useState(null);useEffect(()=>{const node=document.getElementById("host");if(node)setHost(node);},[]);useEffect(()=>{if(!host)return;host.style.pointerEvents="none";},[host]);return <div/>;};',
+    expected: 0,
+  },
+  {
     name: "native-direct-lookup-alias",
     code: 'import {useEffect,useState} from "react";export const Panel=({value})=>{const[host,setHost]=useState(null);useEffect(()=>{const node=document.getElementById("panel-host");if(node)setHost(node);},[]);useEffect(()=>{if(!host)return;host.style.pointerEvents="none";},[host]);return <div/>;};',
     expected: 0,
