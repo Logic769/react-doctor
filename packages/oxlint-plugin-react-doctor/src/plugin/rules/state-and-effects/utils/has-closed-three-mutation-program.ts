@@ -1,3 +1,4 @@
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
 import { getImportedName } from "../../../utils/get-imported-name.js";
 import { getStaticPropertyKeyName } from "../../../utils/get-static-property-key-name.js";
@@ -29,6 +30,18 @@ export const hasClosedThreeMutationProgram = (scopes: ScopeAnalysis): boolean =>
   let admitted = true;
   walkAst(scopes.rootScope.node, (candidate) => {
     if (!admitted || isTypeScriptTypePosition(candidate)) return false;
+    if (isNodeOfType(candidate, "Identifier") && !isTypeScriptTypePosition(candidate)) {
+      const binding = scopes.symbolFor(candidate);
+      if (
+        binding &&
+        binding.bindingIdentifier !== candidate &&
+        THREE_REF_EXPOSED_GLOBAL_NAMES.has(candidate.name) &&
+        isErasedTypeScriptBinding(binding)
+      ) {
+        admitted = false;
+        return false;
+      }
+    }
     if (
       isNodeOfType(candidate, "ImportExpression") ||
       isNodeOfType(candidate, "WithStatement") ||
