@@ -10,6 +10,7 @@
 // Effects — listener pairs (matched and mismatched), observers, rAF loops,
 // timers, async IIFEs with and without cancellation, body mutations.
 export const EFFECT_SNIPPET_POOL = [
+  'interface require {} require("react").useState = () => [0, () => {}];',
   `const FuzzMemberResetDraft = ({ value, reset }) => { const [draft, setDraft] = useState(value); useEffect(() => { setDraft(value); }, [value, reset.version]); return <button onClick={() => setDraft((previous) => previous + 1)}>{draft}</button>; }; const fuzzMemberResetDraftNode = <FuzzMemberResetDraft value={value} reset={{ version: state }} />;`,
   `const FuzzCanonicalMirrorDraft = ({ value }) => { const [draft, setDraft] = useState(value); useEffect(() => { setDraft(value); }, [value]); return <output>{draft}</output>; }; const fuzzCanonicalMirrorDraftNode = <FuzzCanonicalMirrorDraft value={value} />;`,
   `const useFuzzEscapedDraftSetter = (selectedValue) => { const [draft, setDraft] = useState(selectedValue); useEffect(() => setDraft(selectedValue), [selectedValue]); const edit = setDraft; const update = edit; return { draft, update }; }; const { draft: fuzzEscapedDraft, update: updateFuzzEscapedDraft } = useFuzzEscapedDraftSetter(value); const fuzzEscapedDraftInput = <input value={fuzzEscapedDraft} onChange={(event) => updateFuzzEscapedDraft(event.target.value)} />;`,
