@@ -20,6 +20,35 @@ const commonOptions: RunRuleOptions = {
 };
 
 const cases: ObserverTestCase[] = [
+  ...[
+    "declare const require: any; require('mobx-react-lite').observer = () => 42;",
+    "declare let require: any; require('mobx-react-lite').observer = () => 42;",
+    "declare var require: any; require('mobx-react-lite').observer = () => 42;",
+    "declare const globalThis: any; globalThis.require('mobx-react-lite').observer = () => 42;",
+    "declare const module: any; module.require('mobx-react-lite').observer = () => 42;",
+    "declare class require {} require('mobx-react-lite').observer = () => 42;",
+    "interface require {} require('mobx-react-lite').observer = () => 42;",
+    "type require = unknown; require('mobx-react-lite').observer = () => 42;",
+    "import type require from 'loader'; require('mobx-react-lite').observer = () => 42;",
+    "import { type require } from 'loader'; require('mobx-react-lite').observer = () => 42;",
+  ].map((providerSource) => ({
+    name: `erased provider cannot hide runtime mutation: ${providerSource}`,
+    code: `import { observer } from 'mobx-react-lite'; ${providerSource} const Badge = observer(() => <span />); export const Card = () => <Badge />; export default Badge;`,
+    expected: 1,
+  })),
+  ...[
+    "declare const require: unknown;",
+    "declare const globalThis: unknown;",
+    "declare class require {}",
+    "import type require from 'loader';",
+    "interface require {}",
+    "type require = unknown;",
+    "const require = (_source: string) => ({ observer: 0 }); require('other').observer = 1;",
+  ].map((providerSource) => ({
+    name: `inert declarations and runtime locals remain supported: ${providerSource}`,
+    code: `import { observer } from 'mobx-react-lite'; ${providerSource} const Badge = observer(() => <span />); export const Card = () => <Badge />; export default Badge;`,
+    expected: 0,
+  })),
   {
     name: "canonical-named-observer-component",
     code: "import { observer } from 'mobx-react-lite';\nconst Badge = observer(() => <span />);\nexport const Card = () => <Badge />;\nexport default Badge;\n",

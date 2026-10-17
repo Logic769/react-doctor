@@ -7,6 +7,7 @@ import { functionContainsReactRenderOutput } from "../../../utils/function-conta
 import { getDirectConstInitializer } from "../../../utils/get-direct-const-initializer.js";
 import { getImportedName } from "../../../utils/get-imported-name.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import { isProvenGlobalObjectReference } from "../../../utils/is-proven-global-namespace-reference.js";
 import { isTypeOnlyImport } from "../../../utils/is-type-only-import.js";
 import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
@@ -153,14 +154,18 @@ export const isProvenObserverComponentCall = (
           return false;
         }
       }
-      if (
-        isNodeOfType(node, "Identifier") &&
-        (isProvenGlobalObjectReference(node, scopes) ||
+      if (isNodeOfType(node, "Identifier")) {
+        const symbol = scopes.symbolFor(node);
+        if (
+          isProvenGlobalObjectReference(node, scopes) ||
           (OBSERVER_UNSUPPORTED_GLOBAL_REFERENCE_NAMES.has(node.name) &&
-            scopes.isGlobalReference(node)))
-      ) {
-        isSupported = false;
-        return false;
+            symbol?.bindingIdentifier !== node &&
+            (scopes.isGlobalReference(node) ||
+              Boolean(symbol && isErasedTypeScriptBinding(symbol))))
+        ) {
+          isSupported = false;
+          return false;
+        }
       }
     });
     supportedPrograms.set(scopes, isSupported);
