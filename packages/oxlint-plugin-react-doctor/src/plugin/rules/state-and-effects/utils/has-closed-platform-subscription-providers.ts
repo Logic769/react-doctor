@@ -1,3 +1,4 @@
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
 import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
@@ -114,7 +115,8 @@ export const hasClosedPlatformSubscriptionProviders = (
         binding &&
         binding.bindingIdentifier !== candidate &&
         PLATFORM_SUBSCRIPTION_EXPOSED_GLOBALS.has(candidate.name) &&
-        isErasedTypeScriptBinding(binding)
+        isErasedTypeScriptBinding(binding) &&
+        !hasRuntimeValueBinding(binding)
       ) {
         admitted = false;
         return false;
