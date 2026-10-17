@@ -1,3 +1,5 @@
+import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import type { Reference } from "eslint-scope";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import { findEnclosingFunction } from "../../../utils/find-enclosing-function.js";
@@ -39,6 +41,28 @@ const hasSupportedStateWitnessProgram = (context: RuleContext): boolean => {
   let isSupported = true;
   walkAst(program, (node) => {
     if (!isSupported) return false;
+    if (isNodeOfType(node, "Identifier") && !isTypeScriptTypePosition(node)) {
+      const binding = context.scopes.symbolFor(node);
+      if (
+        binding &&
+        binding.bindingIdentifier !== node &&
+        [
+          "React",
+          "require",
+          "module",
+          "eval",
+          "Function",
+          "globalThis",
+          "window",
+          "self",
+          "global",
+        ].includes(node.name) &&
+        isErasedTypeScriptBinding(binding)
+      ) {
+        isSupported = false;
+        return false;
+      }
+    }
     if (isNodeOfType(node, "ImportDeclaration")) {
       if (isTypeOnlyImport(node)) return false;
       if (node.source.value === "node:module" || node.source.value === "module") {
