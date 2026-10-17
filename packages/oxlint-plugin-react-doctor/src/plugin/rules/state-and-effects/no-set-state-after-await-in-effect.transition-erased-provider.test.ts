@@ -53,6 +53,31 @@ const cases = [
     code: 'const require = () => ({}); interface require {}require("react").useTransition = () => [false, () => {}];import { useEffect, useState, useTransition } from "react";\nexport const Example = ({value}) => { const [text, writeText] = useState(""); const [pending, startTransition] = useTransition(); useEffect(() => { startTransition(async () => { await Promise.resolve(value); writeText(value); }); }, [value]); return <output>{pending ? "waiting" : text}</output>; };\n',
     expected: 1,
   },
+  {
+    name: "rejects empty namespace provider masking",
+    code: 'namespace require {}require("react").useTransition = () => [false, () => {}];import { useEffect, useState, useTransition } from "react";\nexport const Example = ({value}) => { const [text, writeText] = useState(""); const [pending, startTransition] = useTransition(); useEffect(() => { startTransition(async () => { await Promise.resolve(value); writeText(value); }); }, [value]); return <output>{pending ? "waiting" : text}</output>; };\n',
+    expected: 0,
+  },
+  {
+    name: "rejects type-only namespace provider masking",
+    code: 'namespace require { export interface Marker {} }require("react").useTransition = () => [false, () => {}];import { useEffect, useState, useTransition } from "react";\nexport const Example = ({value}) => { const [text, writeText] = useState(""); const [pending, startTransition] = useTransition(); useEffect(() => { startTransition(async () => { await Promise.resolve(value); writeText(value); }); }, [value]); return <output>{pending ? "waiting" : text}</output>; };\n',
+    expected: 0,
+  },
+  {
+    name: "rejects nested type-only namespace provider masking",
+    code: 'namespace require { export namespace Nested { export type Marker = unknown; } }require("react").useTransition = () => [false, () => {}];import { useEffect, useState, useTransition } from "react";\nexport const Example = ({value}) => { const [text, writeText] = useState(""); const [pending, startTransition] = useTransition(); useEffect(() => { startTransition(async () => { await Promise.resolve(value); writeText(value); }); }, [value]); return <output>{pending ? "waiting" : text}</output>; };\n',
+    expected: 0,
+  },
+  {
+    name: "preserves an inert empty namespace",
+    code: 'namespace require {}import { useEffect, useState, useTransition } from "react";\nexport const Example = ({value}) => { const [text, writeText] = useState(""); const [pending, startTransition] = useTransition(); useEffect(() => { startTransition(async () => { await Promise.resolve(value); writeText(value); }); }, [value]); return <output>{pending ? "waiting" : text}</output>; };\n',
+    expected: 1,
+  },
+  {
+    name: "preserves a genuine runtime namespace",
+    code: 'namespace require { export const marker = 1; } void require;import { useEffect, useState, useTransition } from "react";\nexport const Example = ({value}) => { const [text, writeText] = useState(""); const [pending, startTransition] = useTransition(); useEffect(() => { startTransition(async () => { await Promise.resolve(value); writeText(value); }); }, [value]); return <output>{pending ? "waiting" : text}</output>; };\n',
+    expected: 1,
+  },
 ];
 
 describe("erased runtime provider admission", () => {

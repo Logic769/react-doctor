@@ -63,6 +63,31 @@ const cases = [
     code: 'const require = () => ({}); interface require {}require("react").useRef = () => ({current:0});import {useEffect,useRef,useState,useCallback} from "react";\nexport const Example=({value,other,enabled})=>{const [count,writeCount]=useState(0);const current=useRef(count);useEffect(()=>{writeCount(value);current.current=value},[value]);return <output>{count}</output>};',
     expected: 0,
   },
+  {
+    name: "rejects empty namespace provider masking",
+    code: 'namespace require {}require("react").useRef = () => ({current:0});import {useEffect,useRef,useState,useCallback} from "react";\nexport const Example=({value,other,enabled})=>{const [count,writeCount]=useState(0);const current=useRef(count);useEffect(()=>{writeCount(value);current.current=value},[value]);return <output>{count}</output>};',
+    expected: 1,
+  },
+  {
+    name: "rejects type-only namespace provider masking",
+    code: 'namespace require { export interface Marker {} }require("react").useRef = () => ({current:0});import {useEffect,useRef,useState,useCallback} from "react";\nexport const Example=({value,other,enabled})=>{const [count,writeCount]=useState(0);const current=useRef(count);useEffect(()=>{writeCount(value);current.current=value},[value]);return <output>{count}</output>};',
+    expected: 1,
+  },
+  {
+    name: "rejects nested type-only namespace provider masking",
+    code: 'namespace require { export namespace Nested { export type Marker = unknown; } }require("react").useRef = () => ({current:0});import {useEffect,useRef,useState,useCallback} from "react";\nexport const Example=({value,other,enabled})=>{const [count,writeCount]=useState(0);const current=useRef(count);useEffect(()=>{writeCount(value);current.current=value},[value]);return <output>{count}</output>};',
+    expected: 1,
+  },
+  {
+    name: "preserves an inert empty namespace",
+    code: 'namespace require {}import {useEffect,useRef,useState,useCallback} from "react";\nexport const Example=({value,other,enabled})=>{const [count,writeCount]=useState(0);const current=useRef(count);useEffect(()=>{writeCount(value);current.current=value},[value]);return <output>{count}</output>};',
+    expected: 0,
+  },
+  {
+    name: "preserves a genuine runtime namespace",
+    code: 'namespace require { export const marker = 1; } void require;import {useEffect,useRef,useState,useCallback} from "react";\nexport const Example=({value,other,enabled})=>{const [count,writeCount]=useState(0);const current=useRef(count);useEffect(()=>{writeCount(value);current.current=value},[value]);return <output>{count}</output>};',
+    expected: 0,
+  },
 ];
 
 describe("erased runtime provider admission", () => {
