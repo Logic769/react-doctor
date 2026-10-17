@@ -12,6 +12,7 @@ import { getFunctionBindingSymbols } from "./get-function-binding-symbols.js";
 import { getStaticPropertyKeyName } from "./get-static-property-key-name.js";
 import { getResolvedStaticPropertyName } from "./get-resolved-static-property-name.js";
 import { getStaticPropertyName } from "./get-static-property-name.js";
+import { hasRuntimeValueBinding } from "./has-runtime-value-binding.js";
 import { isErasedTypeScriptBinding } from "./is-erased-typescript-binding.js";
 import { isFunctionLike } from "./is-function-like.js";
 import { isNodeOfType } from "./is-node-of-type.js";
@@ -84,7 +85,10 @@ const hasUnsupportedSourceOperation = (context: RuleContext): boolean => {
         ) &&
         (context.scopes.isGlobalReference(node) ||
           Boolean(
-            binding && context.scopes.referenceFor(node) && isErasedTypeScriptBinding(binding),
+            binding &&
+            context.scopes.referenceFor(node) &&
+            isErasedTypeScriptBinding(binding) &&
+            !hasRuntimeValueBinding(binding),
           ))) ||
       (isNodeOfType(node, "MemberExpression") &&
         [

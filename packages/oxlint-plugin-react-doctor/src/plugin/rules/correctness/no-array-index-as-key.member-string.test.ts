@@ -208,6 +208,9 @@ return records.map(record=>record.token.split(" ").map((part,index)=><span key={
     check(renderRecords(), 0));
   it.each([
     'interface Object {} Object.defineProperty(Object.getPrototypeOf(""), "split", {value: customSplit});',
+    'import type Object = require("./types"); Object.defineProperty(Object.getPrototypeOf(""), "split", {value: customSplit});',
+    'namespace Object {}Object.defineProperty(Object.getPrototypeOf(""),"split",{value:customSplit});',
+    'namespace Object {export namespace Shape {export interface Marker {}}}Object.defineProperty(Object.getPrototypeOf(""),"split",{value:customSplit});',
     'declare const Function: any; Function("String.prototype.split = customSplit")();',
     'import type {Reflect} from "./types"; Reflect.set(Object.getPrototypeOf(""), "split", customSplit);',
   ])("retains runtime exposure through erased declarations: %s", (exposure) =>
@@ -218,6 +221,8 @@ return records.map(record=>record.token.split(" ").map((part,index)=><span key={
     "declare const Function: any;",
     'import type {Reflect} from "./types";',
     'const Object = {getPrototypeOf: () => null}; Object.getPrototypeOf("");',
+    'namespace Object {export const defineProperty=()=>null;export const getPrototypeOf=()=>({});}Object.defineProperty(Object.getPrototypeOf(""),"split",{value:customSplit});',
+    'const Object={defineProperty(){},getPrototypeOf(){return {}}}; interface Object {} Object.defineProperty(Object.getPrototypeOf(""),"split",{value:customSplit});',
   ])("allows inert declarations and real local reflection: %s", (metadata) =>
     check(`${metadata} ${renderRecords()}`, 0),
   );
