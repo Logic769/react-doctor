@@ -6,6 +6,66 @@ const commonOptions = { filename: "src/example.tsx", forceJsx: true, includeLoca
 
 const cases = [
   {
+    name: "opaque-string-method-name-does-not-close-regex-escape",
+    code: 'import matcher from "matcher-tools"; matcher.match(/x/); export const read = (input: string) => input.match(/^a*/)![0].length;',
+    count: 1,
+  },
+  {
+    name: "string-literal-constructor-exposes-native-providers",
+    code: '("").constructor.prototype.match = () => null; export const read = (input: string) => input.match(/^a*/)![0].length;',
+    count: 1,
+  },
+  {
+    name: "destructured-prototype-reflection-exposes-native-providers",
+    code: 'const { getPrototypeOf: readPrototype } = Object; readPrototype("").match = () => null; export const read = (input: string) => input.match(/^a*/)![0].length;',
+    count: 1,
+  },
+  {
+    name: "erased-interface-does-not-hide-runtime-provider-mutation",
+    code: "interface RegExp {} RegExp.prototype.exec = () => null; export const read = (input: string) => /^a*/.exec(input)![0].length;",
+    count: 1,
+  },
+  {
+    name: "erased-type-import-does-not-hide-runtime-provider-mutation",
+    code: 'import type { RegExp } from "types"; RegExp.prototype.exec = () => null; export const read = (input: string) => /^a*/.exec(input)![0].length;',
+    count: 1,
+  },
+  {
+    name: "erased-import-specifier-does-not-hide-runtime-provider-mutation",
+    code: 'import { type RegExp } from "types"; RegExp.prototype.exec = () => null; export const read = (input: string) => /^a*/.exec(input)![0].length;',
+    count: 1,
+  },
+  {
+    name: "erased-global-interface-does-not-hide-runtime-provider-mutation",
+    code: "interface globalThis {} globalThis.RegExp.prototype.exec = () => null; export const read = (input: string) => /^a*/.exec(input)![0].length;",
+    count: 1,
+  },
+  {
+    name: "ordinary-regex-test-keeps-native-proof",
+    code: "export const read = (input: string) => { /x/.test(input); return /^a*/.exec(input)![0].length; };",
+    count: 0,
+  },
+  {
+    name: "ordinary-string-replace-keeps-native-proof",
+    code: 'export const read = (input: string) => { input.replace(/x/, ""); return /^a*/.exec(input)![0].length; };',
+    count: 0,
+  },
+  {
+    name: "literal-constructor-prototype-mutation-retains-warning",
+    code: "(/x/).constructor.prototype.exec = () => null; export const read = (input: string) => /^a*/.exec(input)![0].length;",
+    count: 1,
+  },
+  {
+    name: "reflected-literal-prototype-mutation-retains-warning",
+    code: "Object.getPrototypeOf(/x/).exec = () => null; export const read = (input: string) => /^a*/.exec(input)![0].length;",
+    count: 1,
+  },
+  {
+    name: "opaque-regex-escape-retains-warning",
+    code: 'import { replaceMatcher } from "matcher-tools"; replaceMatcher(/x/); export const read = (input: string) => /^a*/.exec(input)![0].length;',
+    count: 1,
+  },
+  {
     name: "native-string-terminal-literal-colon",
     code: "export const Example = (input: string) => { const width = input.match(/:*$/)![0].length; return <span>{width}</span>; };\n",
     count: 0,
