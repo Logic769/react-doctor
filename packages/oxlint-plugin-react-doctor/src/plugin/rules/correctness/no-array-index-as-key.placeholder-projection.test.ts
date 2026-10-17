@@ -4,6 +4,42 @@ import { noArrayIndexAsKey } from "./no-array-index-as-key.js";
 
 const cases = [
   {
+    name: "unmasked-native-map-mutation",
+    code: 'Object.defineProperty(Object.getPrototypeOf([]), "map", { value: () => [{ id: "outside" }] }); interface SlotProps { label: string }\nconst Slot = ({ label }: SlotProps) => <input defaultValue={label} />;\nexport const SlotGallery = () => { const count = 6; const slots = new Array(count).fill(null).map((unused, position) => position); return <section>{slots.map((unused, index) => <Slot key={index} label={`Position ${index + 1}`} />)}</section>; };\n',
+    expected: 1,
+  },
+  {
+    name: "ambient-object-native-map-mutation",
+    code: 'declare const Object: any; Object.defineProperty(Object.getPrototypeOf([]), "map", { value: () => [{ id: "outside" }] }); interface SlotProps { label: string }\nconst Slot = ({ label }: SlotProps) => <input defaultValue={label} />;\nexport const SlotGallery = () => { const count = 6; const slots = new Array(count).fill(null).map((unused, position) => position); return <section>{slots.map((unused, index) => <Slot key={index} label={`Position ${index + 1}`} />)}</section>; };\n',
+    expected: 1,
+  },
+  {
+    name: "erased-interface-native-map-mutation",
+    code: 'interface Object {} Object.defineProperty(Object.getPrototypeOf([]), "map", { value: () => [{ id: "outside" }] }); interface SlotProps { label: string }\nconst Slot = ({ label }: SlotProps) => <input defaultValue={label} />;\nexport const SlotGallery = () => { const count = 6; const slots = new Array(count).fill(null).map((unused, position) => position); return <section>{slots.map((unused, index) => <Slot key={index} label={`Position ${index + 1}`} />)}</section>; };\n',
+    expected: 1,
+  },
+  {
+    name: "erased-type-import-native-map-mutation",
+    code: 'import type { Object } from "types"; Object.defineProperty(Object.getPrototypeOf([]), "map", { value: () => [{ id: "outside" }] }); interface SlotProps { label: string }\nconst Slot = ({ label }: SlotProps) => <input defaultValue={label} />;\nexport const SlotGallery = () => { const count = 6; const slots = new Array(count).fill(null).map((unused, position) => position); return <section>{slots.map((unused, index) => <Slot key={index} label={`Position ${index + 1}`} />)}</section>; };\n',
+    expected: 1,
+  },
+  {
+    name: "inert-ambient-object-keeps-placeholder-proof",
+    code: "declare const Object: any; interface SlotProps { label: string }\nconst Slot = ({ label }: SlotProps) => <input defaultValue={label} />;\nexport const SlotGallery = () => { const count = 6; const slots = new Array(count).fill(null).map((unused, position) => position); return <section>{slots.map((unused, index) => <Slot key={index} label={`Position ${index + 1}`} />)}</section>; };\n",
+    expected: 0,
+  },
+  {
+    name: "inert-type-import-keeps-placeholder-proof",
+    code: 'import type { Object } from "types"; interface SlotProps { label: string }\nconst Slot = ({ label }: SlotProps) => <input defaultValue={label} />;\nexport const SlotGallery = () => { const count = 6; const slots = new Array(count).fill(null).map((unused, position) => position); return <section>{slots.map((unused, index) => <Slot key={index} label={`Position ${index + 1}`} />)}</section>; };\n',
+    expected: 0,
+  },
+  {
+    name: "genuine-local-object-keeps-placeholder-proof",
+    code: 'const Object = { defineProperty: () => null, getPrototypeOf: () => ({}) }; Object.defineProperty(Object.getPrototypeOf([]), "map", { value: () => [{ id: "outside" }] }); interface SlotProps { label: string }\nconst Slot = ({ label }: SlotProps) => <input defaultValue={label} />;\nexport const SlotGallery = () => { const count = 6; const slots = new Array(count).fill(null).map((unused, position) => position); return <section>{slots.map((unused, index) => <Slot key={index} label={`Position ${index + 1}`} />)}</section>; };\n',
+    expected: 0,
+  },
+
+  {
     name: "closed-placeholder-index-projection",
     code: "interface SlotProps { label: string }\nconst Slot = ({ label }: SlotProps) => <input defaultValue={label} />;\nexport const SlotGallery = () => { const count = 6; const slots = new Array(count).fill(null).map((unused, position) => position); return <section>{slots.map((unused, index) => <Slot key={index} label={`Position ${index + 1}`} />)}</section>; };\n",
     expected: 0,

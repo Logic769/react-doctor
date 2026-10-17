@@ -11,6 +11,8 @@ import {
   isProvenGlobalObjectReference,
 } from "./is-proven-global-namespace-reference.js";
 import { getStaticPropertyName } from "./get-static-property-name.js";
+import { isErasedTypeScriptBinding } from "./is-erased-typescript-binding.js";
+import { isTypeScriptTypePosition } from "./is-typescript-type-position.js";
 import { isNodeOfType } from "./is-node-of-type.js";
 import { isWithinAssignmentTarget } from "./is-within-assignment-target.js";
 import { stripParenExpression } from "./strip-paren-expression.js";
@@ -101,8 +103,23 @@ const isClosedJsxDataProjection = (node: EsTreeNode, scopes: ScopeAnalysis): boo
 const hasClosedArrayProvider = (scopes: ScopeAnalysis): boolean => {
   const cached = closedArrayProvidersByAnalysis.get(scopes);
   if (cached !== undefined) return cached;
-  let closed = true;
+  let isClosed = true;
   walkAst(scopes.rootScope.node, (node) => {
+    if (
+      isNodeOfType(node, "Identifier") &&
+      UNSUPPORTED_ARRAY_PROVIDER_NAMES.has(node.name) &&
+      !isTypeScriptTypePosition(node)
+    ) {
+      const providerSymbol = scopes.symbolFor(node);
+      if (
+        providerSymbol &&
+        providerSymbol.bindingIdentifier !== node &&
+        isErasedTypeScriptBinding(providerSymbol)
+      ) {
+        isClosed = false;
+        return false;
+      }
+    }
     if (
       isNodeOfType(node, "WithStatement") ||
       isNodeOfType(node, "AssignmentExpression") ||
@@ -111,7 +128,7 @@ const hasClosedArrayProvider = (scopes: ScopeAnalysis): boolean => {
       isNodeOfType(node, "ClassExpression") ||
       isNodeOfType(node, "ThisExpression")
     )
-      closed = false;
+      isClosed = false;
     if (
       isNodeOfType(node, "MemberExpression") &&
       (isWithinAssignmentTarget(node) ||
@@ -121,14 +138,15 @@ const hasClosedArrayProvider = (scopes: ScopeAnalysis): boolean => {
           isProviderCarrier(node.object, scopes) &&
           !isClosedJsxDataProjection(node, scopes)))
     )
-      closed = false;
+      isClosed = false;
     if (isNodeOfType(node, "Property") && isNodeOfType(node.parent, "ObjectPattern")) {
       const property = getStaticPropertyKeyName(node, { allowComputedString: true });
-      if (property === null || UNSUPPORTED_ARRAY_PROVIDER_PROPERTIES.has(property)) closed = false;
+      if (property === null || UNSUPPORTED_ARRAY_PROVIDER_PROPERTIES.has(property))
+        isClosed = false;
     }
   });
   const pending = [scopes.rootScope];
-  while (closed && pending.length > 0) {
+  while (isClosed && pending.length > 0) {
     const scope = pending.pop();
     if (!scope) break;
     pending.push(...scope.children);
@@ -137,7 +155,7 @@ const hasClosedArrayProvider = (scopes: ScopeAnalysis): boolean => {
       if (!isNodeOfType(identifier, "Identifier") || !scopes.isGlobalReference(identifier))
         continue;
       if (UNSUPPORTED_ARRAY_PROVIDER_NAMES.has(identifier.name)) {
-        closed = false;
+        isClosed = false;
         break;
       }
       const root = findTransparentExpressionRoot(identifier);
@@ -148,7 +166,7 @@ const hasClosedArrayProvider = (scopes: ScopeAnalysis): boolean => {
           (!isNodeOfType(parent, "CallExpression") && !isNodeOfType(parent, "NewExpression")) ||
           parent.callee !== root
         )
-          closed = false;
+          isClosed = false;
       } else if (identifier.name === "window") {
         if (
           !isNodeOfType(parent, "MemberExpression") ||
@@ -157,12 +175,12 @@ const hasClosedArrayProvider = (scopes: ScopeAnalysis): boolean => {
           (getStaticPropertyName(parent) !== "innerWidth" &&
             getStaticPropertyName(parent) !== "innerHeight")
         )
-          closed = false;
+          isClosed = false;
       }
     }
   }
-  closedArrayProvidersByAnalysis.set(scopes, closed);
-  return closed;
+  closedArrayProvidersByAnalysis.set(scopes, isClosed);
+  return isClosed;
 };
 
 const isLiteralSlotCount = (expression: EsTreeNode, scopes: ScopeAnalysis): boolean => {
