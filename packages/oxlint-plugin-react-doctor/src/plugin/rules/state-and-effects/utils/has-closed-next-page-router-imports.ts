@@ -1,3 +1,4 @@
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
 import { getImportedName } from "../../../utils/get-imported-name.js";
@@ -23,6 +24,19 @@ export const hasClosedNextPageRouterImports = (scopes: ScopeAnalysis): boolean =
   let routerCalls = 0;
   walkAst(scopes.rootScope.node, (node) => {
     if (!admitted) return false;
+    if (isNodeOfType(node, "Identifier") && !isTypeScriptTypePosition(node)) {
+      const binding = scopes.symbolFor(node);
+      if (
+        binding &&
+        binding.bindingIdentifier !== node &&
+        (NEXT_PAGE_REDIRECT_DYNAMIC_GLOBALS.has(node.name) ||
+          NEXT_PAGE_REDIRECT_GLOBAL_OBJECTS.has(node.name)) &&
+        isErasedTypeScriptBinding(binding)
+      ) {
+        admitted = false;
+        return false;
+      }
+    }
     if (
       NEXT_PAGE_REDIRECT_RUNTIME_TYPES.has(node.type) &&
       !("declare" in node && node.declare === true) &&
