@@ -1,3 +1,4 @@
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
@@ -37,6 +38,20 @@ const hasClosedReactNamedHookProvider = (scopes: ScopeAnalysis): boolean => {
       return false;
     }
     if (isTypeScriptTypePosition(node)) return false;
+    if (isNodeOfType(node, "Identifier") && !isTypeScriptTypePosition(node)) {
+      const binding = scopes.symbolFor(node);
+      if (
+        binding &&
+        binding.bindingIdentifier !== node &&
+        [...NATIVE_REACT_PROVIDER_HAZARD_NAMES, "globalThis", "window", "self", "global"].includes(
+          node.name,
+        ) &&
+        isErasedTypeScriptBinding(binding)
+      ) {
+        closed = false;
+        return false;
+      }
+    }
     if (
       isNodeOfType(node, "WithStatement") ||
       isNodeOfType(node, "ImportExpression") ||
