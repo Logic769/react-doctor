@@ -1,6 +1,8 @@
+import { parseSync } from "oxc-parser";
 import { HTML_TAGS } from "../../../constants/html-tags.js";
-import type { SymbolDescriptor } from "../../../semantic/scope-analysis.js";
+import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
+import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
 import { findEnclosingFunction } from "../../../utils/find-enclosing-function.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
 import { getJsxAttributeName } from "../../../utils/get-jsx-attribute-name.js";
@@ -27,6 +29,31 @@ import {
   NATIVE_TOUCHEND_UNSUPPORTED_PROPERTY_NAMES,
   NATIVE_TOUCHEND_UNSUPPORTED_PROVIDER_PREFIXES,
 } from "./native-touchend/constants.js";
+
+interface NativeTouchendSourceProof {
+  readonly source: string;
+  readonly isSupported: boolean;
+}
+
+const programSupportByScopes = new WeakMap<ScopeAnalysis, boolean>();
+const sourceProofByScopes = new WeakMap<ScopeAnalysis, NativeTouchendSourceProof>();
+const changedTouchReadsByParameter = new WeakMap<
+  SymbolDescriptor,
+  ReadonlySet<EsTreeNode> | null
+>();
+
+const hasSupportedTouchSource = (source: string): boolean => {
+  if (!NATIVE_TOUCHEND_JSX_PRAGMA_PATTERN.test(source)) return true;
+  try {
+    const parsed = parseSync("native-touchend.tsx", source, { astType: "ts", lang: "tsx" });
+    return (
+      !parsed.errors.some((error) => error.severity === "Error") &&
+      !parsed.comments.some((comment) => NATIVE_TOUCHEND_JSX_PRAGMA_PATTERN.test(comment.value))
+    );
+  } catch {
+    return false;
+  }
+};
 
 const readCoordinateFromEvent = (identifier: EsTreeNode): EsTreeNode | null => {
   const changedTouches = identifier.parent;
@@ -91,23 +118,23 @@ const hasReadonlyProviderReferences = (symbol: SymbolDescriptor): boolean =>
     );
   });
 
-const hasSupportedTouchProgram = (context: RuleContext, parameterName: string): boolean => {
+const hasSupportedTouchProgram = (context: RuleContext): boolean => {
   const source = context.sourceCode?.getText?.();
-  if (typeof source !== "string" || NATIVE_TOUCHEND_JSX_PRAGMA_PATTERN.test(source)) return false;
+  if (typeof source !== "string") return false;
+  let sourceProof = sourceProofByScopes.get(context.scopes);
+  if (sourceProof?.source !== source) {
+    sourceProof = { source, isSupported: hasSupportedTouchSource(source) };
+    sourceProofByScopes.set(context.scopes, sourceProof);
+  }
+  if (!sourceProof.isSupported) return false;
+  const cachedSupport = programSupportByScopes.get(context.scopes);
+  if (cachedSupport !== undefined) return cachedSupport;
   let supported = true;
   walkAst(context.scopes.rootScope.node, (node) => {
     if (!supported) return false;
     if (
       NATIVE_TOUCHEND_UNSUPPORTED_PROGRAM_NODE_TYPES.has(node.type) ||
       ("declare" in node && node.declare === true)
-    ) {
-      supported = false;
-      return false;
-    }
-    if (
-      (isNodeOfType(node, "TSInterfaceDeclaration") ||
-        isNodeOfType(node, "TSTypeAliasDeclaration")) &&
-      node.id.name === parameterName
     ) {
       supported = false;
       return false;
@@ -161,7 +188,41 @@ const hasSupportedTouchProgram = (context: RuleContext, parameterName: string): 
       }
     }
   });
+  programSupportByScopes.set(context.scopes, supported);
   return supported;
+};
+
+const getReadonlyChangedTouchReads = (
+  symbol: SymbolDescriptor,
+  handler: EsTreeNodeOfType<"ArrowFunctionExpression">,
+): ReadonlySet<EsTreeNode> | null => {
+  const cachedReads = changedTouchReadsByParameter.get(symbol);
+  if (cachedReads !== undefined) return cachedReads;
+  const coordinates = new Set<EsTreeNode>();
+  const hasReadonlyReferences = symbol.references.every((reference) => {
+    if (isTypeScriptTypePosition(reference.identifier)) return true;
+    if (reference.flag !== "read" || findEnclosingFunction(reference.identifier) !== handler) {
+      return false;
+    }
+    const coordinate = readCoordinateFromEvent(reference.identifier);
+    if (!coordinate) return false;
+    coordinates.add(coordinate);
+    return true;
+  });
+  if (!hasReadonlyReferences) {
+    changedTouchReadsByParameter.set(symbol, null);
+    return null;
+  }
+  let hasSuspension = false;
+  walkAst(handler.body, (child) => {
+    if (isNodeOfType(child, "AwaitExpression") || isNodeOfType(child, "YieldExpression")) {
+      hasSuspension = true;
+      return false;
+    }
+  });
+  const reads = hasSuspension ? null : coordinates;
+  changedTouchReadsByParameter.set(symbol, reads);
+  return reads;
 };
 
 export const isNativeTouchendChangedTouchRead = (
@@ -220,27 +281,7 @@ export const isNativeTouchendChangedTouchRead = (
   }
   const symbol = context.scopes.symbolFor(parameter);
   if (!symbol || symbol.kind !== "parameter") return false;
-  let selectedRead = false;
-  if (
-    !symbol.references.every((reference) => {
-      if (isTypeScriptTypePosition(reference.identifier)) return true;
-      if (reference.flag !== "read" || findEnclosingFunction(reference.identifier) !== handler) {
-        return false;
-      }
-      const coordinate = readCoordinateFromEvent(reference.identifier);
-      selectedRead ||= coordinate === node;
-      return coordinate !== null;
-    }) ||
-    !selectedRead
-  ) {
-    return false;
-  }
-  let hasSuspension = false;
-  walkAst(handler.body, (child) => {
-    if (isNodeOfType(child, "AwaitExpression") || isNodeOfType(child, "YieldExpression")) {
-      hasSuspension = true;
-      return false;
-    }
-  });
-  return !hasSuspension && hasSupportedTouchProgram(context, parameter.name);
+  return Boolean(
+    getReadonlyChangedTouchReads(symbol, handler)?.has(node) && hasSupportedTouchProgram(context),
+  );
 };
