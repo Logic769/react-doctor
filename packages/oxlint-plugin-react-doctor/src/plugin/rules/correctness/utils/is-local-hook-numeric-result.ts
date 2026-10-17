@@ -15,6 +15,7 @@ import { getStaticPropertyKeyName } from "../../../utils/get-static-property-key
 import { getStaticPropertyName } from "../../../utils/get-static-property-name.js";
 import { getValueImportDeclaration } from "../../../utils/get-value-import-declaration.js";
 import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
 import { isFunctionLike } from "../../../utils/is-function-like.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { isProvenGlobalObjectReference } from "../../../utils/is-proven-global-namespace-reference.js";
@@ -165,7 +166,8 @@ const hasClosedNumericProgram = (scopes: ScopeAnalysis): boolean => {
     if (
       symbol &&
       NUMERIC_RESULT_ERASED_PROVIDER_NAMES.has(node.name) &&
-      isErasedTypeScriptBinding(symbol)
+      isErasedTypeScriptBinding(symbol) &&
+      !hasRuntimeValueBinding(symbol)
     ) {
       isClosed = false;
       return false;
