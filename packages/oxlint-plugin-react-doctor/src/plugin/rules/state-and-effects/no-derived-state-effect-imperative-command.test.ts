@@ -607,6 +607,18 @@ const scenarios: ImperativeCommandScenario[] = [
       'import {useEffect,useRef,useState} from "react";export const Example=({value})=>{const [count,writeCount]=useState(0);const literal=1;const current=useRef(0);function update(next){writeCount(value);current.current=next}useEffect(()=>{update(literal)},[value]);return <output>{count}</output>};',
     expected: 1,
   },
+  {
+    name: "closed same bigint initializer retained",
+    source:
+      'import {useEffect,useRef,useState} from "react";export const Example=({value})=>{const[count,setCount]=useState(0);const current=useRef(0n);useEffect(()=>{setCount(value);current.current=0n},[value]);return <output>{count}</output>};',
+    expected: 1,
+  },
+  {
+    name: "closed changed bigint literal accepted",
+    source:
+      'import {useEffect,useRef,useState} from "react";export const Example=({value})=>{const[count,setCount]=useState(0);const current=useRef(0n);useEffect(()=>{setCount(value);current.current=1n},[value]);return <output>{count}</output>};',
+    expected: 0,
+  },
 ];
 describe("no-derived-state-effect adjacent native ref commands", () => {
   it.each(scenarios)("$name", ({ source, expected }) => {
