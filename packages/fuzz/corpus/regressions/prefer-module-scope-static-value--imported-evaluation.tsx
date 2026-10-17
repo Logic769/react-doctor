@@ -1,4 +1,5 @@
 // rule: prefer-module-scope-static-value
+// verdict: pass
 // weakness: cross-file
 // source: independent synthetic imported evaluation control
 import readSnapshot from "synthetic-snapshot-provider";

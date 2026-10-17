@@ -1,4 +1,5 @@
 // rule: prefer-module-scope-static-value
+// verdict: fail
 // weakness: cross-file
 // source: independent synthetic static-allocation positive control
 
