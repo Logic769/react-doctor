@@ -383,7 +383,7 @@ const cases: ReadonlyArray<LoadingRoleCase> = [
     expectedCount: 0,
   },
   {
-    name: "erased-value-shadow-declines",
+    name: "erased-value-shadow-keeps-runtime-state",
     code: 'import { useState } from "react";\nimport { Button } from "antd";\nimport { performTask } from "./task-provider";\nexport const TaskPanel = () => {\n  const [phase, changePhase] = useState(false);\n  const [message, changeMessage] = useState("");\n  interface phase {}\n  const submit = async () => { changePhase(true); try { await performTask(); changePhase(false); } catch { changeMessage("Failed"); } };\n  return <Button loading={phase} onClick={submit}>Run</Button>;\n};\n',
     options: {
       filename: "/synthetic/antd-loading-role/erased-value-shadow-declines.tsx",
@@ -393,7 +393,7 @@ const cases: ReadonlyArray<LoadingRoleCase> = [
         "react-doctor": { portedRuleMode: "curated", capabilities: ["react", "react:18"] },
       },
     },
-    expectedCount: 0,
+    expectedCount: 1,
   },
   {
     name: "runtime-eval-declines",

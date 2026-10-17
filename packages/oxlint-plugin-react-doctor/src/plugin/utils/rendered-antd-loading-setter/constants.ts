@@ -22,3 +22,13 @@ export const UNSUPPORTED_LOADING_ROLE_NODE_TYPES: ReadonlySet<string> = new Set(
   "TSSatisfiesExpression",
   "TSInstantiationExpression",
 ]);
+export const ALWAYS_TRUTHY_LOADING_SELECTOR_NODE_TYPES: ReadonlySet<string> = new Set([
+  "JSXElement",
+  "JSXFragment",
+  "ArrayExpression",
+  "ObjectExpression",
+  "ArrowFunctionExpression",
+  "FunctionExpression",
+  "ClassExpression",
+  "NewExpression",
+]);

@@ -15,6 +15,7 @@ import { isTypeScriptTypePosition } from "./is-typescript-type-position.js";
 import type { RuleContext } from "./rule-context.js";
 import { walkAst } from "./walk-ast.js";
 import {
+  ALWAYS_TRUTHY_LOADING_SELECTOR_NODE_TYPES,
   LOADING_STATE_INITIALIZER_ARGUMENT_COUNT,
   LOADING_STATE_TUPLE_LENGTH,
   REACT_VALUE_API_NAMES,
@@ -23,6 +24,8 @@ import {
 } from "./rendered-antd-loading-setter/constants.js";
 
 const renderedSetterByScopes = new WeakMap<ScopeAnalysis, WeakMap<SymbolDescriptor, boolean>>();
+const supportedProgramByScopes = new WeakMap<ScopeAnalysis, boolean>();
+const childrenByJsxParent = new WeakMap<EsTreeNode, WeakSet<EsTreeNode>>();
 
 const isDirectCallCallee = (node: EsTreeNode): boolean =>
   isNodeOfType(node.parent, "CallExpression") &&
@@ -49,6 +52,8 @@ const hasDirectReactProviderReferences = (symbol: SymbolDescriptor): boolean => 
 };
 
 const hasSupportedLoadingRoleProgram = (context: RuleContext): boolean => {
+  const cachedSupport = supportedProgramByScopes.get(context.scopes);
+  if (cachedSupport !== undefined) return cachedSupport;
   let supported = true;
   walkAst(context.scopes.rootScope.node, (node) => {
     if (!supported) return false;
@@ -71,8 +76,11 @@ const hasSupportedLoadingRoleProgram = (context: RuleContext): boolean => {
       supported = false;
     }
   });
-  if (!supported) return false;
-  return context.scopes.rootScope.symbols.every((symbol) => {
+  if (!supported) {
+    supportedProgramByScopes.set(context.scopes, false);
+    return false;
+  }
+  const supportedProviders = context.scopes.rootScope.symbols.every((symbol) => {
     const source = getValueImportSource(symbol);
     if (source && REACT_RUNTIME_MODULE_SOURCES.has(source)) {
       return hasDirectReactProviderReferences(symbol);
@@ -91,6 +99,8 @@ const hasSupportedLoadingRoleProgram = (context: RuleContext): boolean => {
     }
     return symbol.references.length === 0;
   });
+  supportedProgramByScopes.set(context.scopes, supportedProviders);
+  return supportedProviders;
 };
 
 const isNativeJsxContainer = (node: EsTreeNode): boolean => {
@@ -111,8 +121,19 @@ const isNativeJsxContainer = (node: EsTreeNode): boolean => {
 };
 
 const hasUnsupportedLiteralSelector = (node: EsTreeNode): boolean => {
-  const expression = stripParenExpression(node);
+  let expression = stripParenExpression(node);
+  let hasUnarySelector = false;
+  while (isNodeOfType(expression, "UnaryExpression")) {
+    if (expression.operator === "void" || expression.operator === "typeof") return true;
+    hasUnarySelector = true;
+    expression = stripParenExpression(expression.argument);
+  }
+  if (ALWAYS_TRUTHY_LOADING_SELECTOR_NODE_TYPES.has(expression.type)) return true;
+  if (isNodeOfType(expression, "TemplateLiteral") && expression.expressions.length === 0) {
+    return true;
+  }
   if (!isNodeOfType(expression, "Literal")) return false;
+  if (hasUnarySelector) return true;
   if ("regex" in expression && expression.regex !== null && expression.regex !== undefined) {
     return true;
   }
@@ -161,7 +182,7 @@ const reachesOwnerReturn = (element: EsTreeNode, owner: EsTreeNode): boolean => 
       (parent.operator === "&&" || parent.operator === "||") &&
       (parent.left === current || parent.right === current)
     ) {
-      if (hasUnsupportedLiteralSelector(parent.left)) return false;
+      if (parent.left !== current && hasUnsupportedLiteralSelector(parent.left)) return false;
       const leftTruthiness = readPrimitiveLiteralTruthiness(parent.left);
       if (parent.operator === "&&" && (parent.left === current || leftTruthiness === false))
         return false;
@@ -191,9 +212,14 @@ const reachesOwnerReturn = (element: EsTreeNode, owner: EsTreeNode): boolean => 
     }
     if (
       (isNodeOfType(parent, "JSXFragment") || isNativeJsxContainer(parent)) &&
-      (isNodeOfType(parent, "JSXElement") || isNodeOfType(parent, "JSXFragment")) &&
-      parent.children.some((child) => child === current)
+      (isNodeOfType(parent, "JSXElement") || isNodeOfType(parent, "JSXFragment"))
     ) {
+      let children = childrenByJsxParent.get(parent);
+      if (!children) {
+        children = new WeakSet(parent.children);
+        childrenByJsxParent.set(parent, children);
+      }
+      if (!children.has(current)) return false;
       current = parent;
       continue;
     }
