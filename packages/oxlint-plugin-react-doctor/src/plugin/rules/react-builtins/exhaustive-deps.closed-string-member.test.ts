@@ -468,10 +468,10 @@ const closedStringMemberCases = [
     expectation: "warning",
   },
   {
-    name: "erased-eval-lexical-mutation",
-    code: 'import { useCallback, useEffect } from "react";\ndeclare const eval: (source: string) => unknown;\nexport const Example = ({ value, other, consume }) => {\n  const actions = { ADD: "add", REMOVE: "remove", NONE: "none" };\n  eval("actions.ADD = String(value)");\n  const callback = useCallback(() => actions.ADD, []);\n  return <button onClick={callback}>Run</button>;\n};\n',
+    name: "erased-window-eval-frontier",
+    code: 'import { useCallback, useEffect } from "react";\ninterface window {}\nexport const Example = ({ value, other, consume }) => {\n  const actions = { ADD: "add", REMOVE: "remove", NONE: "none" };\n  window.eval("actions.ADD = String(value)");\n  const callback = useCallback(() => actions.ADD, []);\n  return <button onClick={callback}>Run</button>;\n};\n',
     options: {
-      filename: "/synthetic/readonly-literal-member/erased-eval-lexical-mutation.tsx",
+      filename: "/synthetic/readonly-literal-member/erased-window-eval-frontier.tsx",
       forceJsx: true,
       includeLocations: true,
       settings: {
@@ -747,6 +747,22 @@ const closedStringMemberCases = [
     options: {
       filename:
         "/synthetic/readonly-literal-member/named-default-react-namespace-provider-replacement.tsx",
+      forceJsx: true,
+      includeLocations: true,
+      settings: {
+        "react-doctor": {
+          portedRuleMode: "curated",
+          capabilities: ["react"],
+        },
+      },
+    },
+    expectation: "warning",
+  },
+  {
+    name: "erased-hook-keeps-reactive-member-warning",
+    code: 'import { useCallback, useEffect } from "react";\n\nexport const Example = ({ value, other, consume }) => {\n  interface useCallback {}\n  const actions = { ADD: value };\n  const callback = useCallback(() => actions.ADD, []);\n  return <button onClick={callback}>Run</button>;\n};\n',
+    options: {
+      filename: "/synthetic/readonly-literal-member/erased-hook-keeps-reactive-member-warning.tsx",
       forceJsx: true,
       includeLocations: true,
       settings: {
