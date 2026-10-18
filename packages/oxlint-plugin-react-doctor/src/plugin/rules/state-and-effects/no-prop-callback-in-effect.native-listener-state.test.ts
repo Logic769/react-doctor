@@ -1779,6 +1779,29 @@ export const Example = (props) => {
       },
     ],
   },
+  {
+    name: "erased-native-document-interface",
+    code: 'interface document {}\nimport * as React from "react";\nexport const Example = (props) => {\n  const [position, setPosition] = React.useState({ x: 0, y: 0 });\n  const handleMove = (event) => { setPosition({ x: event.clientX, y: event.clientY }); };\n  function bindEvent(remove) {\n    let method = "addEventListener";\n    if (remove) method = "removeEventListener";\n    document[method]("mousemove", handleMove, false);\n  }\n  React.useEffect(() => { bindEvent(); return () => bindEvent(true); }, []);\n  React.useEffect(() => { props.onChange(position.x, position.y); }, [position]);\n  return null;\n};\n',
+    expectedDiagnostics: [],
+  },
+  {
+    name: "erased-handler-local-setter-interface",
+    code: 'import * as React from "react";\nexport const Example = (props) => {\n  const [position, setPosition] = React.useState({ x: 0, y: 0 });\n  const handleMove = (event) => { interface setPosition {} setPosition({ x: event.clientX, y: event.clientY }); };\n  function bindEvent(remove) {\n    let method = "addEventListener";\n    if (remove) method = "removeEventListener";\n    document[method]("mousemove", handleMove, false);\n  }\n  React.useEffect(() => { bindEvent(); return () => bindEvent(true); }, []);\n  React.useEffect(() => { props.onChange(position.x, position.y); }, [position]);\n  return null;\n};\n',
+    expectedDiagnostics: [],
+  },
+  {
+    name: "erased-react-interface-keeps-extra-react-writer",
+    code: 'import * as React from "react";\nexport const Example = (props) => {\n  interface React {}\n  const [position, setPosition] = React.useState({ x: 0, y: 0 });\n  const handleMove = (event) => { setPosition({ x: event.clientX, y: event.clientY }); };\n  function bindEvent(remove) {\n    let method = "addEventListener";\n    if (remove) method = "removeEventListener";\n    document[method]("mousemove", handleMove, false);\n  }\n  React.useEffect(() => { bindEvent(); return () => bindEvent(true); }, []);\n  React.useEffect(() => { props.onChange(position.x, position.y); }, [position]);\n  return <button onClick={() => setPosition({ x: 1, y: 2 })}>Write</button>;\n};\n',
+    expectedDiagnostics: [
+      {
+        column: 26,
+        line: 12,
+        message:
+          'Your parent re-renders on every local state change because this useEffect calls the prop "onChange" just to stay in sync.',
+        nodeType: "CallExpression",
+      },
+    ],
+  },
 ];
 
 describe("no-prop-callback-in-effect finite native listener state", () => {

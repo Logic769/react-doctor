@@ -2,6 +2,7 @@ import { EFFECT_HOOK_NAMES } from "../../../constants/react.js";
 import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
 import { findEnclosingFunction } from "../../../utils/find-enclosing-function.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
 import { getAssignedExpressionForWrite } from "../../../utils/get-assigned-expression-for-write.js";
@@ -34,6 +35,7 @@ interface NativeStateHandler {
 }
 
 interface NativeStateCertificates {
+  runtimeScopes: ScopeAnalysis;
   providerAccepted: boolean | null;
   selectors: WeakMap<SymbolDescriptor, boolean>;
   handlers: WeakMap<SymbolDescriptor, NativeStateHandler | null>;
@@ -83,6 +85,18 @@ const getNativeStateCertificates = (scopes: ScopeAnalysis): NativeStateCertifica
   let certificates = NATIVE_STATE_CERTIFICATES.get(scopes);
   if (!certificates) {
     certificates = {
+      runtimeScopes: {
+        ...scopes,
+        isGlobalReference: (identifier) => {
+          if (scopes.isGlobalReference(identifier)) return true;
+          const symbol = scopes.symbolFor(identifier);
+          return Boolean(
+            symbol &&
+            (symbol.kind === "ts-interface" || symbol.kind === "ts-type-alias") &&
+            !hasRuntimeValueBinding(symbol),
+          );
+        },
+      },
       providerAccepted: null,
       selectors: new WeakMap(),
       handlers: new WeakMap(),
@@ -189,7 +203,7 @@ const isFiniteNativeSelector = (
     if (!isNodeOfType(listenerStatement, "ExpressionStatement")) return false;
     const listener = getNativeListenerCall(
       stripParenExpression(listenerStatement.expression),
-      context.scopes,
+      certificates.runtimeScopes,
     );
     if (
       !listener ||
@@ -317,7 +331,7 @@ const hasFiniteNativeProviders = (
       )
         accepted = false;
     }
-    if (isNodeOfType(node, "Identifier") && context.scopes.isGlobalReference(node)) {
+    if (isNodeOfType(node, "Identifier") && certificates.runtimeScopes.isGlobalReference(node)) {
       if (NATIVE_PROVIDER_EXECUTION_NAMES.has(node.name)) accepted = false;
       if (node.name === "document" || node.name === "window") {
         const expression = findTransparentExpressionRoot(node);
@@ -333,7 +347,7 @@ const hasFiniteNativeProviders = (
       if (propertyName && NATIVE_PROVIDER_MEMBER_NAMES.has(propertyName)) accepted = false;
       if (node.computed && propertyName === null) {
         const call = findTransparentExpressionRoot(node).parent;
-        const listener = call ? getNativeListenerCall(call, context.scopes) : null;
+        const listener = call ? getNativeListenerCall(call, certificates.runtimeScopes) : null;
         const selector = isNodeOfType(node.property, "Identifier")
           ? context.scopes.symbolFor(node.property)
           : null;
@@ -351,7 +365,7 @@ const hasFiniteNativeProviders = (
         if (
           isNodeOfType(receiver, "Identifier") &&
           (receiver.name === "document" || receiver.name === "window") &&
-          context.scopes.isGlobalReference(receiver)
+          certificates.runtimeScopes.isGlobalReference(receiver)
         ) {
           const call = findTransparentExpressionRoot(node).parent;
           if (
@@ -419,7 +433,9 @@ const getNativeStateHandler = (
   for (const reference of symbol.references) {
     if (reference.flag !== "read") return null;
     const handler = findTransparentExpressionRoot(reference.identifier);
-    const listener = handler.parent ? getNativeListenerCall(handler.parent, context.scopes) : null;
+    const listener = handler.parent
+      ? getNativeListenerCall(handler.parent, certificates.runtimeScopes)
+      : null;
     if (!listener || listener.handler !== handler) return null;
     let methodName = getStaticPropertyName(listener.member);
     if (listener.member.computed && methodName === null) {
@@ -435,7 +451,7 @@ const getNativeStateHandler = (
         !isProvenUnmodifiedGlobalNamespaceReference(
           listener.member.object,
           listener.namespaceName,
-          context.scopes,
+          certificates.runtimeScopes,
           nativeMethod,
         )
       )
