@@ -1,4 +1,4 @@
-import type { SymbolDescriptor } from "../../../semantic/scope-analysis.js";
+import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
 import type { RuleContext } from "../../../utils/rule-context.js";
@@ -13,6 +13,7 @@ import {
   getReactDoctorStringSetting,
 } from "../../../utils/get-react-doctor-setting.js";
 import { getValueImportSource } from "../../../utils/get-value-import-declaration.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { isTypeOnlyImport } from "../../../utils/is-type-only-import.js";
 import { walkAst } from "../../../utils/walk-ast.js";
@@ -253,13 +254,15 @@ const hasClosedProviders = (
       supported = false;
       return false;
     }
-    if (
-      isNodeOfType(node, "Identifier") &&
-      CHART_UNSUPPORTED_GLOBAL_NAMES.has(node.name) &&
-      context.scopes.referenceFor(node)
-    ) {
-      supported = false;
-      return false;
+    if (isNodeOfType(node, "Identifier") && CHART_UNSUPPORTED_GLOBAL_NAMES.has(node.name)) {
+      const reference = context.scopes.referenceFor(node);
+      if (
+        reference &&
+        (!reference.resolvedSymbol || !hasRuntimeValueBinding(reference.resolvedSymbol))
+      ) {
+        supported = false;
+        return false;
+      }
     }
     if (!isNodeOfType(node, "ImportDeclaration") || isTypeOnlyImport(node)) return;
     if (CHART_UNSUPPORTED_PROVIDER_MODULES.has(String(node.source.value))) {
@@ -318,6 +321,178 @@ const hasClosedProviders = (
   return supported && [...providerReads].every(([symbol, reads]) => hasOnlyReadsAt(symbol, reads));
 };
 
+interface ChartOptionsStateCertificate {
+  readonly declarator: EsTreeNodeOfType<"VariableDeclarator">;
+  readonly component: EsTreeNode;
+  readonly assignments: ReadonlySet<EsTreeNode> | null;
+}
+
+const chartCertificatesByAnalysis = new WeakMap<
+  ScopeAnalysis,
+  WeakMap<SymbolDescriptor, WeakMap<EsTreeNode, ChartOptionsStateCertificate>>
+>();
+
+const collectChartOptionsStateAssignments = (
+  state: SymbolDescriptor,
+  setterIdentifier: EsTreeNodeOfType<"Identifier">,
+  component: EsTreeNode,
+  updateEffect: ChartEffect,
+  context: RuleContext,
+): ReadonlySet<EsTreeNode> | null => {
+  const setter = context.scopes.symbolFor(setterIdentifier);
+  if (!setter || setter.references.length !== CHART_SETTER_ARGUMENT_COUNT) return null;
+  const setterReference = setter.references[0];
+  const feed = setterReference?.identifier.parent;
+  if (
+    !setterReference ||
+    setterReference.flag !== "read" ||
+    !isNodeOfType(feed, "CallExpression") ||
+    feed.optional ||
+    feed.callee !== setterReference.identifier ||
+    feed.arguments.length !== CHART_SETTER_ARGUMENT_COUNT ||
+    !isNodeOfType(feed.arguments[0], "Identifier") ||
+    !isNodeOfType(feed.parent, "ExpressionStatement")
+  )
+    return null;
+  const construction = readEffect(findEnclosingFunction(feed), component, context);
+  const instance = context.scopes.symbolFor(feed.arguments[0]);
+  const creation = instance && getDirectConstInitializer(instance);
+  const instanceDeclaration = instance?.declarationNode.parent;
+  if (
+    !construction ||
+    !instance ||
+    !isNodeOfType(creation, "NewExpression") ||
+    creation.arguments.length !== CHART_CONSTRUCTOR_ARGUMENT_COUNT ||
+    creation.arguments.some((argument) => isNodeOfType(argument, "SpreadElement")) ||
+    !isNamedValueProvider(creation.callee, "chart.js", "Chart", context) ||
+    !isNodeOfType(instanceDeclaration, "VariableDeclaration") ||
+    instanceDeclaration.declarations.length !== CHART_SINGLE_DECLARATOR_COUNT ||
+    instanceDeclaration.parent !== construction.body ||
+    getNodeStartIndex(instance.declarationNode) < CHART_EMPTY_ARGUMENT_COUNT ||
+    getNodeStartIndex(instance.declarationNode) >= getNodeStartIndex(feed)
+  )
+    return null;
+  const configuration = creation.arguments[1];
+  if (
+    !isNodeOfType(configuration, "ObjectExpression") ||
+    !creation.arguments[0] ||
+    !isOrdinaryDataExpression(creation.arguments[0], context)
+  )
+    return null;
+  const constructionStatements = construction.body.body.filter(
+    (statement) =>
+      statement.type !== "TSInterfaceDeclaration" && statement.type !== "TSTypeAliasDeclaration",
+  );
+  const tail = constructionStatements.slice(-CHART_CONSTRUCTION_TAIL_STATEMENT_COUNT);
+  const [instanceStatement, feedStatement, returned] = tail;
+  if (
+    instanceStatement !== instanceDeclaration ||
+    feedStatement !== feed.parent ||
+    !isNodeOfType(returned, "ReturnStatement") ||
+    !isNodeOfType(returned.argument, "ArrowFunctionExpression") ||
+    returned.argument.async ||
+    returned.argument.params.length !== CHART_EMPTY_ARGUMENT_COUNT
+  )
+    return null;
+  const cleanup = readMethodCall(returned.argument.body, instance, "destroy", context);
+  if (
+    !cleanup ||
+    cleanup.arguments.length !== CHART_EMPTY_ARGUMENT_COUNT ||
+    !isNodeOfType(cleanup.callee, "MemberExpression") ||
+    !hasOnlyReadsAt(instance, new Set([feed.arguments[0], cleanup.callee.object]))
+  )
+    return null;
+  if (
+    !constructionStatements
+      .slice(0, -CHART_CONSTRUCTION_TAIL_STATEMENT_COUNT)
+      .every(
+        (statement) =>
+          isNodeOfType(statement, "VariableDeclaration") &&
+          statement.kind === "const" &&
+          statement.declarations.length === CHART_SINGLE_DECLARATOR_COUNT &&
+          statement.declarations.every(
+            (binding) =>
+              isNodeOfType(binding.id, "Identifier") &&
+              binding.init &&
+              isOrdinaryDataExpression(binding.init, context),
+          ),
+      )
+  )
+    return null;
+  if (
+    updateEffect.callback === construction.callback ||
+    updateEffect.body.body.length < CHART_UPDATE_MIN_STATEMENT_COUNT
+  )
+    return null;
+  const statements = updateEffect.body.body;
+  const guard = statements[0];
+  const last = statements.at(-1);
+  if (
+    !isNodeOfType(guard, "IfStatement") ||
+    guard.alternate ||
+    !isNodeOfType(guard.test, "UnaryExpression") ||
+    guard.test.operator !== "!" ||
+    !isNodeOfType(guard.test.argument, "Identifier") ||
+    context.scopes.symbolFor(guard.test.argument) !== state ||
+    !isNodeOfType(guard.consequent, "ReturnStatement") ||
+    guard.consequent.argument ||
+    !isNodeOfType(last, "ExpressionStatement")
+  )
+    return null;
+  const update = readMethodCall(last.expression, state, "update", context);
+  if (
+    !update ||
+    update.arguments.length !== CHART_SETTER_ARGUMENT_COUNT ||
+    !isNodeOfType(update.arguments[0], "Literal") ||
+    update.arguments[0].value !== "none" ||
+    !isNodeOfType(update.callee, "MemberExpression")
+  )
+    return null;
+  const allowedStateReads = new Set<EsTreeNode>([guard.test.argument, update.callee.object]);
+  const assignments = new Set<EsTreeNode>();
+  const checkStatement = (statement: EsTreeNode): boolean => {
+    if (isNodeOfType(statement, "BlockStatement")) return statement.body.every(checkStatement);
+    if (isNodeOfType(statement, "IfStatement"))
+      return (
+        isOrdinaryDataExpression(statement.test, context) &&
+        checkStatement(statement.consequent) &&
+        (!statement.alternate || checkStatement(statement.alternate))
+      );
+    if (
+      !isNodeOfType(statement, "ExpressionStatement") ||
+      !isNodeOfType(statement.expression, "AssignmentExpression") ||
+      statement.expression.operator !== "="
+    )
+      return false;
+    const write = statement.expression;
+    const path = readMemberPath(write.left);
+    if (
+      !path ||
+      context.scopes.symbolFor(path.root) !== state ||
+      !CHART_OPTIONS_COLOR_PATHS.has(path.names.join(".")) ||
+      !hasOrdinaryConfigurationPath(configuration, path.names) ||
+      !isOrdinaryDataExpression(write.right, context)
+    )
+      return false;
+    allowedStateReads.add(path.root);
+    assignments.add(write);
+    return true;
+  };
+  if (
+    !statements
+      .slice(CHART_SETTER_ARGUMENT_COUNT, -CHART_SETTER_ARGUMENT_COUNT)
+      .every(checkStatement)
+  )
+    return null;
+  for (const effect of [construction, updateEffect])
+    for (const element of effect.dependencies.elements)
+      if (isNodeOfType(element, "Identifier") && context.scopes.symbolFor(element) === state)
+        allowedStateReads.add(element);
+  if (!hasOnlyReadsAt(state, allowedStateReads)) return null;
+  const program = findProgramRoot(component);
+  return program && hasClosedProviders(program, creation.callee, context) ? assignments : null;
+};
+
 export const isOwnedChartOptionsStateAssignment = (
   assignment: EsTreeNodeOfType<"AssignmentExpression">,
   state: SymbolDescriptor,
@@ -354,156 +529,36 @@ export const isOwnedChartOptionsStateAssignment = (
     !isNamedValueProvider(initial.callee, "react", "useState", context)
   )
     return false;
-  const setter = context.scopes.symbolFor(declarator.id.elements[1]);
-  if (!setter || setter.references.length !== CHART_SETTER_ARGUMENT_COUNT) return false;
-  const setterReference = setter.references[0];
-  const feed = setterReference?.identifier.parent;
-  if (
-    !setterReference ||
-    setterReference.flag !== "read" ||
-    !isNodeOfType(feed, "CallExpression") ||
-    feed.optional ||
-    feed.callee !== setterReference.identifier ||
-    feed.arguments.length !== CHART_SETTER_ARGUMENT_COUNT ||
-    !isNodeOfType(feed.arguments[0], "Identifier") ||
-    !isNodeOfType(feed.parent, "ExpressionStatement")
-  )
-    return false;
-  const construction = readEffect(findEnclosingFunction(feed), component, context);
-  const instance = context.scopes.symbolFor(feed.arguments[0]);
-  const creation = instance && getDirectConstInitializer(instance);
-  const instanceDeclaration = instance?.declarationNode.parent;
-  if (
-    !construction ||
-    !instance ||
-    !isNodeOfType(creation, "NewExpression") ||
-    creation.arguments.length !== CHART_CONSTRUCTOR_ARGUMENT_COUNT ||
-    creation.arguments.some((argument) => isNodeOfType(argument, "SpreadElement")) ||
-    !isNamedValueProvider(creation.callee, "chart.js", "Chart", context) ||
-    !isNodeOfType(instanceDeclaration, "VariableDeclaration") ||
-    instanceDeclaration.declarations.length !== CHART_SINGLE_DECLARATOR_COUNT ||
-    instanceDeclaration.parent !== construction.body ||
-    getNodeStartIndex(instance.declarationNode) < CHART_EMPTY_ARGUMENT_COUNT ||
-    getNodeStartIndex(instance.declarationNode) >= getNodeStartIndex(feed)
-  )
-    return false;
-  const configuration = creation.arguments[1];
-  if (
-    !isNodeOfType(configuration, "ObjectExpression") ||
-    !creation.arguments[0] ||
-    !isOrdinaryDataExpression(creation.arguments[0], context)
-  )
-    return false;
-  const constructionStatements = construction.body.body;
-  const tail = constructionStatements.slice(-CHART_CONSTRUCTION_TAIL_STATEMENT_COUNT);
-  const [instanceStatement, feedStatement, returned] = tail;
-  if (
-    instanceStatement !== instanceDeclaration ||
-    feedStatement !== feed.parent ||
-    !isNodeOfType(returned, "ReturnStatement") ||
-    !isNodeOfType(returned.argument, "ArrowFunctionExpression") ||
-    returned.argument.async ||
-    returned.argument.params.length !== CHART_EMPTY_ARGUMENT_COUNT
-  )
-    return false;
-  const cleanup = readMethodCall(returned.argument.body, instance, "destroy", context);
-  if (
-    !cleanup ||
-    cleanup.arguments.length !== CHART_EMPTY_ARGUMENT_COUNT ||
-    !isNodeOfType(cleanup.callee, "MemberExpression") ||
-    !hasOnlyReadsAt(instance, new Set([feed.arguments[0], cleanup.callee.object]))
-  )
-    return false;
-  if (
-    !constructionStatements
-      .slice(0, -CHART_CONSTRUCTION_TAIL_STATEMENT_COUNT)
-      .every(
-        (statement) =>
-          isNodeOfType(statement, "VariableDeclaration") &&
-          statement.kind === "const" &&
-          statement.declarations.length === CHART_SINGLE_DECLARATOR_COUNT &&
-          statement.declarations.every(
-            (binding) =>
-              isNodeOfType(binding.id, "Identifier") &&
-              binding.init &&
-              isOrdinaryDataExpression(binding.init, context),
-          ),
-      )
-  )
-    return false;
   const updateEffect = readEffect(findEnclosingFunction(assignment), component, context);
+  if (!updateEffect) return false;
+  let certificatesByState = chartCertificatesByAnalysis.get(context.scopes);
+  if (!certificatesByState) {
+    certificatesByState = new WeakMap();
+    chartCertificatesByAnalysis.set(context.scopes, certificatesByState);
+  }
+  let certificatesByEffect = certificatesByState.get(state);
+  if (!certificatesByEffect) {
+    certificatesByEffect = new WeakMap();
+    certificatesByState.set(state, certificatesByEffect);
+  }
+  let certificate = certificatesByEffect.get(updateEffect.callback);
   if (
-    !updateEffect ||
-    updateEffect.callback === construction.callback ||
-    updateEffect.body.body.length < CHART_UPDATE_MIN_STATEMENT_COUNT
-  )
-    return false;
-  const statements = updateEffect.body.body;
-  const guard = statements[0];
-  const last = statements.at(-1);
-  if (
-    !isNodeOfType(guard, "IfStatement") ||
-    guard.alternate ||
-    !isNodeOfType(guard.test, "UnaryExpression") ||
-    guard.test.operator !== "!" ||
-    !isNodeOfType(guard.test.argument, "Identifier") ||
-    context.scopes.symbolFor(guard.test.argument) !== state ||
-    !isNodeOfType(guard.consequent, "ReturnStatement") ||
-    guard.consequent.argument ||
-    !isNodeOfType(last, "ExpressionStatement")
-  )
-    return false;
-  const update = readMethodCall(last.expression, state, "update", context);
-  if (
-    !update ||
-    update.arguments.length !== CHART_SETTER_ARGUMENT_COUNT ||
-    !isNodeOfType(update.arguments[0], "Literal") ||
-    update.arguments[0].value !== "none" ||
-    !isNodeOfType(update.callee, "MemberExpression")
-  )
-    return false;
-  const allowedStateReads = new Set<EsTreeNode>([guard.test.argument, update.callee.object]);
-  const assignments = new Set<EsTreeNode>();
-  const checkStatement = (statement: EsTreeNode): boolean => {
-    if (isNodeOfType(statement, "BlockStatement")) return statement.body.every(checkStatement);
-    if (isNodeOfType(statement, "IfStatement"))
-      return (
-        isOrdinaryDataExpression(statement.test, context) &&
-        checkStatement(statement.consequent) &&
-        (!statement.alternate || checkStatement(statement.alternate))
-      );
-    if (
-      !isNodeOfType(statement, "ExpressionStatement") ||
-      !isNodeOfType(statement.expression, "AssignmentExpression") ||
-      statement.expression.operator !== "="
-    )
-      return false;
-    const write = statement.expression;
-    const path = readMemberPath(write.left);
-    if (
-      !path ||
-      context.scopes.symbolFor(path.root) !== state ||
-      !CHART_OPTIONS_COLOR_PATHS.has(path.names.join(".")) ||
-      !hasOrdinaryConfigurationPath(configuration, path.names) ||
-      !isOrdinaryDataExpression(write.right, context)
-    )
-      return false;
-    allowedStateReads.add(path.root);
-    assignments.add(write);
-    return true;
-  };
-  if (
-    !statements
-      .slice(CHART_SETTER_ARGUMENT_COUNT, -CHART_SETTER_ARGUMENT_COUNT)
-      .every(checkStatement) ||
-    !assignments.has(assignment)
-  )
-    return false;
-  for (const effect of [construction, updateEffect])
-    for (const element of effect.dependencies.elements)
-      if (isNodeOfType(element, "Identifier") && context.scopes.symbolFor(element) === state)
-        allowedStateReads.add(element);
-  if (!hasOnlyReadsAt(state, allowedStateReads)) return false;
-  const program = findProgramRoot(component);
-  return Boolean(program && hasClosedProviders(program, creation.callee, context));
+    !certificate ||
+    certificate.declarator !== declarator ||
+    certificate.component !== component
+  ) {
+    certificate = {
+      declarator,
+      component,
+      assignments: collectChartOptionsStateAssignments(
+        state,
+        declarator.id.elements[1],
+        component,
+        updateEffect,
+        context,
+      ),
+    };
+    certificatesByEffect.set(updateEffect.callback, certificate);
+  }
+  return certificate.assignments?.has(assignment) ?? false;
 };
