@@ -42,6 +42,13 @@ interface SelectedArrayProperty {
   hasConflict: boolean;
 }
 
+interface BodyArrayMirrorModuleFacts {
+  readonly program: EsTreeNode;
+  readonly isSupported: boolean;
+}
+
+const moduleFactsByScopes = new WeakMap<ScopeAnalysis, BodyArrayMirrorModuleFacts>();
+
 const mergeSelectedProperties = (
   properties: ReadonlyArray<SelectedArrayProperty>,
 ): SelectedArrayProperty => {
@@ -130,11 +137,21 @@ const getSelectedArrayProperty = (
 };
 
 const hasOnlyReferences = (symbol: SymbolDescriptor, allowed: ReadonlySet<EsTreeNode>): boolean =>
-  symbol.references.every(
-    (reference) =>
+  symbol.references.every((reference) => {
+    const bindingProperty = symbol.bindingIdentifier.parent;
+    if (
+      isNodeOfType(bindingProperty, "Property") &&
+      !bindingProperty.computed &&
+      isNodeOfType(bindingProperty.parent, "ObjectPattern") &&
+      bindingProperty.value === symbol.bindingIdentifier &&
+      bindingProperty.key === reference.identifier
+    )
+      return true;
+    return (
       isTypeScriptTypePosition(reference.identifier) ||
-      (reference.flag === "read" && allowed.has(reference.identifier)),
-  );
+      (reference.flag === "read" && allowed.has(reference.identifier))
+    );
+  });
 
 const isNamedValueHook = (call: EsTreeNode, name: string, scopes: ScopeAnalysis): boolean => {
   if (!isNodeOfType(call, "CallExpression") || call.optional) return false;
@@ -351,12 +368,17 @@ export const getBodyArrayPropMirror = ({
   )
     return null;
   const program = findProgramRoot(componentBody);
-  if (
-    !program ||
-    hasUnsupportedModuleShape(program, scopes) ||
-    !hasClosedReactProviders(program, scopes)
-  )
-    return null;
+  if (!program) return null;
+  let moduleFacts = moduleFactsByScopes.get(scopes);
+  if (!moduleFacts || moduleFacts.program !== program) {
+    moduleFacts = {
+      program,
+      isSupported:
+        !hasUnsupportedModuleShape(program, scopes) && hasClosedReactProviders(program, scopes),
+    };
+    moduleFactsByScopes.set(scopes, moduleFacts);
+  }
+  if (!moduleFacts.isSupported) return null;
   for (const statement of componentBody.body) {
     if (!isNodeOfType(statement, "ExpressionStatement")) continue;
     const effectCall = statement.expression;
