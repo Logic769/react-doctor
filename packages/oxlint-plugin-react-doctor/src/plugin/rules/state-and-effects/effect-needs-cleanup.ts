@@ -1,3 +1,4 @@
+import { hasRuntimeValueBinding } from "../../utils/has-runtime-value-binding.js";
 import { isLayerLifecycleCallback } from "../../utils/is-layer-lifecycle-callback.js";
 import { nodeDominatesNode } from "../../utils/node-dominates-node.js";
 import { isApiPlatformDataProvider } from "../../utils/is-api-platform-data-provider.js";
@@ -6821,6 +6822,26 @@ const isStableReturnedAllocatorBinding = (
   return isStable;
 };
 
+const isNativeReturnedAllocatorReceiver = (
+  expression: EsTreeNode | null | undefined,
+  context: RuleContext,
+): boolean => {
+  if (isStableLoopReceiver(expression, context)) return true;
+  if (!expression) return false;
+  const receiver = stripParenExpression(expression);
+  if (
+    !isNodeOfType(receiver, "Identifier") ||
+    (receiver.name !== "document" && receiver.name !== "window")
+  )
+    return false;
+  const binding = context.scopes.symbolFor(receiver);
+  return Boolean(
+    binding &&
+    (binding.kind === "ts-interface" || binding.kind === "ts-type-alias") &&
+    !hasRuntimeValueBinding(binding),
+  );
+};
+
 const isClosedReturnedAllocatorListenerCall = (
   call: EsTreeNode,
   method: string,
@@ -6882,7 +6903,7 @@ const isClosedReturnedAllocatorListenerCall = (
   const isCapturedGlobal = Boolean(
     isPrivatePlainConstIdentifier(receiver, context) &&
     isStableReturnedAllocatorBinding(receiver, context) &&
-    isStableLoopReceiver(receiverValue, context),
+    isNativeReturnedAllocatorReceiver(receiverValue, context),
   );
   const event = call.arguments[0];
   const handler = call.arguments[EVENT_LISTENER_HANDLER_ARGUMENT_INDEX];
@@ -6893,7 +6914,11 @@ const isClosedReturnedAllocatorListenerCall = (
   const stableOptions = options ? resolveReadOnlyEventListenerOptions(options, context) : null;
   {
     for (const reference of [receiver, handler, options]) {
-      if (!isNodeOfType(reference, "Identifier") || context.scopes.isGlobalReference(reference))
+      if (
+        !isNodeOfType(reference, "Identifier") ||
+        context.scopes.isGlobalReference(reference) ||
+        isNativeReturnedAllocatorReceiver(reference, context)
+      )
         continue;
       const symbol = context.scopes.symbolFor(reference);
       if (!symbol?.initializer || !isNodeOfType(symbol.declarationNode, "VariableDeclarator"))
@@ -6918,7 +6943,7 @@ const isClosedReturnedAllocatorListenerCall = (
     }
   }
   return Boolean(
-    (isStableLoopReceiver(receiver, context) || isCapturedRef || isCapturedGlobal) &&
+    (isNativeReturnedAllocatorReceiver(receiver, context) || isCapturedRef || isCapturedGlobal) &&
     isNodeOfType(event, "Literal") &&
     typeof event.value === "string" &&
     isNodeOfType(handler, "Identifier") &&
