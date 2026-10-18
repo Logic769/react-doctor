@@ -13,6 +13,45 @@ interface TypedDisplayNameAssignmentOptions {
   scopes: ScopeAnalysis;
 }
 
+interface TypedDisplayNameProgramFacts {
+  nextStatements: ReadonlyMap<EsTreeNode, EsTreeNode>;
+  hasVisibleEval: boolean;
+}
+
+const programFactsByScopes = new WeakMap<ScopeAnalysis, TypedDisplayNameProgramFacts>();
+
+const getTypedDisplayNameProgramFacts = (
+  program: EsTreeNodeOfType<"Program">,
+  scopes: ScopeAnalysis,
+): TypedDisplayNameProgramFacts => {
+  const cached = programFactsByScopes.get(scopes);
+  if (cached) return cached;
+  const nextStatements = new Map<EsTreeNode, EsTreeNode>();
+  let previousStatement: EsTreeNode | null = null;
+  for (const statement of program.body) {
+    if (previousStatement && !nextStatements.has(previousStatement))
+      nextStatements.set(previousStatement, statement);
+    previousStatement = statement;
+  }
+  const facts: TypedDisplayNameProgramFacts = {
+    nextStatements,
+    hasVisibleEval: someAst(program, (child) => {
+      if (!isNodeOfType(child, "CallExpression")) return false;
+      const callee = stripParenExpression(child.callee);
+      if (isNodeOfType(callee, "Identifier")) return callee.name === "eval";
+      if (!isNodeOfType(callee, "MemberExpression") || getStaticPropertyName(callee) !== "eval")
+        return false;
+      const receiver = stripParenExpression(callee.object);
+      return (
+        isNodeOfType(receiver, "Identifier") &&
+        (receiver.name === "globalThis" || receiver.name === "window")
+      );
+    }),
+  };
+  programFactsByScopes.set(scopes, facts);
+  return facts;
+};
+
 export const hasTypedDisplayNameAssignment = ({
   node,
   scopes,
@@ -47,10 +86,9 @@ export const hasTypedDisplayNameAssignment = ({
     symbol.initializer !== initializerRoot
   )
     return false;
-  const statements: ReadonlyArray<EsTreeNode> = program.body;
-  const [currentStatement, nextStatement] = statements.slice(statements.indexOf(statement));
-  if (currentStatement !== statement || !isNodeOfType(nextStatement, "ExpressionStatement"))
-    return false;
+  const programFacts = getTypedDisplayNameProgramFacts(program, scopes);
+  const nextStatement = programFacts.nextStatements.get(statement);
+  if (!isNodeOfType(nextStatement, "ExpressionStatement")) return false;
   const assignment = nextStatement.expression;
   if (
     !isNodeOfType(assignment, "AssignmentExpression") ||
@@ -98,17 +136,6 @@ export const hasTypedDisplayNameAssignment = ({
     symbol.references.every(
       (reference) => reference.identifier === receiver && reference.flag === "read",
     ) &&
-    !someAst(program, (child) => {
-      if (!isNodeOfType(child, "CallExpression")) return false;
-      const callee = stripParenExpression(child.callee);
-      if (isNodeOfType(callee, "Identifier")) return callee.name === "eval";
-      if (!isNodeOfType(callee, "MemberExpression") || getStaticPropertyName(callee) !== "eval")
-        return false;
-      const receiver = stripParenExpression(callee.object);
-      return (
-        isNodeOfType(receiver, "Identifier") &&
-        (receiver.name === "globalThis" || receiver.name === "window")
-      );
-    })
+    !programFacts.hasVisibleEval
   );
 };

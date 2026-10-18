@@ -209,15 +209,15 @@ const typedReceiverCases = [
     expectedCount: 0,
   },
   {
-    name: "ambient-eval-const",
-    code: "import { forwardRef } from 'react';\ndeclare const eval: (source: string) => unknown;\ninterface DisplayTarget { displayName?: string }\nexport const Preview = forwardRef((props, ref) => <div ref={ref} />);\n(Preview as DisplayTarget).displayName = 'Preview';\neval(\"Preview.displayName = ''\");\n",
-    filename: "/synthetic/display-name-cast-receiver/independent-ambient-eval-const.tsx",
+    name: "ambient-window-eval",
+    code: "import { forwardRef } from 'react';\ndeclare const window: { eval(source: string): unknown };\ninterface DisplayTarget { displayName?: string }\nexport const Preview = forwardRef((props, ref) => <div ref={ref} />);\n(Preview as DisplayTarget).displayName = 'Preview';\nwindow.eval(\"Preview.displayName = ''\");\n",
+    filename: "/synthetic/display-name-cast-receiver/independent-ambient-window-eval.tsx",
     expectedCount: 1,
   },
   {
-    name: "erased-eval-type-alias",
-    code: "import { forwardRef } from 'react';\ntype eval = (source: string) => unknown;\ninterface DisplayTarget { displayName?: string }\nexport const Preview = forwardRef((props, ref) => <div ref={ref} />);\n(Preview as DisplayTarget).displayName = 'Preview';\neval(\"Preview.displayName = ''\");\n",
-    filename: "/synthetic/display-name-cast-receiver/independent-erased-eval-type-alias.tsx",
+    name: "erased-window-eval-type-alias",
+    code: "import { forwardRef } from 'react';\ntype window = { eval(source: string): unknown };\ninterface DisplayTarget { displayName?: string }\nexport const Preview = forwardRef((props, ref) => <div ref={ref} />);\n(Preview as DisplayTarget).displayName = 'Preview';\nwindow.eval(\"Preview.displayName = ''\");\n",
+    filename: "/synthetic/display-name-cast-receiver/independent-erased-window-eval-type-alias.tsx",
     expectedCount: 1,
   },
   {
