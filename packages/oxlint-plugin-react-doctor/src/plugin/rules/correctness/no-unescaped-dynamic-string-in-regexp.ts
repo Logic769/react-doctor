@@ -6,6 +6,7 @@ import { findVariableInitializer } from "../../utils/find-variable-initializer.j
 import { getImportBindingForName } from "../../utils/find-import-source-for-name.js";
 import { getCalleeName } from "../../utils/get-callee-name.js";
 import { getStaticPropertyName } from "../../utils/get-static-property-name.js";
+import { hasUnescapedNativeNodePathPattern } from "../../utils/has-unescaped-native-node-path-pattern.js";
 import { hasBindingWriteBetween } from "../../utils/has-binding-write-between.js";
 import { isEarlyExitStatement } from "../../utils/is-early-exit-statement.js";
 import { isFunctionLike } from "../../utils/is-function-like.js";
@@ -947,7 +948,17 @@ export const noUnescapedDynamicStringInRegexp = defineRule({
           !isShapeTestedByDominatingGuard(node, identifier, context.scopes) &&
           !isParameterFedOnlyMetacharacterFreeLiterals(identifier, context.scopes),
       );
-      if (!hasUnescapedDynamicLiteral) return;
+      if (
+        !hasUnescapedDynamicLiteral &&
+        !hasUnescapedNativeNodePathPattern(
+          node,
+          firstArgument,
+          context.scopes,
+          flattenPatternParts,
+          (identifier) => isShapeTestedByDominatingGuard(node, identifier, context.scopes),
+        )
+      )
+        return;
       context.report({
         node,
         message:
