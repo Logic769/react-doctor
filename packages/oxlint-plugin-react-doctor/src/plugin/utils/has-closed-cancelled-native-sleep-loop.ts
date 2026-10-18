@@ -2,6 +2,7 @@ import type { SymbolDescriptor } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
 import type { EsTreeNodeOfType } from "./es-tree-node-of-type.js";
 import { findProgramRoot } from "./find-program-root.js";
+import { hasRuntimeValueBinding } from "./has-runtime-value-binding.js";
 import { getDirectConstInitializer } from "./get-direct-const-initializer.js";
 import { getStaticPropertyKeyName } from "./get-static-property-key-name.js";
 import { getStaticPropertyName } from "./get-static-property-name.js";
@@ -84,6 +85,16 @@ const hasOnlyReferences = (
       : reference.flag === "write" && allowedWrites.has(reference.identifier),
   );
 
+const isNativeSleepGlobalReference = (identifier: EsTreeNode, context: RuleContext): boolean => {
+  if (context.scopes.isGlobalReference(identifier)) return true;
+  const symbol = context.scopes.symbolFor(identifier);
+  return Boolean(
+    symbol &&
+    (symbol.kind === "ts-interface" || symbol.kind === "ts-type-alias") &&
+    !hasRuntimeValueBinding(symbol),
+  );
+};
+
 const getClosedNativeSleep = (
   callee: EsTreeNodeOfType<"Identifier">,
   context: RuleContext,
@@ -111,7 +122,7 @@ const getClosedNativeSleep = (
     !isNodeOfType(construction, "NewExpression") ||
     !isNodeOfType(construction.callee, "Identifier") ||
     construction.callee.name !== "Promise" ||
-    !context.scopes.isGlobalReference(construction.callee)
+    !isNativeSleepGlobalReference(construction.callee, context)
   ) {
     return null;
   }
@@ -135,7 +146,7 @@ const getClosedNativeSleep = (
     timer.optional ||
     !isNodeOfType(timer.callee, "Identifier") ||
     timer.callee.name !== "setTimeout" ||
-    !context.scopes.isGlobalReference(timer.callee)
+    !isNativeSleepGlobalReference(timer.callee, context)
   ) {
     return null;
   }
@@ -168,7 +179,7 @@ const getClosedNativeSleep = (
 
 const hasUnsupportedModule = (
   owner: EsTreeNode,
-  sleep: ClosedNativeSleep,
+  nativeSleep: ClosedNativeSleep,
   bindings: ReadonlySet<EsTreeNode>,
   context: RuleContext,
 ): boolean => {
@@ -196,8 +207,8 @@ const hasUnsupportedModule = (
     [...bindings].flatMap((binding) => (isNodeOfType(binding, "Identifier") ? [binding.name] : [])),
   );
   const nativeReferences = new Map<EsTreeNode, string>([
-    [sleep.construction.callee, "Promise"],
-    [sleep.timer.callee, "setTimeout"],
+    [nativeSleep.construction.callee, "Promise"],
+    [nativeSleep.timer.callee, "setTimeout"],
   ]);
   return someAst(program, (node) => {
     if (
@@ -281,8 +292,6 @@ const hasUnsupportedModule = (
       (isNodeOfType(parent, "ImportNamespaceSpecifier") && parent.local === node) ||
       ((isNodeOfType(parent, "FunctionDeclaration") ||
         isNodeOfType(parent, "ClassDeclaration") ||
-        isNodeOfType(parent, "TSTypeAliasDeclaration") ||
-        isNodeOfType(parent, "TSInterfaceDeclaration") ||
         isNodeOfType(parent, "TSEnumDeclaration") ||
         isNodeOfType(parent, "TSModuleDeclaration")) &&
         parent.id === node) ||
@@ -324,25 +333,33 @@ export const hasClosedCancelledNativeSleepLoop = ({
     !isNodeOfType(loop.test.argument, "Identifier")
   )
     return false;
-  const flag = context.scopes.symbolFor(loop.test.argument);
-  const run = context.scopes
+  const cancellationFlagSymbol = context.scopes.symbolFor(loop.test.argument);
+  const asyncRunnerSymbol = context.scopes
     .scopeFor(asyncFunction)
     .symbols.find((symbol) => symbol.initializer === asyncFunction);
-  if (!flag || !run) return false;
-  const runDeclaration = getSingletonDeclaration(run, "const", effectCallback.body);
-  const flagDeclaration = getSingletonDeclaration(flag, "let", effectCallback.body);
+  if (!cancellationFlagSymbol || !asyncRunnerSymbol) return false;
+  const asyncRunnerDeclaration = getSingletonDeclaration(
+    asyncRunnerSymbol,
+    "const",
+    effectCallback.body,
+  );
+  const cancellationFlagDeclaration = getSingletonDeclaration(
+    cancellationFlagSymbol,
+    "let",
+    effectCallback.body,
+  );
   if (
-    !runDeclaration ||
-    !flagDeclaration ||
-    !isNodeOfType(flag.initializer, "Literal") ||
-    flag.initializer.value !== false
+    !asyncRunnerDeclaration ||
+    !cancellationFlagDeclaration ||
+    !isNodeOfType(cancellationFlagSymbol.initializer, "Literal") ||
+    cancellationFlagSymbol.initializer.value !== false
   )
     return false;
-  const [invocationReference, ...otherRunReferences] = run.references;
+  const [invocationReference, ...otherAsyncRunnerReferences] = asyncRunnerSymbol.references;
   const invocation = invocationReference?.identifier.parent;
   if (
     !invocationReference ||
-    otherRunReferences.length ||
+    otherAsyncRunnerReferences.length ||
     invocationReference.flag !== "read" ||
     !isNodeOfType(invocation, "CallExpression") ||
     invocation.callee !== invocationReference.identifier ||
@@ -386,31 +403,34 @@ export const hasClosedCancelledNativeSleepLoop = ({
   if (
     assignment.operator !== "=" ||
     !isNodeOfType(assignment.left, "Identifier") ||
-    context.scopes.symbolFor(assignment.left) !== flag ||
+    context.scopes.symbolFor(assignment.left) !== cancellationFlagSymbol ||
     !isNodeOfType(assignment.right, "Literal") ||
     assignment.right.value !== true ||
-    !nodeDominatesNode(flagDeclaration, invocation, context) ||
-    !nodeDominatesNode(runDeclaration, invocation, context)
+    !nodeDominatesNode(cancellationFlagDeclaration, invocation, context) ||
+    !nodeDominatesNode(asyncRunnerDeclaration, invocation, context)
   )
     return false;
-  const flagReads = new Set<EsTreeNode>([loop.test.argument]);
-  const sleepCalls = new Set<EsTreeNode>();
+  const cancellationFlagReads = new Set<EsTreeNode>([loop.test.argument]);
+  const nativeSleepCalls = new Set<EsTreeNode>();
   const argumentReads = new Map<SymbolDescriptor, Set<EsTreeNode>>();
   const dispatchReads = new Map<SymbolDescriptor, Set<EsTreeNode>>();
-  const declarations = new Set<EsTreeNode>([flagDeclaration, runDeclaration]);
-  const bindings = new Set<EsTreeNode>([flag.bindingIdentifier, run.bindingIdentifier]);
-  let sleep: ClosedNativeSleep | null = null;
-  let fresh = true;
+  const declarations = new Set<EsTreeNode>([cancellationFlagDeclaration, asyncRunnerDeclaration]);
+  const bindings = new Set<EsTreeNode>([
+    cancellationFlagSymbol.bindingIdentifier,
+    asyncRunnerSymbol.bindingIdentifier,
+  ]);
+  let nativeSleep: ClosedNativeSleep | null = null;
+  let hasFreshCancellationGuard = true;
   for (const statement of loop.body.body) {
     if (
       isNodeOfType(statement, "IfStatement") &&
       !statement.alternate &&
       isNodeOfType(statement.test, "Identifier") &&
-      context.scopes.symbolFor(statement.test) === flag &&
+      context.scopes.symbolFor(statement.test) === cancellationFlagSymbol &&
       isBareReturn(statement.consequent)
     ) {
-      flagReads.add(statement.test);
-      fresh = true;
+      cancellationFlagReads.add(statement.test);
+      hasFreshCancellationGuard = true;
       continue;
     }
     if (!isNodeOfType(statement, "ExpressionStatement")) return false;
@@ -423,10 +443,14 @@ export const hasClosedCancelledNativeSleepLoop = ({
         !isNodeOfType(call.callee, "Identifier")
       )
         return false;
-      const candidateSleep = getClosedNativeSleep(call.callee, context);
-      if (!candidateSleep || (sleep && candidateSleep.symbol !== sleep.symbol)) return false;
-      sleep = candidateSleep;
-      sleepCalls.add(call.callee);
+      const candidateNativeSleep = getClosedNativeSleep(call.callee, context);
+      if (
+        !candidateNativeSleep ||
+        (nativeSleep && candidateNativeSleep.symbol !== nativeSleep.symbol)
+      )
+        return false;
+      nativeSleep = candidateNativeSleep;
+      nativeSleepCalls.add(call.callee);
       const [argument, ...otherArguments] = call.arguments;
       if (!argument || otherArguments.length) return false;
       if (!isPrimitiveLiteral(argument)) {
@@ -448,11 +472,11 @@ export const hasClosedCancelledNativeSleepLoop = ({
         reads.add(argument);
         argumentReads.set(symbol, reads);
       }
-      fresh = false;
+      hasFreshCancellationGuard = false;
       continue;
     }
     if (
-      !fresh ||
+      !hasFreshCancellationGuard ||
       !isNodeOfType(expression, "CallExpression") ||
       expression.optional ||
       !isNodeOfType(expression.callee, "Identifier") ||
@@ -473,11 +497,11 @@ export const hasClosedCancelledNativeSleepLoop = ({
     dispatchReads.set(symbol, reads);
   }
   if (
-    !sleep ||
+    !nativeSleep ||
     !dispatchReads.size ||
-    !hasOnlyReferences(run, new Set([invocationReference.identifier])) ||
-    !hasOnlyReferences(flag, flagReads, new Set([assignment.left])) ||
-    !hasOnlyReferences(sleep.symbol, sleepCalls)
+    !hasOnlyReferences(asyncRunnerSymbol, new Set([invocationReference.identifier])) ||
+    !hasOnlyReferences(cancellationFlagSymbol, cancellationFlagReads, new Set([assignment.left])) ||
+    !hasOnlyReferences(nativeSleep.symbol, nativeSleepCalls)
   )
     return false;
   for (const [symbol, reads] of [...argumentReads, ...dispatchReads]) {
@@ -514,11 +538,11 @@ export const hasClosedCancelledNativeSleepLoop = ({
   while (moduleOwner.parent && moduleOwner.parent !== program) moduleOwner = moduleOwner.parent;
   if (
     moduleOwner.parent !== program ||
-    program.body.findIndex((statement) => statement === sleep.declaration) >=
+    program.body.findIndex((statement) => statement === nativeSleep.declaration) >=
       program.body.findIndex((statement) => statement === moduleOwner)
   )
     return false;
-  bindings.add(sleep.symbol.bindingIdentifier);
-  for (const binding of sleep.parameterBindings) bindings.add(binding);
-  return !hasUnsupportedModule(effectCallback, sleep, bindings, context);
+  bindings.add(nativeSleep.symbol.bindingIdentifier);
+  for (const binding of nativeSleep.parameterBindings) bindings.add(binding);
+  return !hasUnsupportedModule(effectCallback, nativeSleep, bindings, context);
 };
