@@ -278,6 +278,7 @@ export const GUARD_SNIPPET_POOL = [
   `const decoded = decodeURIComponent(String(params.slug));`,
   `const parsedUrl = new URL(String(value));`,
   `const fuzzNodePath = require("node:path"); const fuzzAssetDirectory = fuzzNodePath.resolve("assets"); const fuzzAssetMatcher = new RegExp(\`\${fuzzAssetDirectory}/bundle/.*\`);`,
+  `const fuzzPathProvider = require("node:path"); const fuzzPathValue = fuzzPathProvider.resolve("assets"); ({ fuzzPathValue } = { fuzzPathValue: "updated" }); const fuzzPathMatcher = new RegExp(\`\${fuzzPathValue}/bundle/.*\`);`,
   `const matcher = new RegExp(searchTerm, "i");`,
   `const escaped = searchTerm.replace(/[.*+?^\${}()|[\\]\\\\]/g, "\\\\$&"); const safeMatcher = new RegExp(escaped, "i");`,
   `const width = canUseDOM ? window.innerWidth : 0;`,

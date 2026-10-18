@@ -17,6 +17,7 @@ import { getStaticStringExpression } from "./get-static-string-expression.js";
 import { getNodeEndIndex } from "./get-node-end-index.js";
 import { getNodeStartIndex } from "./get-node-start-index.js";
 import { getResolvedStaticPropertyName } from "./get-resolved-static-property-name.js";
+import { isMemberMutationTarget } from "./is-member-mutation-target.js";
 import { isNodeOfType } from "./is-node-of-type.js";
 import { isTypeOnlyImport } from "./is-type-only-import.js";
 import { isTypeScriptTypePosition } from "./is-typescript-type-position.js";
@@ -28,15 +29,38 @@ interface NativeNodePathProviders {
   readonly filesystems: Set<SymbolDescriptor>;
 }
 
-const isReadonlyConstBefore = (symbol: SymbolDescriptor, reference: EsTreeNode): boolean => {
+const closedProvidersByAnalysis = new WeakMap<ScopeAnalysis, NativeNodePathProviders | null>();
+const readonlyConstBindingsByAnalysis = new WeakMap<
+  ScopeAnalysis,
+  WeakMap<SymbolDescriptor, boolean>
+>();
+
+const isReadonlyConstBefore = (
+  symbol: SymbolDescriptor,
+  reference: EsTreeNode,
+  scopes: ScopeAnalysis,
+): boolean => {
+  let readonlyConstBindings = readonlyConstBindingsByAnalysis.get(scopes);
+  if (!readonlyConstBindings) {
+    readonlyConstBindings = new WeakMap<SymbolDescriptor, boolean>();
+    readonlyConstBindingsByAnalysis.set(scopes, readonlyConstBindings);
+  }
+  let isReadonlyConst = readonlyConstBindings.get(symbol);
   const declaration = symbol.declarationNode;
+  if (isReadonlyConst === undefined) {
+    isReadonlyConst =
+      symbol.kind === "const" &&
+      !isNodeOfType(declaration.parent?.parent, "ExportNamedDeclaration") &&
+      isNodeOfType(declaration, "VariableDeclarator") &&
+      declaration.id === symbol.bindingIdentifier &&
+      isNodeOfType(declaration.id, "Identifier") &&
+      symbol.references.every(
+        (reference) => reference.flag === "read" && !isMemberMutationTarget(reference.identifier),
+      );
+    readonlyConstBindings.set(symbol, isReadonlyConst);
+  }
   return (
-    symbol.kind === "const" &&
-    !isNodeOfType(declaration.parent?.parent, "ExportNamedDeclaration") &&
-    isNodeOfType(declaration, "VariableDeclarator") &&
-    declaration.id === symbol.bindingIdentifier &&
-    isNodeOfType(declaration.id, "Identifier") &&
-    symbol.references.every((item) => item.flag === "read") &&
+    isReadonlyConst &&
     getNodeEndIndex(declaration) >= 0 &&
     getNodeEndIndex(declaration) < getNodeStartIndex(reference)
   );
@@ -69,7 +93,7 @@ const hasDirectProviderReferences = (
     const call = member?.parent;
     return (
       reference.flag === "read" &&
-      (symbol.kind === "import" || isReadonlyConstBefore(symbol, identifier)) &&
+      (symbol.kind === "import" || isReadonlyConstBefore(symbol, identifier, scopes)) &&
       isNodeOfType(member, "MemberExpression") &&
       member.object === receiver &&
       !member.optional &&
@@ -84,6 +108,8 @@ const collectClosedProviders = (
   program: EsTreeNode,
   scopes: ScopeAnalysis,
 ): NativeNodePathProviders | null => {
+  const cachedProviders = closedProvidersByAnalysis.get(scopes);
+  if (cachedProviders !== undefined) return cachedProviders;
   const paths = new Set<SymbolDescriptor>();
   const filesystems = new Set<SymbolDescriptor>();
   const providerCollections = new Map<string, Set<SymbolDescriptor>>();
@@ -124,11 +150,7 @@ const collectClosedProviders = (
       const reference = scopes.referenceFor(node);
       if (!reference) return;
       const symbol = reference.resolvedSymbol;
-      if (
-        symbol?.kind === "ts-interface" ||
-        symbol?.kind === "ts-type-alias" ||
-        NODE_PATH_EXPOSED_GLOBAL_NAMES.has(node.name)
-      )
+      if (NODE_PATH_EXPOSED_GLOBAL_NAMES.has(node.name) && scopes.isGlobalReference(node))
         isClosed = false;
       if (symbol?.kind === "import") {
         const declaration = symbol.declarationNode.parent;
@@ -239,9 +261,13 @@ const collectClosedProviders = (
     paths.size === 0 ||
     [...paths].some((symbol) => !hasDirectProviderReferences(symbol, "resolve", scopes)) ||
     [...filesystems].some((symbol) => !hasDirectProviderReferences(symbol, "realpathSync", scopes))
-  )
+  ) {
+    closedProvidersByAnalysis.set(scopes, null);
     return null;
-  return { paths, filesystems };
+  }
+  const providers = { paths, filesystems };
+  closedProvidersByAnalysis.set(scopes, providers);
+  return providers;
 };
 
 const isDirectNamespaceCall = (
@@ -298,7 +324,7 @@ const isNativePathProducer = (
       !symbol?.initializer ||
       remainingBindings === 0 ||
       visitedSymbols.has(symbol) ||
-      !isReadonlyConstBefore(symbol, inner)
+      !isReadonlyConstBefore(symbol, inner, scopes)
     )
       return false;
     visitedSymbols.add(symbol);

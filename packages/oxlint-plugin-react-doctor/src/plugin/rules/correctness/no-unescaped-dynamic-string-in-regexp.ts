@@ -8,6 +8,8 @@ import { getCalleeName } from "../../utils/get-callee-name.js";
 import { getStaticPropertyName } from "../../utils/get-static-property-name.js";
 import { hasUnescapedNativeNodePathPattern } from "../../utils/has-unescaped-native-node-path-pattern.js";
 import { hasBindingWriteBetween } from "../../utils/has-binding-write-between.js";
+import { hasRuntimeValueBinding } from "../../utils/has-runtime-value-binding.js";
+import { isErasedTypeScriptBinding } from "../../utils/is-erased-typescript-binding.js";
 import { isEarlyExitStatement } from "../../utils/is-early-exit-statement.js";
 import { isFunctionLike } from "../../utils/is-function-like.js";
 import { isNodeOfType } from "../../utils/is-node-of-type.js";
@@ -919,12 +921,22 @@ export const noUnescapedDynamicStringInRegexp = defineRule({
     "A dynamic literal string such as a search term or path segment dropped straight into `new RegExp(...)` lets its regex metacharacters act as operators, so values containing `.` or `(` over-match or throw. Escape the value with an `escapeRegExp` helper before constructing the pattern.",
   create: (context: RuleContext): RuleVisitors => {
     if (TEST_CONTEXT_FILE_PATTERN.test(context.filename ?? "")) return EMPTY_RULE_VISITORS;
+    const nativePathScopes: ScopeAnalysis = {
+      ...context.scopes,
+      isGlobalReference: (identifier) => {
+        if (context.scopes.isGlobalReference(identifier)) return true;
+        const symbol = context.scopes.symbolFor(identifier);
+        return Boolean(
+          symbol && isErasedTypeScriptBinding(symbol) && !hasRuntimeValueBinding(symbol),
+        );
+      },
+    };
     let regexpObjectIndex: RegExpObjectIndex | null = null;
     const reportUnescapedConstruction = (
       node: EsTreeNodeOfType<"CallExpression"> | EsTreeNodeOfType<"NewExpression">,
     ): void => {
       const regExpCallee = getRegExpCallee(node);
-      if (!regExpCallee || !context.scopes.isGlobalReference(regExpCallee)) return;
+      if (!regExpCallee || !nativePathScopes.isGlobalReference(regExpCallee)) return;
       const firstArgument = node.arguments?.[0];
       if (!firstArgument || isNodeOfType(firstArgument, "SpreadElement")) return;
       if (isFullyLiteralPattern(firstArgument)) return;
@@ -953,7 +965,7 @@ export const noUnescapedDynamicStringInRegexp = defineRule({
         !hasUnescapedNativeNodePathPattern(
           node,
           firstArgument,
-          context.scopes,
+          nativePathScopes,
           flattenPatternParts,
           (identifier) => isShapeTestedByDominatingGuard(node, identifier, context.scopes),
         )
