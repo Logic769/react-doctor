@@ -1,5 +1,6 @@
 // rule: no-reset-all-state-on-prop-change
 // weakness: alias-guard
+// source: synthetic
 // verdict: fail
 import { useEffect, useState } from "react";
 interface RowData {
