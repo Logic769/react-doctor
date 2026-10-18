@@ -132,11 +132,10 @@ export const getClassifiedWebhookEntrypoint = (
       }
       const start = getNodeStartIndex(node);
       const end = getNodeEndIndex(node);
-      const rawSource = file.content.slice(start, end);
       if (
         isNodeOfType(node, "Identifier") &&
         WEBHOOK_IDENTIFIER_NAME_PATTERN.test(node.name) &&
-        rawSource === node.name
+        file.content.slice(start, end) === node.name
       ) {
         regions.push({ start, end, isRetained: true });
       } else if (isNodeOfType(node, "ExportNamedDeclaration")) {
@@ -148,6 +147,7 @@ export const getClassifiedWebhookEntrypoint = (
             isRetained: true,
           });
       } else if (isNodeOfType(node, "Literal")) {
+        const rawSource = file.content.slice(start, end);
         if ("regex" in node && node.regex) {
           if (rawSource !== `/${node.regex.pattern}/${node.regex.flags}`) {
             hasConsistentSpans = false;
@@ -177,6 +177,7 @@ export const getClassifiedWebhookEntrypoint = (
           });
         }
       } else if (isNodeOfType(node, "TemplateElement")) {
+        const rawSource = file.content.slice(start, end);
         const marker = rawSource[WEBHOOK_FIRST_ITEM_INDEX];
         const ending = node.tail ? "`" : "${";
         const endingLength = node.tail
