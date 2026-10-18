@@ -5,6 +5,7 @@ import { getStaticObjectPropertyValue } from "../../../utils/get-static-object-p
 import { getStaticPropertyName } from "../../../utils/get-static-property-name.js";
 import { isFunctionLike } from "../../../utils/is-function-like.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
+import { isWithinAssignmentTarget } from "../../../utils/is-within-assignment-target.js";
 import { nodeDominatesNode } from "../../../utils/node-dominates-node.js";
 import { resolveReactRefCurrentOriginSymbol } from "../../../utils/react-ref-origin.js";
 import { resolveConstIdentifierAlias } from "../../../utils/resolve-const-identifier-alias.js";
@@ -96,7 +97,48 @@ export const isOwnedRequestMapReset = (write: EsTreeNode, context: RuleContext):
       const record = isNodeOfType(value, "Identifier")
         ? resolveConstIdentifierAlias(value, context.scopes)?.initializer
         : value;
-      const controller = record ? getStaticObjectPropertyValue(record, field) : null;
+      const controllerValue = record ? getStaticObjectPropertyValue(record, field) : null;
+      const requestOwner = findEnclosingFunction(candidate);
+      if (!requestOwner) return;
+      let controller = controllerValue;
+      if (isNodeOfType(controllerValue, "Identifier")) {
+        const controllerSymbol = context.scopes.symbolFor(controllerValue);
+        const controllerProperty = controllerValue.parent;
+        if (
+          !isNodeOfType(value, "ObjectExpression") ||
+          !isNodeOfType(controllerProperty, "Property") ||
+          controllerProperty.parent !== value ||
+          controllerProperty.value !== controllerValue ||
+          controllerSymbol?.kind !== "const" ||
+          !isNodeOfType(controllerSymbol.declarationNode, "VariableDeclarator") ||
+          controllerSymbol.declarationNode.id !== controllerSymbol.bindingIdentifier ||
+          findEnclosingFunction(controllerSymbol.declarationNode) !== requestOwner ||
+          !nodeDominatesNode(controllerSymbol.declarationNode, candidate, context) ||
+          !controllerSymbol.references.every((reference) => {
+            if (
+              reference.flag !== "read" ||
+              findEnclosingFunction(reference.identifier) !== requestOwner
+            )
+              return false;
+            if (reference.identifier.parent === controllerProperty) return true;
+            const member = reference.identifier.parent;
+            return (
+              isNodeOfType(member, "MemberExpression") &&
+              member.object === reference.identifier &&
+              getStaticPropertyName(member) === "signal" &&
+              isNodeOfType(member.parent, "Property") &&
+              member.parent.value === member &&
+              member.parent.kind === "init" &&
+              !member.parent.computed &&
+              !member.parent.method &&
+              isNodeOfType(member.parent.parent, "ObjectExpression") &&
+              !isWithinAssignmentTarget(member)
+            );
+          })
+        )
+          return;
+        controller = controllerSymbol.initializer;
+      }
       if (
         !isNodeOfType(controller, "NewExpression") ||
         !isNodeOfType(controller.callee, "Identifier") ||
@@ -104,8 +146,6 @@ export const isOwnedRequestMapReset = (write: EsTreeNode, context: RuleContext):
         !context.scopes.isGlobalReference(controller.callee)
       )
         return;
-      const requestOwner = findEnclosingFunction(candidate);
-      if (!requestOwner) return;
       walkAst(requestOwner, (stateWrite) => {
         if (stateWrite !== requestOwner && isFunctionLike(stateWrite)) return false;
         if (
