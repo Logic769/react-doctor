@@ -1,4 +1,5 @@
 import { getFiniteStaticStringValues } from "../../utils/get-finite-static-string-values.js";
+import { hasRuntimeValueBinding } from "../../utils/has-runtime-value-binding.js";
 import { hasRawOwnSearchSlot } from "./utils/has-raw-own-search-slot.js";
 import { EMPTY_RULE_VISITORS } from "../../utils/empty-rule-visitors.js";
 import { defineRule } from "../../utils/define-rule.js";
@@ -925,7 +926,17 @@ export const noUnescapedDynamicStringInRegexp = defineRule({
       node: EsTreeNodeOfType<"CallExpression"> | EsTreeNodeOfType<"NewExpression">,
     ): void => {
       const regExpCallee = getRegExpCallee(node);
-      if (!regExpCallee || !context.scopes.isGlobalReference(regExpCallee)) return;
+      if (!regExpCallee) return;
+      const regExpBinding = context.scopes.symbolFor(regExpCallee);
+      if (
+        !context.scopes.isGlobalReference(regExpCallee) &&
+        !(
+          regExpBinding &&
+          (regExpBinding.kind === "ts-interface" || regExpBinding.kind === "ts-type-alias") &&
+          !hasRuntimeValueBinding(regExpBinding)
+        )
+      )
+        return;
       const firstArgument = node.arguments?.[0];
       if (!firstArgument || isNodeOfType(firstArgument, "SpreadElement")) return;
       if (isFullyLiteralPattern(firstArgument)) return;

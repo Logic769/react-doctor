@@ -9,6 +9,7 @@ import { getResolvedStaticPropertyName } from "../../../utils/get-resolved-stati
 import { getStaticStringExpression } from "../../../utils/get-static-string-expression.js";
 import { getStaticPropertyKeyName } from "../../../utils/get-static-property-key-name.js";
 import { isFunctionLike } from "../../../utils/is-function-like.js";
+import { isEarlyExitStatement } from "../../../utils/is-early-exit-statement.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { isPropertyNamePosition } from "../../../utils/is-property-name-position.js";
 import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
@@ -437,6 +438,20 @@ export const hasRawOwnSearchSlot = ({
       return false;
     if (method.kind !== "method") return false;
     if (isLiteralReset(assignment.right)) continue;
+    const writerStatement = assignment.parent;
+    const writerBody = method.value.body;
+    if (
+      !writerStatement ||
+      !isNodeOfType(writerStatement, "ExpressionStatement") ||
+      writerStatement.expression !== assignment ||
+      !isNodeOfType(writerBody, "BlockStatement") ||
+      writerStatement.parent !== writerBody ||
+      writerBody.body.at(-1) !== writerStatement ||
+      writerBody.body.some(
+        (statement) => statement !== writerStatement && isEarlyExitStatement(statement),
+      )
+    )
+      return false;
     const value = stripParenExpression(assignment.right);
     if (!isNodeOfType(value, "Identifier")) return false;
     const parameter = scopes.symbolFor(value);

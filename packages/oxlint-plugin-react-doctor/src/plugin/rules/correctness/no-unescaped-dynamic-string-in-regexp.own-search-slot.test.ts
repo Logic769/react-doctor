@@ -257,10 +257,10 @@ const cases = [
     },
   },
   {
-    name: "ambient-eval-channel",
-    code: 'class TextMatcher {\n  needleText = "";\n  setText(value) {\n    if (typeof value !== "string") return;\n    this.needleText = value;\n  }\n  matches(value) {\n    return new RegExp(this.needleText, "i").test(value);\n  }\n}\nconst matcher = new TextMatcher();\nexport const matches = (input, value) => {\n  matcher.setText(input);\n  return matcher.matches(value);\n};\ndeclare const eval: (source: string) => unknown;\neval("void 0");\n',
+    name: "global-eval-channel",
+    code: 'class TextMatcher {\n  needleText = "";\n  setText(value) {\n    if (typeof value !== "string") return;\n    this.needleText = value;\n  }\n  matches(value) {\n    return new RegExp(this.needleText, "i").test(value);\n  }\n}\nconst matcher = new TextMatcher();\nexport const matches = (input, value) => {\n  matcher.setText(input);\n  return matcher.matches(value);\n};\nglobalThis.eval("void 0");\n',
     expectedCount: 0,
-    filename: "/synthetic/raw-member-literal-filter/ambient-eval-channel.ts",
+    filename: "/synthetic/raw-member-literal-filter/global-eval-channel.ts",
     forceJsx: false,
     includeLocations: true,
     settings: {
@@ -572,10 +572,10 @@ const cases = [
     },
   },
   {
-    name: "active-filter-ambient-eval-channel",
-    code: 'class TextMatcher {\n  filter = "";\n  setText(value) {\n    if (typeof value !== "string") return;\n    this.filter = value;\n  }\n  matches(value) {\n    return new RegExp(this.filter, "i").test(value);\n  }\n}\nconst matcher = new TextMatcher();\nexport const matches = (input, value) => {\n  matcher.setText(input);\n  return matcher.matches(value);\n};\ndeclare const eval: (source: string) => unknown;\neval("void 0");\n',
+    name: "active-filter-global-eval-channel",
+    code: 'class TextMatcher {\n  filter = "";\n  setText(value) {\n    if (typeof value !== "string") return;\n    this.filter = value;\n  }\n  matches(value) {\n    return new RegExp(this.filter, "i").test(value);\n  }\n}\nconst matcher = new TextMatcher();\nexport const matches = (input, value) => {\n  matcher.setText(input);\n  return matcher.matches(value);\n};\nglobalThis.eval("void 0");\n',
     expectedCount: 0,
-    filename: "/synthetic/raw-member-literal-filter/active-filter-ambient-eval-channel.ts",
+    filename: "/synthetic/raw-member-literal-filter/active-filter-global-eval-channel.ts",
     forceJsx: false,
     includeLocations: true,
     settings: {
@@ -798,11 +798,11 @@ const cases = [
     },
   },
   {
-    name: "erased-eval-shadow-does-not-close-provider",
-    code: 'declare const eval: (source: string) => unknown;\neval("globalThis.RegExp = class Replacement {}");\nclass SearchStore {\n  filter = "";\n  setFilter(value) { this.filter = value; }\n  matches(value) { return new RegExp(this.filter, "i").test(value); }\n}\nexport default new SearchStore();\n',
+    name: "erased-global-type-does-not-close-eval-channel",
+    code: 'interface globalThis {}\nglobalThis.eval("globalThis.RegExp = class Replacement {}");\nclass SearchStore {\n  filter = "";\n  setFilter(value) { this.filter = value; }\n  matches(value) { return new RegExp(this.filter, "i").test(value); }\n}\nexport default new SearchStore();\n',
     expectedCount: 0,
     filename:
-      "/synthetic/own-search-slot-adversarial/erased-eval-shadow-does-not-close-provider.ts",
+      "/synthetic/own-search-slot-adversarial/erased-global-type-does-not-close-eval-channel.ts",
     forceJsx: false,
     includeLocations: true,
     settings: {
