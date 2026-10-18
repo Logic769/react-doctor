@@ -7038,17 +7038,24 @@ const getReturnedEffectAllocatorProof = (
     }
     return cleanup.body.body.every(
       (statement) =>
-        isNodeOfType(statement, "ExpressionStatement") &&
-        isClosedReturnedAllocatorListenerCall(
-          statement.expression,
-          "removeEventListener",
-          context,
-          invocation,
-          creation,
-        ),
+        isNodeOfType(statement, "TSInterfaceDeclaration") ||
+        isNodeOfType(statement, "TSTypeAliasDeclaration") ||
+        (isNodeOfType(statement, "ExpressionStatement") &&
+          isClosedReturnedAllocatorListenerCall(
+            statement.expression,
+            "removeEventListener",
+            context,
+            invocation,
+            creation,
+          )),
     );
   };
   for (const statement of allocator.body.body) {
+    if (
+      isNodeOfType(statement, "TSInterfaceDeclaration") ||
+      isNodeOfType(statement, "TSTypeAliasDeclaration")
+    )
+      continue;
     if (isNodeOfType(statement, "VariableDeclaration")) {
       if (statement.kind !== "const" && statement.kind !== "let") return null;
       for (const declaration of statement.declarations) {
