@@ -1,3 +1,8 @@
+import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
+import { resolveConstIdentifierRootSymbol } from "../../../utils/resolve-const-identifier-root-symbol.js";
+import { getResolvedStaticPropertyName } from "../../../utils/get-resolved-static-property-name.js";
+import { getRootIdentifier } from "../../../utils/get-root-identifier.js";
+import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
 import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
@@ -104,6 +109,29 @@ const isClosedRuntimeNamedImport = (
   return valid;
 };
 
+const hasUnresolvedMotionWriteReceiver = (
+  member: EsTreeNodeOfType<"MemberExpression">,
+  context: RuleContext,
+): boolean => {
+  if (!member.computed || !isWithinAssignmentTarget(member)) return false;
+  const expression = findTransparentExpressionRoot(member);
+  const consumer = expression.parent;
+  if (
+    !isNodeOfType(consumer, "MemberExpression") ||
+    consumer.object !== expression ||
+    getResolvedStaticPropertyName(member, context.scopes) !== null
+  )
+    return false;
+  const root = getRootIdentifier(member.object);
+  const symbol = root ? resolveConstIdentifierRootSymbol(root, context.scopes) : null;
+  if (symbol?.kind !== "const" || !symbol.initializer) return false;
+  const initialization = stripParenExpression(symbol.initializer);
+  if (!isNodeOfType(initialization, "CallExpression") || initialization.optional) return false;
+  return [...MOTION_RUNTIME_IMPORT_NAMES].some((name) =>
+    isClosedRuntimeNamedImport(initialization.callee, "motion/react", name, context),
+  );
+};
+
 const hasOrdinaryMotionProviders = (context: RuleContext): boolean => {
   const cached = motionProviderValidityByAnalysis.get(context.scopes);
   if (cached !== undefined) return cached;
@@ -190,12 +218,13 @@ const hasOrdinaryMotionProviders = (context: RuleContext): boolean => {
           valid = false;
         if (
           isNodeOfType(node, "MemberExpression") &&
-          isWithinAssignmentTarget(node) &&
-          (name === "on" ||
-            (name !== null && MOTION_READ_METHOD_NAMES.has(name)) ||
-            [...candidates].some(
-              (candidate) => candidate === "on" || MOTION_READ_METHOD_NAMES.has(candidate),
-            ))
+          (hasUnresolvedMotionWriteReceiver(node, context) ||
+            (isWithinAssignmentTarget(node) &&
+              (name === "on" ||
+                (name !== null && MOTION_READ_METHOD_NAMES.has(name)) ||
+                [...candidates].some(
+                  (candidate) => candidate === "on" || MOTION_READ_METHOD_NAMES.has(candidate),
+                ))))
         )
           valid = false;
       }
@@ -238,7 +267,11 @@ const getReturnedMotionEffect = (
   if (isNodeOfType(callback, "ReturnStatement") && callback.argument === registration) {
     const block = callback.parent;
     if (!isNodeOfType(block, "BlockStatement")) return null;
-    const [statement, ...otherStatements] = block.body;
+    const [statement, ...otherStatements] = block.body.filter(
+      (statement) =>
+        !isNodeOfType(statement, "TSInterfaceDeclaration") &&
+        !isNodeOfType(statement, "TSTypeAliasDeclaration"),
+    );
     if (statement !== callback || otherStatements.length) return null;
     callback = block.parent;
   }
