@@ -1,4 +1,5 @@
-import type { SymbolDescriptor } from "../../../semantic/scope-analysis.js";
+import { parseSync } from "oxc-parser";
+import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
 import { findEnclosingFunction } from "../../../utils/find-enclosing-function.js";
@@ -42,6 +43,14 @@ interface TextMapCallback {
   readonly call: EsTreeNodeOfType<"CallExpression">;
   readonly receiver: EsTreeNode;
 }
+
+interface PrimitiveTextLeafSourceProof {
+  readonly source: string;
+  readonly isSupported: boolean;
+}
+
+const programSupportByScopes = new WeakMap<ScopeAnalysis, boolean>();
+const sourceProofByScopes = new WeakMap<ScopeAnalysis, PrimitiveTextLeafSourceProof>();
 
 const hasOnlyReferencesAt = (symbol: SymbolDescriptor, allowed: ReadonlySet<EsTreeNode>): boolean =>
   symbol.references.filter((reference) => !isTypeScriptTypePosition(reference.identifier))
@@ -138,6 +147,8 @@ const isStyledSpanReference = (node: EsTreeNode): boolean => {
 };
 
 const hasSupportedProgram = (program: EsTreeNode, context: RuleContext): boolean => {
+  const cached = programSupportByScopes.get(context.scopes);
+  if (cached !== undefined) return cached;
   let supported = true;
   let hasReactValueProvider = false;
   walkAst(program, (node) => {
@@ -198,7 +209,22 @@ const hasSupportedProgram = (program: EsTreeNode, context: RuleContext): boolean
     }
     return undefined;
   });
-  return supported && hasReactValueProvider;
+  const isSupported = supported && hasReactValueProvider;
+  programSupportByScopes.set(context.scopes, isSupported);
+  return isSupported;
+};
+
+const hasSupportedTextSource = (source: string): boolean => {
+  if (!TEXT_JSX_DIRECTIVE_PATTERN.test(source)) return true;
+  try {
+    const parsed = parseSync("primitive-text-leaf.tsx", source, { astType: "ts", lang: "tsx" });
+    return (
+      !parsed.errors.some((error) => error.severity === "Error") &&
+      !parsed.comments.some((comment) => TEXT_JSX_DIRECTIVE_PATTERN.test(comment.value))
+    );
+  } catch {
+    return false;
+  }
 };
 
 const hasSupportedSourceAndProfile = (context: RuleContext): boolean => {
@@ -224,7 +250,12 @@ const hasSupportedSourceAndProfile = (context: RuleContext): boolean => {
     return false;
   try {
     const text = context.sourceCode?.getText?.();
-    return typeof text === "string" && !TEXT_JSX_DIRECTIVE_PATTERN.test(text);
+    if (typeof text !== "string") return false;
+    const previous = sourceProofByScopes.get(context.scopes);
+    if (previous?.source === text) return previous.isSupported;
+    const isSupported = hasSupportedTextSource(text);
+    sourceProofByScopes.set(context.scopes, { source: text, isSupported });
+    return isSupported;
   } catch {
     return false;
   }
