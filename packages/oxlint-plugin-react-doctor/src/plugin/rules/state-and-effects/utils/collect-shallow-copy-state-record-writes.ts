@@ -12,10 +12,11 @@ import { getStaticPropertyName } from "../../../utils/get-static-property-name.j
 import { isBindingAssignmentTarget } from "../../../utils/is-binding-assignment-target.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { isNodeReachableWithinFunction } from "../../../utils/is-node-reachable-within-function.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
+import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
 import { isReactApiCall } from "../../../utils/is-react-api-call.js";
 import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
 import { walkAst } from "../../../utils/walk-ast.js";
-import { someAst } from "../../../utils/some-ast.js";
 
 interface ClosedRecordArray {
   readonly state: SymbolDescriptor;
@@ -128,18 +129,29 @@ const absentKeyProviderAccessCache = new WeakMap<ScopeAnalysis, boolean>();
 const hasVisibleAbsentKeyProviderAccess = (context: RuleContext): boolean => {
   const cached = absentKeyProviderAccessCache.get(context.scopes);
   if (cached !== undefined) return cached;
-  const hasAccess = someAst(context.scopes.rootScope.node, (node) => {
-    if (isNodeOfType(node, "ObjectPattern")) {
-      return node.properties.some((property) => {
+  let hasAccess = false;
+  walkAst(context.scopes.rootScope.node, (node) => {
+    if (
+      hasAccess ||
+      isNodeOfType(node, "TSInterfaceDeclaration") ||
+      isNodeOfType(node, "TSTypeAliasDeclaration")
+    )
+      return false;
+    if (isTypeScriptTypePosition(node)) return;
+    if (isNodeOfType(node, "TSParameterProperty")) {
+      hasAccess = true;
+    } else if (isNodeOfType(node, "ObjectPattern")) {
+      hasAccess = node.properties.some((property) => {
         if (!isNodeOfType(property, "Property") || property.computed) return true;
         const propertyName = getStaticPropertyKeyName(property);
         return propertyName === null || ABSENT_KEY_PATTERN_PROPERTY_NAMES.has(propertyName);
       });
-    }
-    return (
+    } else if (
       isNodeOfType(node, "MemberExpression") &&
       ABSENT_KEY_REFLECTION_METHOD_NAMES.has(getStaticPropertyName(node) ?? "")
-    );
+    ) {
+      hasAccess = true;
+    }
   });
   absentKeyProviderAccessCache.set(context.scopes, hasAccess);
   return hasAccess;
@@ -171,10 +183,18 @@ const hasVisibleIntrinsicAccess = (proof: ClosedRecordArray, context: RuleContex
     if (hasAccess) return false;
     if (
       isNodeOfType(node, "Identifier") &&
-      INTRINSIC_GLOBAL_NAMES.has(node.name) &&
-      context.scopes.isGlobalReference(node)
-    )
-      hasAccess = true;
+      !isTypeScriptTypePosition(node) &&
+      INTRINSIC_GLOBAL_NAMES.has(node.name)
+    ) {
+      const symbol = context.scopes.symbolFor(node);
+      if (
+        context.scopes.isGlobalReference(node) ||
+        (symbol &&
+          (symbol.kind === "ts-interface" || symbol.kind === "ts-type-alias") &&
+          !hasRuntimeValueBinding(symbol))
+      )
+        hasAccess = true;
+    }
     if (
       isNodeOfType(node, "MemberExpression") &&
       (INTRINSIC_PROPERTY_NAMES.has(getStaticPropertyName(node) ?? "") ||
@@ -198,10 +218,17 @@ const hasVisibleIntrinsicAccess = (proof: ClosedRecordArray, context: RuleContex
   return hasAccess;
 };
 
-const symbolIsReadonly = (symbol: SymbolDescriptor): boolean =>
-  symbol.references.every(
+const readonlySymbols = new WeakMap<SymbolDescriptor, boolean>();
+
+const symbolIsReadonly = (symbol: SymbolDescriptor): boolean => {
+  const cached = readonlySymbols.get(symbol);
+  if (cached !== undefined) return cached;
+  const readonly = symbol.references.every(
     (reference) => reference.flag === "read" && !isBindingAssignmentTarget(reference.identifier),
   );
+  readonlySymbols.set(symbol, readonly);
+  return readonly;
+};
 
 const getConstSymbol = (node: EsTreeNode, context: RuleContext): SymbolDescriptor | null => {
   if (!isNodeOfType(node, "Identifier")) return null;
@@ -563,7 +590,7 @@ const isCanonicalIndex = (
 
 const numericIndexListsByScopes = new WeakMap<
   ScopeAnalysis,
-  WeakMap<EsTreeNode, ReadonlyArray<ClosedNumericIndexList>>
+  WeakMap<EsTreeNode, ReadonlyMap<SymbolDescriptor, ClosedNumericIndexList>>
 >();
 
 const getNumericListCallback = (
@@ -737,7 +764,7 @@ const collectClosedNumericIndexLists = (
   binding: UseStateBinding,
   proof: ClosedRecordArray,
   context: RuleContext,
-): ReadonlyArray<ClosedNumericIndexList> => {
+): ReadonlyMap<SymbolDescriptor, ClosedNumericIndexList> => {
   let listsByBinding = numericIndexListsByScopes.get(context.scopes);
   if (!listsByBinding) {
     listsByBinding = new WeakMap();
@@ -745,7 +772,7 @@ const collectClosedNumericIndexLists = (
   }
   const cached = listsByBinding.get(binding.declarator);
   if (cached) return cached;
-  const lists: ClosedNumericIndexList[] = [];
+  const lists = new Map<SymbolDescriptor, ClosedNumericIndexList>();
   listsByBinding.set(binding.declarator, lists);
   const componentBody = binding.declarator.parent?.parent;
   const recordHook = binding.declarator.init;
@@ -807,9 +834,30 @@ const collectClosedNumericIndexLists = (
       return true;
     });
     if (closedFeeds && hasAppend && numericListReferencesAreClosed(list, proof, feeds, context))
-      lists.push(list);
+      lists.set(state, list);
   }
   return lists;
+};
+
+const getNumericListSourceState = (
+  node: EsTreeNode,
+  context: RuleContext,
+): SymbolDescriptor | null => {
+  const expression = stripParenExpression(node);
+  if (!isNodeOfType(expression, "Identifier")) return null;
+  const parameter = context.scopes.symbolFor(expression);
+  if (!parameter || parameter.kind !== "parameter") return null;
+  const callback = findEnclosingFunction(parameter.bindingIdentifier);
+  if (
+    !isNodeOfType(callback, "ArrowFunctionExpression") ||
+    callback.params[0] !== parameter.bindingIdentifier
+  )
+    return null;
+  const call = findTransparentExpressionRoot(callback).parent;
+  if (!isNodeOfType(call, "CallExpression") || !isNodeOfType(call.callee, "MemberExpression"))
+    return null;
+  const receiver = stripParenExpression(call.callee.object);
+  return isNodeOfType(receiver, "Identifier") ? context.scopes.symbolFor(receiver) : null;
 };
 
 const isClosedNumericListIndex = (
@@ -817,11 +865,34 @@ const isClosedNumericListIndex = (
   binding: UseStateBinding,
   proof: ClosedRecordArray,
   context: RuleContext,
-): boolean =>
-  !hasVisibleAbsentKeyProviderAccess(context) &&
-  collectClosedNumericIndexLists(binding, proof, context).some((list) =>
-    isTransportedNumericListValue(node, list, context),
-  );
+): boolean => {
+  if (hasVisibleAbsentKeyProviderAccess(context)) return false;
+  const lists = collectClosedNumericIndexLists(binding, proof, context);
+  if (lists.size === 0) return false;
+  let state = getNumericListSourceState(node, context);
+  if (!state) {
+    const expression = stripParenExpression(node);
+    if (!isNodeOfType(expression, "Identifier")) return false;
+    const parameter = context.scopes.symbolFor(expression);
+    if (!parameter) return false;
+    const handler = findEnclosingFunction(parameter.bindingIdentifier);
+    if (!handler) return false;
+    const [handlerBinding] = getFunctionBindingSymbols(handler, context.scopes);
+    const reference = handlerBinding?.references[0];
+    if (!reference) return false;
+    const root = findTransparentExpressionRoot(reference.identifier);
+    const call = root.parent;
+    if (
+      !isNodeOfType(call, "CallExpression") ||
+      call.callee !== root ||
+      call.arguments.length !== 1
+    )
+      return false;
+    state = getNumericListSourceState(call.arguments[0], context);
+  }
+  const list = state ? lists.get(state) : null;
+  return Boolean(list && isTransportedNumericListValue(node, list, context));
+};
 
 export const collectShallowCopyStateRecordWrites = (
   binding: UseStateBinding,
