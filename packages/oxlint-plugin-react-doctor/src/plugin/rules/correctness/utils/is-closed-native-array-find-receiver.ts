@@ -71,7 +71,7 @@ const hasClosedProvider = (
       isNodeOfType(node, "Identifier") &&
       !isTypeScriptTypePosition(node) &&
       DYNAMIC_PROVIDER_NAMES.has(node.name) &&
-      isNativeProviderReference(node, scopes)
+      (includeRepeatedGuardMethods || isNativeProviderReference(node, scopes))
     ) {
       isClosed = false;
     }

@@ -98,6 +98,16 @@ const cases = [
     code: 'export const read = () => { const rows = [{ label: "only" }]; let phase = false; if (rows.findLast(() => (phase = !phase))) return rows.findLast(() => (phase = !phase)).label; return "none"; };',
     diagnosticCount: 1,
   },
+  {
+    name: "ambient-const-Function-runtime-provider",
+    code: 'declare const Function: FunctionConstructor;\nFunction("Array.prototype.find = () => ({label: \'safe\'})")();\nexport const read = () => { const rows = [{label:"only"}]; let calls=0; if(rows.some(() => ++calls === 1)) return rows.find(() => ++calls === 1).label; return "none"; };',
+    diagnosticCount: 0,
+  },
+  {
+    name: "ambient-function-Function-runtime-provider",
+    code: 'declare function Function(...arguments_: string[]): Function;\nFunction("Array.prototype.find = () => ({label: \'safe\'})")();\nexport const read = () => { const rows = [{label:"only"}]; let calls=0; if(rows.some(() => ++calls === 1)) return rows.find(() => ++calls === 1).label; return "none"; };',
+    diagnosticCount: 0,
+  },
 ];
 
 describe("repeated native lookup predicates", () => {
