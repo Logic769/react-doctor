@@ -1,7 +1,13 @@
-import type { SymbolDescriptor } from "../../../semantic/scope-analysis.js";
+import {
+  MATCHER_PROVIDER_KEYS,
+  MATCHER_PROTOCOL_KEYS,
+  MATCHER_UNSUPPORTED_RUNTIME_NODE_TYPES,
+} from "./stable-matcher/constants.js";
+import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import { doNodesCoverEveryPathFromFunctionEntry } from "../../../utils/do-nodes-cover-every-path-from-function-entry.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
 import { findEnclosingClass } from "../../../utils/find-enclosing-class.js";
 import { findEnclosingFunction } from "../../../utils/find-enclosing-function.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
@@ -37,51 +43,6 @@ interface MatcherIteration {
   readonly handlerName: string;
 }
 
-const MATCHER_PROVIDER_KEYS = new Set([
-  "__proto__",
-  "prototype",
-  "__defineGetter__",
-  "__defineSetter__",
-  "defineProperty",
-  "defineProperties",
-  "setPrototypeOf",
-  "assign",
-  "Reflect",
-  "eval",
-  "require",
-  "Proxy",
-  "Object",
-  "Array",
-  "Function",
-  "globalThis",
-  "global",
-  "self",
-  "document",
-  "window",
-]);
-const MATCHER_PROTOCOL_KEYS = new Set([
-  "keys",
-  "values",
-  "reduce",
-  "forEach",
-  "matchMedia",
-  "addListener",
-  "removeListener",
-  "Component",
-  "PureComponent",
-  "setState",
-  "componentDidMount",
-  "componentWillUnmount",
-]);
-const MATCHER_UNSUPPORTED_RUNTIME_NODE_TYPES = new Set([
-  "TSEnumDeclaration",
-  "TSEnumBody",
-  "TSEnumMember",
-  "TSExportAssignment",
-  "TSImportEqualsDeclaration",
-  "TSModuleDeclaration",
-  "ImportExpression",
-]);
 const matcherProvidersByAnalysis = new WeakMap<RuleContext["scopes"], boolean>();
 const matcherMemberReferencesByAnalysis = new WeakMap<
   RuleContext["scopes"],
@@ -135,6 +96,57 @@ const getMatcherMethodCall = (node: EsTreeNode | null | undefined, name: string)
     : null;
 };
 
+const nativeMatcherScopesByAnalysis = new WeakMap<ScopeAnalysis, ScopeAnalysis>();
+
+const isNativeMatcherGlobalReference = (identifier: EsTreeNode, scopes: ScopeAnalysis): boolean => {
+  if (scopes.isGlobalReference(identifier)) return true;
+  if (!isNodeOfType(identifier, "Identifier")) return false;
+  const symbol = scopes.symbolFor(identifier);
+  return Boolean(
+    symbol &&
+    (symbol.kind === "ts-interface" || symbol.kind === "ts-type-alias") &&
+    !hasRuntimeValueBinding(symbol),
+  );
+};
+
+const isNativeMatcherNamespaceReference = (
+  expression: EsTreeNode,
+  namespace: string,
+  context: RuleContext,
+  memberName: string,
+): boolean => {
+  if (
+    isProvenUnmodifiedGlobalNamespaceReference(expression, namespace, context.scopes, memberName)
+  ) {
+    return true;
+  }
+  const receiver = unwrapMatcherExpression(expression);
+  if (
+    !isNodeOfType(receiver, "Identifier") ||
+    receiver.name !== namespace ||
+    (namespace !== "Object" && namespace !== "window") ||
+    matcherProvidersByAnalysis.get(context.scopes) !== true ||
+    context.scopes.isGlobalReference(receiver) ||
+    !isNativeMatcherGlobalReference(receiver, context.scopes)
+  ) {
+    return false;
+  }
+  let nativeScopes = nativeMatcherScopesByAnalysis.get(context.scopes);
+  if (!nativeScopes) {
+    const scopes = context.scopes;
+    nativeScopes = {
+      ...scopes,
+      isGlobalReference: (identifier) =>
+        scopes.isGlobalReference(identifier) ||
+        (isNodeOfType(identifier, "Identifier") &&
+          (identifier.name === "Object" || identifier.name === "window") &&
+          isNativeMatcherGlobalReference(identifier, scopes)),
+    };
+    nativeMatcherScopesByAnalysis.set(scopes, nativeScopes);
+  }
+  return isProvenUnmodifiedGlobalNamespaceReference(receiver, namespace, nativeScopes, memberName);
+};
+
 const getNativeMatcherMethodCall = (
   node: EsTreeNode | null | undefined,
   namespace: string,
@@ -143,12 +155,7 @@ const getNativeMatcherMethodCall = (
 ) => {
   const matchingCall = getMatcherMethodCall(node, name);
   return matchingCall &&
-    isProvenUnmodifiedGlobalNamespaceReference(
-      matchingCall.callee.object,
-      namespace,
-      context.scopes,
-      name,
-    )
+    isNativeMatcherNamespaceReference(matchingCall.callee.object, namespace, context, name)
     ? matchingCall
     : null;
 };
@@ -259,9 +266,13 @@ const isMatcherDataIndexRead = (node: EsTreeNode, context: RuleContext): boolean
     !isWithinAssignmentTarget(consumer)
   )
     return true;
-  const nativeQuery = getNativeMatcherMethodCall(consumer, "window", "matchMedia", context);
+  const nativeQuery = getMatcherMethodCall(consumer, "matchMedia");
+  const receiver = nativeQuery && unwrapMatcherExpression(nativeQuery.callee.object);
   return Boolean(
     nativeQuery &&
+    isNodeOfType(receiver, "Identifier") &&
+    receiver.name === "window" &&
+    isNativeMatcherGlobalReference(receiver, context.scopes) &&
     nativeQuery.call.arguments.at(FIRST_ARGUMENT_INDEX) === root &&
     !nativeQuery.call.arguments.at(SECOND_ARGUMENT_INDEX),
   );
@@ -280,7 +291,12 @@ const hasClosedMatcherProviders = (context: RuleContext): boolean => {
       valid = false;
       return false;
     }
-    if (isTypeScriptTypePosition(node)) return false;
+    if (
+      isNodeOfType(node, "TSInterfaceDeclaration") ||
+      isNodeOfType(node, "TSTypeAliasDeclaration")
+    ) {
+      return false;
+    }
     if (
       node.type === "Decorator" ||
       node.type === "TSImportEqualsDeclaration" ||
@@ -355,7 +371,7 @@ const hasClosedMatcherProviders = (context: RuleContext): boolean => {
           valid = false;
       }
     }
-    if (!context.scopes.isGlobalReference(node)) return;
+    if (!isNativeMatcherGlobalReference(node, context.scopes)) return;
     if (
       [
         "Reflect",
@@ -773,7 +789,7 @@ const collectSupportCheck = (expression: EsTreeNode, proof: MatcherCollectionPro
       if (
         !isNodeOfType(target, "Identifier") ||
         target.name !== "window" ||
-        !proof.context.scopes.isGlobalReference(target)
+        !isNativeMatcherGlobalReference(target, proof.context.scopes)
       )
         return false;
     } else {
@@ -781,12 +797,7 @@ const collectSupportCheck = (expression: EsTreeNode, proof: MatcherCollectionPro
         !isNodeOfType(target, "MemberExpression") ||
         target.computed ||
         getMatcherMemberName(target) !== "matchMedia" ||
-        !isProvenUnmodifiedGlobalNamespaceReference(
-          target.object,
-          "window",
-          proof.context.scopes,
-          "matchMedia",
-        )
+        !isNativeMatcherNamespaceReference(target.object, "window", proof.context, "matchMedia")
       )
         return false;
     }
@@ -959,7 +970,12 @@ const classReferencesAreClosed = (
       valid = false;
       return false;
     }
-    if (isTypeScriptTypePosition(node)) return false;
+    if (
+      isNodeOfType(node, "TSInterfaceDeclaration") ||
+      isNodeOfType(node, "TSTypeAliasDeclaration")
+    ) {
+      return false;
+    }
     if (isNodeOfType(node, "ThisExpression")) {
       if (findEnclosingClass(node) !== proof.classBody.parent) {
         valid = false;
