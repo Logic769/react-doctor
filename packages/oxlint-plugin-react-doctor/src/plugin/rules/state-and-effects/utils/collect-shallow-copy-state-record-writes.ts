@@ -10,6 +10,8 @@ import { getStaticPropertyName } from "../../../utils/get-static-property-name.j
 import { isBindingAssignmentTarget } from "../../../utils/is-binding-assignment-target.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { isNodeReachableWithinFunction } from "../../../utils/is-node-reachable-within-function.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
+import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
 import { isReactApiCall } from "../../../utils/is-react-api-call.js";
 import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
 import { walkAst } from "../../../utils/walk-ast.js";
@@ -123,6 +125,7 @@ const hasVisibleAbsentKeyProviderAccess = (context: RuleContext): boolean => {
   const cached = absentKeyProviderAccessCache.get(context.scopes);
   if (cached !== undefined) return cached;
   const hasAccess = someAst(context.scopes.rootScope.node, (node) => {
+    if (isTypeScriptTypePosition(node)) return false;
     if (isNodeOfType(node, "ObjectPattern")) {
       return node.properties.some((property) => {
         if (!isNodeOfType(property, "Property") || property.computed) return true;
@@ -165,10 +168,18 @@ const hasVisibleIntrinsicAccess = (proof: ClosedRecordArray, context: RuleContex
     if (hasAccess) return false;
     if (
       isNodeOfType(node, "Identifier") &&
-      INTRINSIC_GLOBAL_NAMES.has(node.name) &&
-      context.scopes.isGlobalReference(node)
-    )
-      hasAccess = true;
+      !isTypeScriptTypePosition(node) &&
+      INTRINSIC_GLOBAL_NAMES.has(node.name)
+    ) {
+      const symbol = context.scopes.symbolFor(node);
+      if (
+        context.scopes.isGlobalReference(node) ||
+        (symbol &&
+          (symbol.kind === "ts-interface" || symbol.kind === "ts-type-alias") &&
+          !hasRuntimeValueBinding(symbol))
+      )
+        hasAccess = true;
+    }
     if (
       isNodeOfType(node, "MemberExpression") &&
       (INTRINSIC_PROPERTY_NAMES.has(getStaticPropertyName(node) ?? "") ||
