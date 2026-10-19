@@ -1,3 +1,4 @@
+import { parseSync } from "oxc-parser";
 import { HTML_TAGS } from "../../../constants/html-tags.js";
 import type { SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
@@ -17,6 +18,13 @@ import { isNodeReachableWithinFunction } from "../../../utils/is-node-reachable-
 import { isProvenReactClassComponent } from "../../../utils/is-proven-react-class-component.js";
 import { isReactApiCall } from "../../../utils/is-react-api-call.js";
 import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
+import {
+  FLICKITY_JSX_DIRECTIVE_PATTERN,
+  FLICKITY_POSSIBLE_JSX_DIRECTIVE_PATTERN,
+} from "./constants.js";
+import type { ScopeDescriptor } from "../../../semantic/scope-analysis.js";
 import { isWithinAssignmentTarget } from "../../../utils/is-within-assignment-target.js";
 import { resolveImportedApiReference } from "../../../utils/resolve-imported-api-reference.js";
 import type { RuleContext } from "../../../utils/rule-context.js";
@@ -59,6 +67,99 @@ const nativeElementDefaultByClass = new WeakMap<
 >();
 const imageObserverAdmissionBySymbol = new WeakMap<SymbolDescriptor, boolean>();
 const imageCallbackAdmissionBySymbol = new WeakMap<SymbolDescriptor, boolean>();
+
+interface FlickityJsxSourceFacts {
+  program: EsTreeNode;
+  sourceText: string;
+  supported: boolean;
+  factory: string | null;
+  usesClassicRuntime: boolean;
+}
+
+const jsxSourceFactsByScopes = new WeakMap<RuleContext["scopes"], FlickityJsxSourceFacts>();
+
+const hasNativeProviderReference = (
+  node: EsTreeNodeOfType<"Identifier">,
+  context: RuleContext,
+): boolean => {
+  if (context.scopes.isGlobalReference(node)) return true;
+  const symbol = context.scopes.symbolFor(node);
+  return Boolean(
+    symbol &&
+    (symbol.kind === "ts-interface" || symbol.kind === "ts-type-alias") &&
+    !hasRuntimeValueBinding(symbol),
+  );
+};
+
+const hasNativeJsxFactory = (
+  opening: EsTreeNodeOfType<"JSXOpeningElement">,
+  context: RuleContext,
+): boolean => {
+  const sourceCode = context.sourceCode;
+  if (!sourceCode?.getText) return false;
+  let sourceText: string;
+  try {
+    sourceText = sourceCode.getText();
+  } catch {
+    return false;
+  }
+  if (typeof sourceText !== "string") return false;
+  const program = findProgramRoot(opening);
+  if (!program || context.scopes.rootScope.node !== program) return false;
+  let facts = jsxSourceFactsByScopes.get(context.scopes);
+  if (!facts || facts.program !== program || facts.sourceText !== sourceText) {
+    facts = { program, sourceText, supported: true, factory: null, usesClassicRuntime: false };
+    if (FLICKITY_POSSIBLE_JSX_DIRECTIVE_PATTERN.test(sourceText)) {
+      try {
+        const parsed = parseSync("flickity-native-ref.tsx", sourceText, {
+          astType: "ts",
+          lang: "tsx",
+        });
+        if (parsed.errors.some((error) => error.severity === "Error")) facts.supported = false;
+        for (const comment of parsed.comments) {
+          for (const directive of comment.value.matchAll(FLICKITY_JSX_DIRECTIVE_PATTERN)) {
+            const [, kind, provider] = directive;
+            if (kind === "jsxImportSource" && provider !== "react") facts.supported = false;
+            if (kind === "jsx") {
+              if (facts.factory && facts.factory !== provider) facts.supported = false;
+              facts.factory = provider ?? null;
+            }
+            if (kind === "jsxRuntime" && provider === "classic") facts.usesClassicRuntime = true;
+          }
+        }
+      } catch {
+        facts.supported = false;
+      }
+    }
+    jsxSourceFactsByScopes.set(context.scopes, facts);
+  }
+  if (!facts.supported) return false;
+  const factory = facts.factory ?? (facts.usesClassicRuntime ? "React.createElement" : null);
+  if (!factory) return true;
+  const factoryParts = factory.split(".");
+  if (factoryParts.length > 2 || (factoryParts.length === 2 && factoryParts[1] !== "createElement"))
+    return false;
+  let scope: ScopeDescriptor | null = context.scopes.scopeFor(opening);
+  while (scope) {
+    const symbols = scope.symbols.filter(
+      (symbol) => symbol.name === factoryParts[0] && !isErasedTypeScriptBinding(symbol),
+    );
+    if (symbols.length > 0) {
+      const symbol = symbols[0];
+      if (symbols.length !== 1 || !symbol) return false;
+      const imported = resolveImportedApiReference(symbol.bindingIdentifier, context.scopes);
+      return Boolean(
+        imported &&
+        imported.source === "react" &&
+        (factoryParts.length === 1
+          ? imported.importedName === "createElement"
+          : imported.isNamespace || imported.importedName === "default"),
+      );
+    }
+    scope = scope.parent;
+  }
+  return false;
+};
 
 const isDirectWrite = (node: EsTreeNode): boolean => {
   const expression = findTransparentExpressionRoot(node);
@@ -115,7 +216,7 @@ const hasAdmittedProvider = (node: EsTreeNode, context: RuleContext): boolean =>
         return (
           !isTypeScriptTypePosition(candidate) &&
           Boolean(context.scopes.referenceFor(candidate)) &&
-          context.scopes.isGlobalReference(candidate) &&
+          hasNativeProviderReference(candidate, context) &&
           UNSUPPORTED_PROVIDER_GLOBALS.has(candidate.name)
         );
       }
@@ -440,9 +541,14 @@ const isNativeRefWrite = (
     return false;
   const body = stripParenExpression(callback.body);
   if (isNodeOfType(body, "BlockStatement")) {
-    const statement = body.body[0];
+    const runtimeStatements = body.body.filter(
+      (statement) =>
+        !isNodeOfType(statement, "TSInterfaceDeclaration") &&
+        !isNodeOfType(statement, "TSTypeAliasDeclaration"),
+    );
+    const statement = runtimeStatements[0];
     if (
-      body.body.length !== 1 ||
+      runtimeStatements.length !== 1 ||
       !isNodeOfType(statement, "ExpressionStatement") ||
       stripParenExpression(statement.expression) !== assignment
     )
@@ -473,6 +579,7 @@ const isNativeRefWrite = (
     isNodeOfType(container.parent.parent, "JSXOpeningElement")
   ) {
     const opening = container.parent.parent;
+    if (!hasNativeJsxFactory(opening, context)) return false;
     return (
       isNodeOfType(opening.parent, "JSXElement") &&
       isDirectRenderReturn(opening.parent, renderFunction, context) &&

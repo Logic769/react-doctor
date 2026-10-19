@@ -914,8 +914,8 @@ const cases = [
     },
   },
   {
-    name: "own-render-field-overrides-native-ref-method",
-    code: "import React, { Component } from 'react';\nimport Flickity from 'flickity';\n\ninterface GalleryProps { options?: object; onAcquire?: (widget: unknown) => void; }\n\nclass Gallery extends Component<GalleryProps> {\n  container: HTMLDivElement | null = null;\n  widget: any = null;\n  componentDidMount() {\n    if (!this.container) return;\n    this.widget = new Flickity(this.container, {});\n  }\n\n  render() { return <div ref={element => { this.container = element; }} />; }\n  render = () => null;\n}\nexport default Gallery;\n",
+    name: "own-render-field-does-not-prove-native-ref",
+    code: "import React, { Component } from 'react';\nimport Flickity from 'flickity';\n\ninterface GalleryProps { options?: object; onAcquire?: (widget: unknown) => void; }\n\nclass Gallery extends Component<GalleryProps> {\n  container: HTMLDivElement | null = null;\n  widget: any = null;\n  componentDidMount() {\n    if (!this.container) return;\n    this.widget = new Flickity(this.container, {});\n  }\n\n  render = () => <div ref={element => { this.container = element; }} />;\n}\nexport default Gallery;\n",
     options: {
       filename: "synthetic-gallery.tsx",
       includeLocations: true,
