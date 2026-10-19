@@ -461,4 +461,39 @@ export const Example = () => {
 `,
     expectedDiagnostics: [],
   },
+  {
+    name: "global-provider-parameter-property",
+    code: `import { useEffect, useState, useRef } from "react";
+class Setup { constructor(public value = (globalThis.fetch = () => Promise.resolve("ok"))) {} }
+new Setup();
+export const Example = () => {
+  const [value, setValue] = useState<unknown>(null);
+  useEffect(() => {
+    (async () => {
+      fetch("/value").then(setValue);
+    })();
+  }, []);
+  return null;
+};
+`,
+    expectedDiagnostics: [],
+  },
+  {
+    name: "local-object-parameter-property",
+    code: `import { useEffect, useState, useRef } from "react";
+const localProvider = { fetch: () => Promise.resolve("local") };
+class Setup { constructor(public value = (localProvider.fetch = () => Promise.resolve("ok"))) {} }
+new Setup();
+export const Example = () => {
+  const [value, setValue] = useState<unknown>(null);
+  useEffect(() => {
+    (async () => {
+      fetch("/value").then(setValue);
+    })();
+  }, []);
+  return null;
+};
+`,
+    expectedDiagnostics: [],
+  },
 ];

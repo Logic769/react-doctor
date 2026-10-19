@@ -27,7 +27,7 @@ export const createImmediateIifeFetchProviderCheck = (
   const globalObjectsByIdentity = new Map<string, EsTreeNode>();
   const promisePrototypesByIdentity = new Map<string, EsTreeNode>();
   let didIndexProviders = false;
-  let hasUnsupportedProviderWrite = false;
+  let hasUnsupportedProvider = false;
   return (fetchCall, chain) => {
     if (!didIndexProviders) {
       const providerScopes: ScopeAnalysis = {
@@ -44,6 +44,10 @@ export const createImmediateIifeFetchProviderCheck = (
       };
 
       walkAst(context.scopes.rootScope.node, (node) => {
+        if (isNodeOfType(node, "TSParameterProperty")) {
+          hasUnsupportedProvider = true;
+          return false;
+        }
         mutationAnalysis.record(node);
         if (
           isNodeOfType(node, "MemberExpression") &&
@@ -59,7 +63,7 @@ export const createImmediateIifeFetchProviderCheck = (
               getStaticPropertyName(receiver) === "prototype" &&
               isProvenGlobalNamespaceReference(receiver.object, "Promise", providerScopes))
           ) {
-            hasUnsupportedProviderWrite = true;
+            hasUnsupportedProvider = true;
           }
         }
         const identity = resolveExpressionKey(node, context);
@@ -83,7 +87,7 @@ export const createImmediateIifeFetchProviderCheck = (
       didIndexProviders = true;
     }
     if (
-      hasUnsupportedProviderWrite ||
+      hasUnsupportedProvider ||
       mutationAnalysis.hasProvenMutation(fetchCall.callee, "", fetchCall)
     )
       return false;
