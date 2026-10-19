@@ -274,6 +274,11 @@ const controls = [
     code: 'import { useEffect, useState } from "react";\nself = { addEventListener(event, callback) { callback(); }, removeEventListener() {} };\nexport const Example = ({ mode }) => {\n  const [open, setOpen] = useState(false);\n  useEffect(() => {\n    let listener;\n    if (mode) { listener = () => {}; } else { listener = () => setOpen(!open); }\n    self.addEventListener("change", listener);\n    return () => self.removeEventListener("change", listener);\n  }, [mode]);\n  return <output>{String(open)}</output>;\n};\n',
     diagnostics: [],
   },
+  {
+    name: "TypeScript wrapped direct eval fixes branch predicate before listener assignment",
+    code: 'import { useEffect, useState } from "react";\nexport const Example = ({ mode, target }) => {\n  const [open, setOpen] = useState(false);\n  useEffect(() => {\n    (eval as any)("mode = true");\n    let listener;\n    if (mode) { listener = () => {}; } else { listener = () => setOpen(!open); }\n    target.addEventListener("change", listener);\n    return () => target.removeEventListener("change", listener);\n  }, [mode, target]);\n  return <output>{String(open)}</output>;\n};\n',
+    diagnostics: [],
+  },
 ];
 
 describe("no-boolean-toggle-without-functional-update — closed local branch listeners", () => {

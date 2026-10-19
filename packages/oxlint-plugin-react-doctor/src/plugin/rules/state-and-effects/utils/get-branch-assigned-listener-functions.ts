@@ -16,6 +16,7 @@ import { isProvenBrowserApiReceiver } from "../../../utils/is-proven-browser-api
 import { resolveReactUseStatePair } from "../../../utils/resolve-react-use-state-pair.js";
 import type { RuleContext } from "../../../utils/rule-context.js";
 import { someAst } from "../../../utils/some-ast.js";
+import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
 
 interface BranchListenerAssignment {
   readonly assignment: EsTreeNodeOfType<"AssignmentExpression">;
@@ -67,18 +68,16 @@ const isProviderWriteTarget = (node: EsTreeNode): boolean => {
 const hasDynamicScope = (program: EsTreeNode): boolean => {
   const cached = dynamicScopeByProgram.get(program);
   if (cached !== undefined) return cached;
-  const result = someAst(
-    program,
-    (node) =>
+  const result = someAst(program, (node) => {
+    const callee = isNodeOfType(node, "CallExpression") ? stripParenExpression(node.callee) : null;
+    return (
       node.type === "WithStatement" ||
       node.type === "TSParameterProperty" ||
       node.type === "TSEnumDeclaration" ||
       node.type === "TSModuleDeclaration" ||
       node.type === "TSImportEqualsDeclaration" ||
       node.type === "TSExportAssignment" ||
-      (isNodeOfType(node, "CallExpression") &&
-        isNodeOfType(node.callee, "Identifier") &&
-        node.callee.name === "eval") ||
+      (isNodeOfType(callee, "Identifier") && callee.name === "eval") ||
       (isNodeOfType(node, "AssignmentExpression") && isProviderWriteTarget(node.left)) ||
       (isNodeOfType(node, "UpdateExpression") && isProviderWriteTarget(node.argument)) ||
       (isNodeOfType(node, "UnaryExpression") &&
@@ -88,8 +87,9 @@ const hasDynamicScope = (program: EsTreeNode): boolean => {
         isNodeOfType(node.callee, "MemberExpression") &&
         isNodeOfType(node.callee.object, "Identifier") &&
         (node.callee.object.name === "Object" || node.callee.object.name === "Reflect") &&
-        reflectiveMutationNames.has(getStaticPropertyName(node.callee) ?? "")),
-  );
+        reflectiveMutationNames.has(getStaticPropertyName(node.callee) ?? ""))
+    );
+  });
   dynamicScopeByProgram.set(program, result);
   return result;
 };
