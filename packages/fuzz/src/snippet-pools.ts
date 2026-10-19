@@ -420,6 +420,8 @@ export const MODULE_SCOPE_SNIPPET_POOL = [
 ] as const;
 
 export const SERVER_MODULE_PROGRAM_POOL = [
+  `export class FuzzRandomDataAdapter { constructor() { this.key = Math.random(); } parse(entries) { for (const item of entries) { const value = item[0]; if (value !== "and") throw new Error("Unexpected token: " + value); } } }`,
+  `export class FuzzCapturedRandomKey { constructor() { this.key = Math.random(); } fail() { throw new Error("Unexpected token: " + this.key); } }`,
   `export default function FuzzDedupPage({ items }) {
   return <FuzzList items={items} sortedItems={items.toSorted()} />;
 }`,
