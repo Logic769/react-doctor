@@ -147,6 +147,94 @@ const CASES = [
       parseErrors: [],
     },
   },
+  {
+    name: "nested-type-only-reflection-pattern",
+    code: 'import { useState } from "react";\ntype ReflectionNote = ({ nested: { constructor } }: { nested: { constructor: string } }) => void;\nexport const RecordPicker = () => {\n  const [records, setRecords] = useState([{ label: "one" }]);\n  const write = (index: number) => {\n    const copy = [...records];\n    copy[index].extra = "new";\n    setRecords(copy);\n  };\n  return <div>{records.map((record, index) => <button key={index} onClick={() => write(index)}>{record.label}</button>)}</div>;\n};\n',
+    expectedResult: {
+      diagnostics: [
+        {
+          column: 4,
+          line: 7,
+          message:
+            'Copying the array still shares its records with "records". Replace the changed record instead of changing it in place.',
+          nodeType: "AssignmentExpression",
+        },
+      ],
+      parseErrors: [],
+    },
+  },
+  {
+    name: "runtime-nested-reflection-pattern",
+    code: 'import { useState } from "react";\nconst readReflection = ({ nested: { constructor } }: { nested: { constructor: string } }) => constructor;\nexport const RecordPicker = () => {\n  const [records, setRecords] = useState([{ label: "one" }]);\n  const write = (index: number) => {\n    const copy = [...records];\n    copy[index].extra = "new";\n    setRecords(copy);\n  };\n  return <div>{records.map((record, index) => <button key={index} onClick={() => write(index)}>{record.label}</button>)}</div>;\n};\n',
+    expectedResult: {
+      diagnostics: [],
+      parseErrors: [],
+    },
+  },
+  {
+    name: "runtime-parameter-property-provider",
+    code: 'import { useState } from "react";\ndeclare const provider: { defineProperty(): number };\nclass Setup { constructor(public value = provider.defineProperty()) {} }\nnew Setup();\nexport const RecordPicker = () => {\n  const [records, setRecords] = useState([{ label: "one" }]);\n  const write = (index: number) => {\n    const copy = [...records];\n    copy[index].extra = "new";\n    setRecords(copy);\n  };\n  return <div>{records.map((record, index) => <button key={index} onClick={() => write(index)}>{record.label}</button>)}</div>;\n};\n',
+    expectedResult: {
+      diagnostics: [],
+      parseErrors: [],
+    },
+  },
+  {
+    name: "runtime-enum-provider",
+    code: 'import { useState } from "react";\ndeclare const provider: { defineProperty(): number };\nenum Setup { Value = provider.defineProperty() }\nexport const RecordPicker = () => {\n  const [records, setRecords] = useState([{ label: "one" }]);\n  const write = (index: number) => {\n    const copy = [...records];\n    copy[index].extra = "new";\n    setRecords(copy);\n  };\n  return <div>{records.map((record, index) => <button key={index} onClick={() => write(index)}>{record.label}</button>)}</div>;\n};\n',
+    expectedResult: {
+      diagnostics: [],
+      parseErrors: [],
+    },
+  },
+  {
+    name: "runtime-namespace-provider",
+    code: 'import { useState } from "react";\ndeclare const provider: { defineProperty(): number };\nnamespace Setup { export const value = provider.defineProperty(); }\nexport const RecordPicker = () => {\n  const [records, setRecords] = useState([{ label: "one" }]);\n  const write = (index: number) => {\n    const copy = [...records];\n    copy[index].extra = "new";\n    setRecords(copy);\n  };\n  return <div>{records.map((record, index) => <button key={index} onClick={() => write(index)}>{record.label}</button>)}</div>;\n};\n',
+    expectedResult: {
+      diagnostics: [],
+      parseErrors: [],
+    },
+  },
+  {
+    name: "runtime-parameter-property-function-provider",
+    code: 'import { useState } from "react";\nclass Setup { constructor(public value = Function("Object.defineProperty(Object.prototype, \'extra\', { set() {}, configurable: true })")()) {} }\nnew Setup();\nexport const RecordPicker = () => {\n  const [records, setRecords] = useState([{ label: "one" }]);\n  const write = (index: number) => {\n    const copy = [...records];\n    copy[index].extra = "new";\n    setRecords(copy);\n  };\n  return <div>{records.map((record, index) => <button key={index} onClick={() => write(index)}>{record.label}</button>)}</div>;\n};\n',
+    expectedResult: {
+      diagnostics: [],
+      parseErrors: [],
+    },
+  },
+  {
+    name: "as-any-receiver",
+    code: 'import { useState } from "react";\nexport const RecordPicker = () => {\n  const [records, setRecords] = useState([{ label: "one" }]);\n  const write = (index: number) => {\n    interface index {}\n    const copy = [...records];\n    copy[index].extra = "new";\n    setRecords(copy);\n  };\n  return <div>{(records as any).map((record, index) => <button key={index} onClick={() => write(index)}>{record.label}</button>)}</div>;\n};\n',
+    expectedResult: {
+      diagnostics: [
+        {
+          column: 4,
+          line: 7,
+          message:
+            'Copying the array still shares its records with "records". Replace the changed record instead of changing it in place.',
+          nodeType: "AssignmentExpression",
+        },
+      ],
+      parseErrors: [],
+    },
+  },
+  {
+    name: "non-null-receiver",
+    code: 'import { useState } from "react";\nexport const RecordPicker = () => {\n  const [records, setRecords] = useState([{ label: "one" }]);\n  const write = (index: number) => {\n    interface index {}\n    const copy = [...records];\n    copy[index].extra = "new";\n    setRecords(copy);\n  };\n  return <div>{(records!).map((record, index) => <button key={index} onClick={() => write(index)}>{record.label}</button>)}</div>;\n};\n',
+    expectedResult: {
+      diagnostics: [
+        {
+          column: 4,
+          line: 7,
+          message:
+            'Copying the array still shares its records with "records". Replace the changed record instead of changing it in place.',
+          nodeType: "AssignmentExpression",
+        },
+      ],
+      parseErrors: [],
+    },
+  },
 ];
 
 describe("no-direct-state-mutation absent record runtime bindings", () => {

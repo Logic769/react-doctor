@@ -15,7 +15,6 @@ import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-posi
 import { isReactApiCall } from "../../../utils/is-react-api-call.js";
 import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
 import { walkAst } from "../../../utils/walk-ast.js";
-import { someAst } from "../../../utils/some-ast.js";
 
 interface ClosedRecordArray {
   readonly state: SymbolDescriptor;
@@ -124,19 +123,29 @@ const absentKeyProviderAccessCache = new WeakMap<ScopeAnalysis, boolean>();
 const hasVisibleAbsentKeyProviderAccess = (context: RuleContext): boolean => {
   const cached = absentKeyProviderAccessCache.get(context.scopes);
   if (cached !== undefined) return cached;
-  const hasAccess = someAst(context.scopes.rootScope.node, (node) => {
-    if (isTypeScriptTypePosition(node)) return false;
-    if (isNodeOfType(node, "ObjectPattern")) {
-      return node.properties.some((property) => {
+  let hasAccess = false;
+  walkAst(context.scopes.rootScope.node, (node) => {
+    if (
+      hasAccess ||
+      isNodeOfType(node, "TSInterfaceDeclaration") ||
+      isNodeOfType(node, "TSTypeAliasDeclaration")
+    )
+      return false;
+    if (isTypeScriptTypePosition(node)) return;
+    if (isNodeOfType(node, "TSParameterProperty")) {
+      hasAccess = true;
+    } else if (isNodeOfType(node, "ObjectPattern")) {
+      hasAccess = node.properties.some((property) => {
         if (!isNodeOfType(property, "Property") || property.computed) return true;
         const propertyName = getStaticPropertyKeyName(property);
         return propertyName === null || ABSENT_KEY_PATTERN_PROPERTY_NAMES.has(propertyName);
       });
-    }
-    return (
+    } else if (
       isNodeOfType(node, "MemberExpression") &&
       ABSENT_KEY_REFLECTION_METHOD_NAMES.has(getStaticPropertyName(node) ?? "")
-    );
+    ) {
+      hasAccess = true;
+    }
   });
   absentKeyProviderAccessCache.set(context.scopes, hasAccess);
   return hasAccess;
@@ -517,7 +526,7 @@ const isMapIndex = (
   const call = callback.parent;
   if (!isNodeOfType(call, "CallExpression") || !isNodeOfType(call.callee, "MemberExpression"))
     return false;
-  const receiver = call.callee.object;
+  const receiver = stripParenExpression(call.callee.object);
   return (
     isNodeOfType(receiver, "Identifier") &&
     context.scopes.symbolFor(receiver) === proof.state &&
