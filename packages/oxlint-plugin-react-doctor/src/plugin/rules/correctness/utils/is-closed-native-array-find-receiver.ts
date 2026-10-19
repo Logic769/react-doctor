@@ -1,6 +1,13 @@
+import {
+  DYNAMIC_PROVIDER_NAMES,
+  FIND_METHOD_NAMES,
+  PROVIDER_KEYS,
+  RUNTIME_TYPESCRIPT_PROVIDER_NODES,
+} from "./native-array-find/constants.js";
 import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
+import { hasRuntimeValueBinding } from "../../../utils/has-runtime-value-binding.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
 import { getDirectConstInitializer } from "../../../utils/get-direct-const-initializer.js";
 import { getStaticPropertyKeyName } from "../../../utils/get-static-property-key-name.js";
@@ -12,48 +19,34 @@ import type { RuleContext } from "../../../utils/rule-context.js";
 import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
 import { walkAst } from "../../../utils/walk-ast.js";
 
-const FIND_METHOD_NAMES = new Set(["find", "findLast"]);
-const PROVIDER_KEYS = new Set([
-  "__proto__",
-  "__defineGetter__",
-  "__defineSetter__",
-  "constructor",
-  "prototype",
-  "defineProperty",
-  "defineProperties",
-  "setPrototypeOf",
-  "getPrototypeOf",
-  "Array",
-  "Object",
-  "Reflect",
-  "Proxy",
-  "Function",
-  "eval",
-]);
-const DYNAMIC_PROVIDER_NAMES = new Set([
-  "Array",
-  "Object",
-  "Reflect",
-  "eval",
-  "Function",
-  "Proxy",
-  "require",
-]);
-const RUNTIME_TYPESCRIPT_PROVIDER_NODES = new Set([
-  "TSEnumDeclaration",
-  "TSExportAssignment",
-  "TSImportEqualsDeclaration",
-  "TSModuleDeclaration",
-]);
 const providerSafetyByAnalysis = new WeakMap<ScopeAnalysis, boolean>();
 const receiverSafetyByAnalysis = new WeakMap<ScopeAnalysis, Map<number, boolean>>();
+
+const isNativeProviderReference = (
+  identifier: EsTreeNodeOfType<"Identifier">,
+  scopes: ScopeAnalysis,
+): boolean => {
+  if (scopes.isGlobalReference(identifier)) return true;
+  const symbol = scopes.symbolFor(identifier);
+  return Boolean(
+    symbol &&
+    (symbol.kind === "ts-interface" || symbol.kind === "ts-type-alias") &&
+    !hasRuntimeValueBinding(symbol),
+  );
+};
 
 const hasClosedProvider = (scopes: ScopeAnalysis): boolean => {
   const cached = providerSafetyByAnalysis.get(scopes);
   if (cached !== undefined) return cached;
   let isClosed = true;
   walkAst(scopes.rootScope.node, (node) => {
-    if (!isClosed) return false;
+    if (
+      !isClosed ||
+      isNodeOfType(node, "TSInterfaceDeclaration") ||
+      isNodeOfType(node, "TSTypeAliasDeclaration")
+    ) {
+      return false;
+    }
     if (RUNTIME_TYPESCRIPT_PROVIDER_NODES.has(node.type)) {
       isClosed = false;
       return false;
@@ -62,7 +55,7 @@ const hasClosedProvider = (scopes: ScopeAnalysis): boolean => {
       isNodeOfType(node, "Identifier") &&
       !isTypeScriptTypePosition(node) &&
       DYNAMIC_PROVIDER_NAMES.has(node.name) &&
-      scopes.isGlobalReference(node)
+      isNativeProviderReference(node, scopes)
     ) {
       isClosed = false;
     }

@@ -1,5 +1,6 @@
 import { PROMISE_SETTLE_METHODS } from "../../constants/js.js";
 import { defineRule } from "../../utils/define-rule.js";
+import { FIND_METHOD_NAMES } from "./utils/native-array-find/constants.js";
 import { isClosedNativeArrayFindReceiver } from "./utils/is-closed-native-array-find-receiver.js";
 import type { EsTreeNode } from "../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../utils/es-tree-node-of-type.js";
@@ -19,7 +20,6 @@ import { walkAst } from "../../utils/walk-ast.js";
 const MESSAGE =
   "`find` returns `undefined` when nothing matches, so reading from its result here throws `Cannot read properties of undefined` — use optional chaining (`?.`) or guard the result before you use it.";
 
-const FIND_METHOD_NAMES = new Set(["find", "findLast"]);
 const PASCAL_CASE_IDENTIFIER_PATTERN = /^[A-Z]/;
 // Capitalized globals that are real element predicates (`values.find(Boolean)`),
 // not component selectors — exempt from the PascalCase argument bail.
