@@ -506,7 +506,7 @@ const isMapIndex = (
   const call = callback.parent;
   if (!isNodeOfType(call, "CallExpression") || !isNodeOfType(call.callee, "MemberExpression"))
     return false;
-  const receiver = call.callee.object;
+  const receiver = stripParenExpression(call.callee.object);
   return (
     isNodeOfType(receiver, "Identifier") &&
     context.scopes.symbolFor(receiver) === proof.state &&
