@@ -1,4 +1,4 @@
-import type { SymbolDescriptor } from "../../../semantic/scope-analysis.js";
+import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { RuleContext } from "../../../utils/rule-context.js";
 import type { UseStateBinding } from "./collect-use-state-bindings.js";
@@ -13,6 +13,7 @@ import { isNodeReachableWithinFunction } from "../../../utils/is-node-reachable-
 import { isReactApiCall } from "../../../utils/is-react-api-call.js";
 import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
 import { walkAst } from "../../../utils/walk-ast.js";
+import { someAst } from "../../../utils/some-ast.js";
 
 interface ClosedRecordArray {
   readonly state: SymbolDescriptor;
@@ -86,6 +87,57 @@ const ARRAY_PROTOCOL_PROPERTY_NAMES = new Set([
   "toSpliced",
   "with",
 ]);
+
+const ABSENT_KEY_REFLECTION_METHOD_NAMES = new Set([
+  "defineProperty",
+  "defineProperties",
+  "getPrototypeOf",
+  "setPrototypeOf",
+  "getOwnPropertyDescriptor",
+  "getOwnPropertyDescriptors",
+  "create",
+  "__defineGetter__",
+  "__defineSetter__",
+  "__lookupGetter__",
+  "__lookupSetter__",
+]);
+const ABSENT_KEY_PATTERN_PROPERTY_NAMES = new Set([
+  ...INTRINSIC_GLOBAL_NAMES,
+  ...INTRINSIC_PROPERTY_NAMES,
+  ...ABSENT_KEY_REFLECTION_METHOD_NAMES,
+  "require",
+]);
+const ABSENT_KEY_FORBIDDEN_PROPERTY_NAMES = new Set([
+  ...INTRINSIC_PROPERTY_NAMES,
+  ...ARRAY_PROTOCOL_PROPERTY_NAMES,
+  ...ABSENT_KEY_REFLECTION_METHOD_NAMES,
+  "isPrototypeOf",
+  "hasOwnProperty",
+  "propertyIsEnumerable",
+  "then",
+  "toJSON",
+]);
+const absentKeyProviderAccessCache = new WeakMap<ScopeAnalysis, boolean>();
+
+const hasVisibleAbsentKeyProviderAccess = (context: RuleContext): boolean => {
+  const cached = absentKeyProviderAccessCache.get(context.scopes);
+  if (cached !== undefined) return cached;
+  const hasAccess = someAst(context.scopes.rootScope.node, (node) => {
+    if (isNodeOfType(node, "ObjectPattern")) {
+      return node.properties.some((property) => {
+        if (!isNodeOfType(property, "Property") || property.computed) return true;
+        const propertyName = getStaticPropertyKeyName(property);
+        return propertyName === null || ABSENT_KEY_PATTERN_PROPERTY_NAMES.has(propertyName);
+      });
+    }
+    return (
+      isNodeOfType(node, "MemberExpression") &&
+      ABSENT_KEY_REFLECTION_METHOD_NAMES.has(getStaticPropertyName(node) ?? "")
+    );
+  });
+  absentKeyProviderAccessCache.set(context.scopes, hasAccess);
+  return hasAccess;
+};
 
 const isNumericLoopIndex = (node: EsTreeNode, context: RuleContext): boolean => {
   const symbol = context.scopes.symbolFor(node);
@@ -513,9 +565,11 @@ export const collectShallowCopyStateRecordWrites = (
     return [];
   const recordKeys = proof.records.map(recordDataKeys);
   const commonKeys = new Set(recordKeys[0]);
+  const allRecordKeys = new Set(commonKeys);
   for (const keys of recordKeys) {
     if (!keys) return [];
     for (const key of commonKeys) if (!keys.has(key)) commonKeys.delete(key);
+    for (const key of keys) allRecordKeys.add(key);
   }
   const writes: EsTreeNode[] = [];
   for (const [container, kind] of proof.containers) {
@@ -531,10 +585,14 @@ export const collectShallowCopyStateRecordWrites = (
       )
         continue;
       const field = element.parent;
+      if (!isNodeOfType(field, "MemberExpression") || field.object !== element) continue;
+      const fieldName = getStaticPropertyName(field);
       if (
-        !isNodeOfType(field, "MemberExpression") ||
-        field.object !== element ||
-        !commonKeys.has(getStaticPropertyName(field) ?? "")
+        fieldName === null ||
+        (!commonKeys.has(fieldName) &&
+          (ABSENT_KEY_FORBIDDEN_PROPERTY_NAMES.has(fieldName) ||
+            allRecordKeys.has(fieldName) ||
+            hasVisibleAbsentKeyProviderAccess(context)))
       )
         continue;
       const assignment = field.parent;
