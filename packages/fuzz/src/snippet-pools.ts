@@ -314,6 +314,7 @@ export const LIBRARY_SNIPPET_POOL = [
 
 // Module scope — SSR hazards, guard aliases, contexts, caches, styled.
 export const MODULE_SCOPE_SNIPPET_POOL = [
+  `import { useState } from "react"; interface globalThis {} globalThis.eval('Object.defineProperty(Object.prototype,"extra",{set(value){void value;},configurable:true})'); export const RecordPicker = () => {   const [records, setRecords] = useState([{ label: "one" }]);   const write = (index: number) => {     const copy = [...records];     copy[index].extra = "new";     setRecords(copy);   };   return <div>{records.map((record, index) => <button key={index} onClick={() => write(index)}>{record.label}</button>)}</div>; };`,
   `import { create as createFuzzZustandStore } from "zustand"; export const useFuzzZustandStore = createFuzzZustandStore(() => ({ items: [] })); export const fuzzZustandSelection = useFuzzZustandStore((state) => ({ items: state.items }));`,
   `import { create as createFuzzZustandTarget } from "zustand"; const useFuzzZustandTarget = createFuzzZustandTarget(() => ({ value: 0, other: 0 })); export const FuzzZustandWholeStoreTarget = () => { const { value: fuzzZustandValue } = useFuzzZustandTarget(); return <output>{fuzzZustandValue}</output>; };`,
   `import { create as createFuzzZustandGetStore } from "zustand"; const useFuzzZustandGetStore = createFuzzZustandGetStore((_set, get) => ({ count: get().count }));`,
