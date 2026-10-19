@@ -44,3 +44,18 @@ export const MATCHER_UNSUPPORTED_RUNTIME_NODE_TYPES = new Set([
   "TSModuleDeclaration",
   "ImportExpression",
 ]);
+
+export const MATCHER_FORBIDDEN_GLOBALS = new Set([
+  "Reflect",
+  "Proxy",
+  "eval",
+  "require",
+  "Function",
+  "setTimeout",
+  "setInterval",
+  "document",
+  "globalThis",
+  "global",
+  "self",
+  "Array",
+]);

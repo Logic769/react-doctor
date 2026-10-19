@@ -1,4 +1,5 @@
 import {
+  MATCHER_FORBIDDEN_GLOBALS,
   MATCHER_PROVIDER_KEYS,
   MATCHER_PROTOCOL_KEYS,
   MATCHER_UNSUPPORTED_RUNTIME_NODE_TYPES,
@@ -14,6 +15,7 @@ import { findTransparentExpressionRoot } from "../../../utils/find-transparent-e
 import { getFiniteStaticStringValues } from "../../../utils/get-finite-static-string-values.js";
 import { getStaticPropertyKeyName } from "../../../utils/get-static-property-key-name.js";
 import { getValueImportDeclaration } from "../../../utils/get-value-import-declaration.js";
+import { isErasedTypeScriptBinding } from "../../../utils/is-erased-typescript-binding.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { isNodeReachableWithinFunction } from "../../../utils/is-node-reachable-within-function.js";
 import { isProvenUnmodifiedGlobalNamespaceReference } from "../../../utils/is-proven-unmodified-global-namespace-reference.js";
@@ -278,6 +280,32 @@ const isMatcherDataIndexRead = (node: EsTreeNode, context: RuleContext): boolean
   );
 };
 
+const isMatcherNonReferenceIdentifier = (
+  node: EsTreeNodeOfType<"Identifier">,
+  scopes: ScopeAnalysis,
+): boolean => {
+  if (isTypeScriptTypePosition(node) || scopes.symbolFor(node)?.bindingIdentifier === node)
+    return true;
+  const parent = node.parent;
+  return (
+    (isNodeOfType(parent, "MemberExpression") && !parent.computed && parent.property === node) ||
+    (isNodeOfType(parent, "Property") &&
+      !parent.computed &&
+      parent.key === node &&
+      (!parent.shorthand || parent.value !== node)) ||
+    ((isNodeOfType(parent, "MethodDefinition") || isNodeOfType(parent, "PropertyDefinition")) &&
+      !parent.computed &&
+      parent.key === node) ||
+    isNodeOfType(parent, "ImportSpecifier") ||
+    isNodeOfType(parent, "ImportDefaultSpecifier") ||
+    isNodeOfType(parent, "ImportNamespaceSpecifier") ||
+    isNodeOfType(parent, "ExportSpecifier") ||
+    (isNodeOfType(parent, "LabeledStatement") && parent.label === node) ||
+    ((isNodeOfType(parent, "BreakStatement") || isNodeOfType(parent, "ContinueStatement")) &&
+      parent.label === node)
+  );
+};
+
 const hasClosedMatcherProviders = (context: RuleContext): boolean => {
   const saved = matcherProvidersByAnalysis.get(context.scopes);
   if (saved !== undefined) return saved;
@@ -285,6 +313,12 @@ const hasClosedMatcherProviders = (context: RuleContext): boolean => {
   const writesByName = new Map<string, EsTreeNode[]>();
   const memberReferencesByName = new Map<string, EsTreeNode[]>();
   const readonlyImports = new Map<SymbolDescriptor, boolean>();
+  const reactImportNames = new Set<string>();
+  for (const symbol of context.scopes.rootScope.symbols) {
+    const declaration = getValueImportDeclaration(symbol);
+    if (isNodeOfType(declaration, "ImportDeclaration") && declaration.source.value === "react")
+      reactImportNames.add(symbol.name);
+  }
   walkAst(context.scopes.rootScope.node, (node) => {
     if (!valid) return false;
     if (MATCHER_UNSUPPORTED_RUNTIME_NODE_TYPES.has(node.type)) {
@@ -350,6 +384,26 @@ const hasClosedMatcherProviders = (context: RuleContext): boolean => {
       )
         valid = false;
     }
+    if (
+      isNodeOfType(node, "Identifier") &&
+      (MATCHER_FORBIDDEN_GLOBALS.has(node.name) ||
+        node.name === "Object" ||
+        node.name === "window" ||
+        reactImportNames.has(node.name)) &&
+      !isMatcherNonReferenceIdentifier(node, context.scopes)
+    ) {
+      const symbol = context.scopes.symbolFor(node);
+      if (
+        !context.scopes.referenceFor(node) ||
+        (MATCHER_FORBIDDEN_GLOBALS.has(node.name) &&
+          symbol &&
+          isErasedTypeScriptBinding(symbol) &&
+          !hasRuntimeValueBinding(symbol))
+      ) {
+        valid = false;
+        return false;
+      }
+    }
     if (!isNodeOfType(node, "Identifier") || !context.scopes.referenceFor(node)) return;
     const symbol = context.scopes.symbolFor(node);
     if (symbol?.kind === "import") {
@@ -372,22 +426,7 @@ const hasClosedMatcherProviders = (context: RuleContext): boolean => {
       }
     }
     if (!isNativeMatcherGlobalReference(node, context.scopes)) return;
-    if (
-      [
-        "Reflect",
-        "Proxy",
-        "eval",
-        "require",
-        "Function",
-        "setTimeout",
-        "setInterval",
-        "document",
-        "globalThis",
-        "global",
-        "self",
-        "Array",
-      ].includes(node.name)
-    ) {
+    if (MATCHER_FORBIDDEN_GLOBALS.has(node.name)) {
       valid = false;
       return;
     }
