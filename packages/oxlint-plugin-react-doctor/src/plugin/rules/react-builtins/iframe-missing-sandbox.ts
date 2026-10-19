@@ -4,7 +4,7 @@ import type { EsTreeNodeOfType } from "../../utils/es-tree-node-of-type.js";
 import { getJsxPropStringValue } from "../../utils/get-jsx-prop-string-value.js";
 import { hasJsxPropIgnoreCase } from "../../utils/has-jsx-prop-ignore-case.js";
 import { hasJsxSpreadAttribute } from "../../utils/has-jsx-spread-attribute.js";
-import { isCreateElementCall } from "../../utils/is-create-element-call.js";
+import { isReactApiCall } from "../../utils/is-react-api-call.js";
 import { isNodeOfType } from "../../utils/is-node-of-type.js";
 import { isNullishExpression } from "../../utils/is-nullish-expression.js";
 import type { Rule } from "../../utils/rule.js";
@@ -122,7 +122,16 @@ export const iframeMissingSandbox = defineRule({
       validateSandboxValue(context, stringValue, sandboxAttr);
     },
     CallExpression(node: EsTreeNodeOfType<"CallExpression">) {
-      if (!isCreateElementCall(node)) return;
+      if (
+        !isReactApiCall(node, "createElement", context.scopes, {
+          allowGlobalReactNamespace: true,
+          allowUnboundBareCalls: true,
+          resolveNamedAliases: false,
+          resolveConditionalAliases: false,
+        })
+      ) {
+        return;
+      }
       const firstArgument = node.arguments[0];
       if (!firstArgument) return;
       if (!isNodeOfType(firstArgument, "Literal") || firstArgument.value !== "iframe") return;
