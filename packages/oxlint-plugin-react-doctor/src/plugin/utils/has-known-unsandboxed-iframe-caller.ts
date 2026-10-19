@@ -390,8 +390,9 @@ export const hasKnownUnsandboxedIframeCaller = (
       return false;
     if (node.type === "ReturnStatement") returns.push(node);
   });
-  const returned =
+  const returnedArgument =
     returns.length === 1 && returns[0]?.parent === component.body ? returns[0].argument : null;
+  const returned = returnedArgument ? stripParenExpression(returnedArgument) : null;
   if (
     !returned ||
     (returned.type !== "JSXElement" && returned.type !== "JSXFragment") ||

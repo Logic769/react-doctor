@@ -425,6 +425,33 @@ const fixtures: ReadonlyArray<KnownIframeFixture> = [
     },
     admitted: false,
   },
+  {
+    name: "parenthesized function return preserves native iframe ancestry",
+    code: 'import { Frame } from "./frame";\nexport const View = () => <Frame html="<p>hello</p>" />;\n',
+    files: {
+      "frame.tsx":
+        "export function Frame(props) { const { html, ...rest } = props; return (<div><iframe {...rest} srcDoc={html} /></div>); }\n",
+    },
+    admitted: true,
+  },
+  {
+    name: "parenthesized arrow return preserves fragment iframe ancestry",
+    code: 'import { Frame } from "./frame";\nexport const View = () => <Frame html="<p>hello</p>" />;\n',
+    files: {
+      "frame.tsx":
+        "export const Frame = (props) => { const { html, ...rest } = props; return (<><iframe {...rest} srcDoc={html} /></>); };\n",
+    },
+    admitted: true,
+  },
+  {
+    name: "transparent TypeScript return wrapper preserves native iframe ancestry",
+    code: 'import { Frame } from "./frame";\nexport const View = () => <Frame html="<p>hello</p>" />;\n',
+    files: {
+      "frame.tsx":
+        "export const Frame = (props) => { const { html, ...rest } = props; return ((<div><iframe {...rest} srcDoc={html} /></div>) as any); };\n",
+    },
+    admitted: true,
+  },
 ];
 
 let directory: string;
