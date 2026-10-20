@@ -2,7 +2,7 @@ import type { ScopeAnalysis } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
 import { findTransparentExpressionRoot } from "./find-transparent-expression-root.js";
 import { getStaticKeyName } from "./get-static-key-name.js";
-import { getStaticPropertyName } from "./get-static-property-name.js";
+import { getStaticPropertyKeyName } from "./get-static-property-key-name.js";
 import { hasCompleteSymbolReferences } from "./has-complete-symbol-references.js";
 import { isNodeOfType } from "./is-node-of-type.js";
 import { isTypeScriptTypePosition } from "./is-typescript-type-position.js";
@@ -134,7 +134,10 @@ export const hasOrdinaryRefRelayRuntime = (program: EsTreeNode, scopes: ScopeAna
         isOrdinary = false;
     }
     if (isNodeOfType(node, "MemberExpression")) {
-      const name = getStaticPropertyName(node);
+      const name = getStaticPropertyKeyName(node, {
+        allowComputedString: true,
+        stringifyNonStringLiterals: true,
+      });
       if (node.computed && name === null) {
         const parent = node.parent;
         let comparisonOperand: EsTreeNode | null = null;

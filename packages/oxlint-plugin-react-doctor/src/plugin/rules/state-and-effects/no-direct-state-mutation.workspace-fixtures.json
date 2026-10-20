@@ -527,6 +527,15 @@
       "settingsRoot": "CONSUMER_ROOT",
       "symlinkProvider": false,
       "expectedMutation": "node.style.visibility='hidden'"
+    },
+    {
+      "name": "typed-dom-array-numeric-access",
+      "updates": {
+        "packages/ui/src/panel.tsx": "import {useState,useEffect} from 'react';\nimport {useMergedRefs} from '@sample/ref-kit/internal';\nexport const Panel=({forwarded,modal})=>{\n const measure=(node:HTMLElement[])=>observe(node[0]);\n const [node,setNode]=useState(null);\n const merged=useMergedRefs(forwarded,setNode);\n const Host=(modal?'dialog':'div');\n useEffect(()=>{if(node){measure([node]);node.style.visibility='hidden'}},[node]);\n return <Host ref={merged}/>;\n};\n"
+      },
+      "settingsRoot": "CONSUMER_ROOT",
+      "symlinkProvider": false,
+      "expectedMutation": null
     }
   ]
 }
