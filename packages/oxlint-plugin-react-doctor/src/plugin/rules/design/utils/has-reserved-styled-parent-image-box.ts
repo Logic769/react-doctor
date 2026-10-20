@@ -302,54 +302,7 @@ export const hasReservedStyledParentImageBox = (
     return false;
   if (initializer.quasi.expressions.length > STYLED_SCREEN_BOX_MAX_MEDIA_QUERY_COUNT) return false;
   let hasCompetingStyles = false;
-  walkAst(context.scopes.rootScope.node, (candidate) => {
-    if (candidate === initializer) return false;
-    if (
-      isNodeOfType(candidate, "JSXAttribute") &&
-      isNodeOfType(candidate.name, "JSXIdentifier") &&
-      candidate.name.name === "dangerouslySetInnerHTML"
-    )
-      hasCompetingStyles = true;
-    if (isNodeOfType(candidate, "NewExpression")) hasCompetingStyles = true;
-    if (isNodeOfType(candidate, "CallExpression")) {
-      const owner = candidate.parent;
-      if (
-        !isNodeOfType(owner, "TaggedTemplateExpression") ||
-        owner.tag !== candidate ||
-        !isNodeOfType(candidate.callee, "Identifier") ||
-        !isProvenStyledComponentExpression(owner, context.scopes)
-      )
-        hasCompetingStyles = true;
-    }
-    if (
-      isNodeOfType(candidate, "TaggedTemplateExpression") &&
-      !isProvenStyledComponentExpression(candidate, context.scopes) &&
-      !getMediaBounds(candidate, context, candidate)
-    )
-      hasCompetingStyles = true;
-
-    if (
-      isNodeOfType(candidate, "Identifier") &&
-      ["document", "window", "globalThis", "require", "eval", "Function"].includes(candidate.name)
-    )
-      hasCompetingStyles = true;
-    if (isNodeOfType(candidate, "ImportExpression")) hasCompetingStyles = true;
-    if (isNodeOfType(candidate, "ImportDeclaration")) {
-      hasCompetingStyles ||=
-        typeof candidate.source.value === "string" &&
-        /\.(?:css|scss|sass|less|styl)(?:[?#].*)?$/i.test(candidate.source.value);
-      hasCompetingStyles ||= candidate.specifiers.some(
-        (specifier) => getImportedName(specifier) === "createGlobalStyle",
-      );
-    }
-    if (
-      isNodeOfType(candidate, "JSXOpeningElement") &&
-      isNodeOfType(candidate.name, "JSXIdentifier") &&
-      ["style", "link"].includes(candidate.name.name)
-    )
-      hasCompetingStyles = true;
-    return !hasCompetingStyles;
-  });
+  const ancestorTemplates = new Set<EsTreeNode>();
   for (let ancestor = parent.parent; ancestor; ancestor = ancestor.parent) {
     if (!isNodeOfType(ancestor, "JSXElement")) continue;
     if (ancestor.openingElement.attributes.length !== 0) return false;
@@ -364,6 +317,7 @@ export const hasReservedStyledParentImageBox = (
       !isProvenStyledComponentExpression(ancestorInitializer, context.scopes)
     )
       return false;
+    ancestorTemplates.add(ancestorInitializer);
     const ancestorFactory = ancestorInitializer.tag;
     if (
       !ancestorSymbol ||
@@ -415,6 +369,66 @@ export const hasReservedStyledParentImageBox = (
       return !hasCompetingStyles;
     });
   }
+  walkAst(context.scopes.rootScope.node, (candidate) => {
+    if (candidate === initializer) return false;
+    if (
+      isNodeOfType(candidate, "JSXAttribute") &&
+      isNodeOfType(candidate.name, "JSXIdentifier") &&
+      candidate.name.name === "dangerouslySetInnerHTML"
+    )
+      hasCompetingStyles = true;
+    if (isNodeOfType(candidate, "NewExpression")) hasCompetingStyles = true;
+    if (isNodeOfType(candidate, "CallExpression")) {
+      const owner = candidate.parent;
+      if (
+        !isNodeOfType(owner, "TaggedTemplateExpression") ||
+        owner.tag !== candidate ||
+        !isNodeOfType(candidate.callee, "Identifier") ||
+        !isProvenStyledComponentExpression(owner, context.scopes)
+      )
+        hasCompetingStyles = true;
+    }
+    if (
+      isNodeOfType(candidate, "TaggedTemplateExpression") &&
+      isProvenStyledComponentExpression(candidate, context.scopes) &&
+      !ancestorTemplates.has(candidate) &&
+      (candidate.quasi.expressions.length !== 0 ||
+        candidate.quasi.quasis.some(
+          (quasi) =>
+            quasi.value.cooked !== quasi.value.raw ||
+            !hasOnlyNonSizingNestedBorders(quasi.value.raw),
+        ))
+    )
+      hasCompetingStyles = true;
+    if (
+      isNodeOfType(candidate, "TaggedTemplateExpression") &&
+      !isProvenStyledComponentExpression(candidate, context.scopes) &&
+      !getMediaBounds(candidate, context, candidate)
+    )
+      hasCompetingStyles = true;
+
+    if (
+      isNodeOfType(candidate, "Identifier") &&
+      ["document", "window", "globalThis", "require", "eval", "Function"].includes(candidate.name)
+    )
+      hasCompetingStyles = true;
+    if (isNodeOfType(candidate, "ImportExpression")) hasCompetingStyles = true;
+    if (isNodeOfType(candidate, "ImportDeclaration")) {
+      hasCompetingStyles ||=
+        typeof candidate.source.value === "string" &&
+        /\.(?:css|scss|sass|less|styl)(?:[?#].*)?$/i.test(candidate.source.value);
+      hasCompetingStyles ||= candidate.specifiers.some(
+        (specifier) => getImportedName(specifier) === "createGlobalStyle",
+      );
+    }
+    if (
+      isNodeOfType(candidate, "JSXOpeningElement") &&
+      isNodeOfType(candidate.name, "JSXIdentifier") &&
+      ["style", "link"].includes(candidate.name.name)
+    )
+      hasCompetingStyles = true;
+    return !hasCompetingStyles;
+  });
   if (hasCompetingStyles) return false;
   const factory = stripParenExpression(initializer.tag);
   if (

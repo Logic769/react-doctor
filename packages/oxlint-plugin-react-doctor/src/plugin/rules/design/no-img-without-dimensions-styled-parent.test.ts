@@ -63,6 +63,39 @@ describe("no-img-without-dimensions styled parent", () => {
   });
   const controls = [
     [
+      "sibling selector removes parent reservation",
+      componentSource
+        .replace(
+          "export const Picture",
+          "const Other = styled.div`& + div { height: auto !important; }`; export const Picture",
+        )
+        .replace("=> <PictureFrame>", "=> <section><Other /><PictureFrame>")
+        .replace("</PictureFrame>;", "</PictureFrame></section>;"),
+      mediaSource,
+    ],
+    [
+      "sibling selector removes image bounds",
+      componentSource
+        .replace(
+          "export const Picture",
+          "const Other = styled.div`& + div img { max-width: none !important; max-height: none !important; }`; export const Picture",
+        )
+        .replace("=> <PictureFrame>", "=> <section><Other /><PictureFrame>")
+        .replace("</PictureFrame>;", "</PictureFrame></section>;"),
+      mediaSource,
+    ],
+    [
+      "sibling interpolation injects sizing override",
+      componentSource
+        .replace(
+          "export const Picture",
+          'const Other = styled.div`${"& + div { height: auto !important; }"}`; export const Picture',
+        )
+        .replace("=> <PictureFrame>", "=> <section><Other /><PictureFrame>")
+        .replace("</PictureFrame>;", "</PictureFrame></section>;"),
+      mediaSource,
+    ],
+    [
       "root declaration after media",
       "import styled from 'styled-components'; import sizes from './sizes'; const PictureFrame = styled.div`${sizes.small`display: block;`} display: none; flex-shrink: 0; & img { max-width: 100%; max-height: 100%; }`; export const Picture = ({ url }) => <PictureFrame><img src={url} /></PictureFrame>;",
       mediaSource,
