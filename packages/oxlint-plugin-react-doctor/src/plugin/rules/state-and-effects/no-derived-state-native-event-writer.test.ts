@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import { runRule } from "../../../test-utils/run-rule.js";
+import { wrapWithSemanticContext } from "../../utils/wrap-with-semantic-context.js";
 import { noDerivedState } from "./no-derived-state.js";
 
 interface NativeEventWriterCase {
@@ -505,9 +506,12 @@ export const Panel = ({ seed }) => {
   },
 ];
 
-describe("no-derived-state independent native event writers", () => {
+describe.each([
+  { name: "direct", rule: noDerivedState },
+  { name: "semantic wrapper", rule: wrapWithSemanticContext(noDerivedState) },
+])("no-derived-state independent native event writers ($name)", ({ rule }) => {
   it.each(nativeEventWriterCases)("$name", (testCase) => {
-    const result = runRule(noDerivedState, testCase.code, { forceJsx: true });
+    const result = runRule(rule, testCase.code, { forceJsx: true });
     expect(result.parseErrors).toEqual([]);
     expect(result.diagnostics).toEqual(
       testCase.reportsPropReseed
@@ -521,6 +525,24 @@ describe("no-derived-state independent native event writers", () => {
         : [],
     );
   });
+});
+
+it("retains the custom JSX runtime fence through the semantic wrapper", () => {
+  const testCase = nativeEventWriterCases.find((candidate) => !candidate.reportsPropReseed);
+  if (!testCase) throw new Error("Expected an independent native writer fixture");
+  const result = runRule(
+    wrapWithSemanticContext(noDerivedState),
+    `/** @jsx customElement */\n${testCase.code}`,
+    { forceJsx: true },
+  );
+  expect(result.parseErrors).toEqual([]);
+  expect(result.diagnostics).toEqual([
+    {
+      message:
+        'Storing "value" in state when you can derive it from other values costs an extra render.',
+      nodeType: "CallExpression",
+    },
+  ]);
 });
 
 describe("no-derived-state existing dynamic-scope behavior", () => {
