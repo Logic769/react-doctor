@@ -1,3 +1,4 @@
+import { hasVisibleAmbientFunctionDeclaration } from "./has-visible-ambient-function-declaration.js";
 import type { ScopeAnalysis } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
 import { findTransparentExpressionRoot } from "./find-transparent-expression-root.js";
@@ -6,6 +7,8 @@ import { getNodeStartIndex } from "./get-node-start-index.js";
 import { getStaticPropertyKeyName } from "./get-static-property-key-name.js";
 import { getStaticPropertyName } from "./get-static-property-name.js";
 import { isPropertyNamePosition } from "./is-property-name-position.js";
+import { hasOnlyErasedTypeNameBindings } from "./has-only-erased-type-name-bindings.js";
+import { isErasedTypeScriptBinding } from "./is-erased-typescript-binding.js";
 import { isFunctionLike } from "./is-function-like.js";
 import { isTypeScriptTypePosition } from "./is-typescript-type-position.js";
 import { isWithinAssignmentTarget } from "./is-within-assignment-target.js";
@@ -100,7 +103,12 @@ const hasClosedWindowMessageProvider = (program: EsTreeNode, scopes: ScopeAnalys
       eligible = false;
       return false;
     }
-    if (isTypeScriptTypePosition(node)) return false;
+    if (
+      node.type === "TSTypeAliasDeclaration" ||
+      node.type === "TSInterfaceDeclaration" ||
+      isTypeScriptTypePosition(node)
+    )
+      return false;
     if (
       node.type === "Identifier" &&
       (node.name === "Function" || node.name === "eval") &&
@@ -253,15 +261,21 @@ export const getNamedWindowMessageDataRead = (
   )
     return null;
   const receiver = stripParenExpression(callee.object);
+  const receiverSymbol = scopes.symbolFor(receiver);
   const eventName = registration.arguments[0];
   const callbackReference = registration.arguments[1];
   if (
     receiver.type !== "Identifier" ||
     receiver.name !== "window" ||
-    !scopes.isGlobalReference(receiver) ||
+    hasVisibleAmbientFunctionDeclaration(scopes.scopeFor(receiver), "window") ||
+    !(
+      scopes.isGlobalReference(receiver) ||
+      (receiverSymbol && hasOnlyErasedTypeNameBindings(receiverSymbol))
+    ) ||
     eventName?.type !== "Literal" ||
     eventName.value !== "message" ||
-    callbackReference?.type !== "Identifier"
+    callbackReference?.type !== "Identifier" ||
+    hasVisibleAmbientFunctionDeclaration(scopes.scopeFor(callbackReference), callbackReference.name)
   )
     return null;
   const callbackSymbol = scopes.symbolFor(callbackReference);
@@ -270,7 +284,10 @@ export const getNamedWindowMessageDataRead = (
     (callbackSymbol.kind !== "const" && callbackSymbol.kind !== "function") ||
     !callbackSymbol.references.every((reference) => reference.flag === "read") ||
     callbackSymbol.scope.symbols.some(
-      (symbol) => symbol !== callbackSymbol && symbol.name === callbackSymbol.name,
+      (symbol) =>
+        symbol !== callbackSymbol &&
+        symbol.name === callbackSymbol.name &&
+        !isErasedTypeScriptBinding(symbol),
     )
   )
     return null;
@@ -302,7 +319,12 @@ export const getNamedWindowMessageDataRead = (
   }
   let hasUncertainIdentity = false;
   walkAst(program, (node) => {
-    if (isTypeScriptTypePosition(node)) return false;
+    if (
+      node.type === "TSTypeAliasDeclaration" ||
+      node.type === "TSInterfaceDeclaration" ||
+      isTypeScriptTypePosition(node)
+    )
+      return false;
     if (
       node.type !== "Identifier" ||
       node.name !== callbackSymbol.name ||
@@ -319,7 +341,12 @@ export const getNamedWindowMessageDataRead = (
     if (!reference || reference.flag !== "read") hasUncertainIdentity = true;
   });
   walkAst(callback, (node) => {
-    if (isTypeScriptTypePosition(node)) return false;
+    if (
+      node.type === "TSTypeAliasDeclaration" ||
+      node.type === "TSInterfaceDeclaration" ||
+      isTypeScriptTypePosition(node)
+    )
+      return false;
     if (
       node.type !== "Identifier" ||
       node.name !== eventParameter.name ||
@@ -347,7 +374,12 @@ export const getNamedWindowMessageDataRead = (
       (isFunctionLike(node) || node.type === "ClassDeclaration" || node.type === "ClassExpression")
     )
       return false;
-    if (isTypeScriptTypePosition(node)) return false;
+    if (
+      node.type === "TSTypeAliasDeclaration" ||
+      node.type === "TSInterfaceDeclaration" ||
+      isTypeScriptTypePosition(node)
+    )
+      return false;
     if (node.type === "MemberExpression" && getStaticPropertyName(node) === "data") {
       const object = stripParenExpression(node.object);
       if (object.type !== "Identifier" || scopes.symbolFor(object) !== eventSymbol) return;

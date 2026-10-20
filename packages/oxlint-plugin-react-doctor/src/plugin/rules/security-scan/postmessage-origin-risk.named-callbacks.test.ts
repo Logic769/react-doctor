@@ -292,3 +292,91 @@ describe("named window message callbacks", () => {
     });
   }
 });
+
+describe("erased-only window callback identities", () => {
+  it("erased-window", () => {
+    expect(
+      runScanRule(postmessageOriginRisk, {
+        relativePath: "src/erased-window.tsx",
+        content:
+          'interface window { note: string };\nconst receive = (event) => consume(event.data);\nwindow.addEventListener("message", receive);',
+      }),
+    ).toHaveLength(1);
+  });
+  it("erased-handler", () => {
+    expect(
+      runScanRule(postmessageOriginRisk, {
+        relativePath: "src/erased-window.tsx",
+        content:
+          'interface receive {note:string};\nconst receive = (event) => consume(event.data);\nwindow.addEventListener("message", receive);',
+      }),
+    ).toHaveLength(1);
+  });
+  it("nested-type", () => {
+    expect(
+      runScanRule(postmessageOriginRisk, {
+        relativePath: "src/erased-window.tsx",
+        content:
+          'type Notes = ({ nested: { constructor } }: {nested:{constructor:string}})=>void;\nconst receive = (event) => consume(event.data);\nwindow.addEventListener("message", receive);',
+      }),
+    ).toHaveLength(1);
+  });
+  it("runtime-param", () => {
+    expect(
+      runScanRule(postmessageOriginRisk, {
+        relativePath: "src/erased-window.tsx",
+        content:
+          'class Overrides { constructor(public ignored = Function("window.addEventListener = (_type, callback) => callback({data:1})")()) {} }; new Overrides();\nconst receive = (event) => consume(event.data);\nwindow.addEventListener("message", receive);',
+      }),
+    ).toHaveLength(0);
+  });
+  it("runtime window companion remains opaque", () => {
+    expect(
+      runScanRule(postmessageOriginRisk, {
+        relativePath: "src/erased-window.tsx",
+        content:
+          'interface window {note:string}; const window={addEventListener(_type,callback){callback({data:1})}}; const receive = event => consume(event.data); window.addEventListener("message", receive);',
+      }),
+    ).toEqual([]);
+  });
+});
+
+it("preserves outer ambient value contracts", () => {
+  expect(
+    runScanRule(postmessageOriginRisk, {
+      relativePath: "src/ambient-window.tsx",
+      content:
+        'declare const window: unknown; { interface window {note:string}; const receive=event=>consume(event.data); window.addEventListener("message",receive); }',
+    }),
+  ).toHaveLength(0);
+});
+
+it("preserves ambient function contract 0", () => {
+  expect(
+    runScanRule(postmessageOriginRisk, {
+      relativePath: "src/ambient-function-window.tsx",
+      content:
+        'declare function window(): unknown; const receive = (event) => consume(event.data);\nwindow.addEventListener("message", receive);',
+    }),
+  ).toHaveLength(0);
+});
+
+it("preserves ambient function contract 1", () => {
+  expect(
+    runScanRule(postmessageOriginRisk, {
+      relativePath: "src/ambient-function-window.tsx",
+      content:
+        'interface window {}; function owner(){ declare function window(): unknown; const receive = (event) => consume(event.data);\nwindow.addEventListener("message", receive); }',
+    }),
+  ).toHaveLength(0);
+});
+
+it("declines an inner ambient callback contract", () => {
+  expect(
+    runScanRule(postmessageOriginRisk, {
+      relativePath: "src/ambient-callback.tsx",
+      content:
+        'const receive = event => consume(event.data); function register(){ declare function receive(event: unknown): void; window.addEventListener("message", receive); }',
+    }),
+  ).toEqual([]);
+});
