@@ -961,3 +961,119 @@ describe("security-scan/postmessage-origin-risk closed CJS stream receivers", ()
     expect(postmessageOriginRisk.scan?.(file)).toEqual(findings);
   });
 });
+
+describe("erased-only require provider", () => {
+  it("nominal", () => {
+    expect(
+      postmessageOriginRisk.scan?.({
+        absolutePath: "/synthetic/erased-require.tsx",
+        relativePath: "src/erased-require.tsx",
+        isGeneratedBundle: false,
+        content:
+          "const SockJS = require('sockjs-client'); const connection = new SockJS('/stream'); connection.onmessage = event => consume(event.data);",
+      }),
+    ).toHaveLength(0);
+  });
+  it("erased-require", () => {
+    expect(
+      postmessageOriginRisk.scan?.({
+        absolutePath: "/synthetic/erased-require.tsx",
+        relativePath: "src/erased-require.tsx",
+        isGeneratedBundle: false,
+        content:
+          "interface require {note:string}; const SockJS = require('sockjs-client'); const connection = new SockJS('/stream'); connection.onmessage = event => consume(event.data);",
+      }),
+    ).toHaveLength(0);
+  });
+  it("erased-constructor", () => {
+    expect(
+      postmessageOriginRisk.scan?.({
+        absolutePath: "/synthetic/erased-require.tsx",
+        relativePath: "src/erased-require.tsx",
+        isGeneratedBundle: false,
+        content:
+          "interface SockJS {note:string}; const SockJS = require('sockjs-client'); const connection = new SockJS('/stream'); connection.onmessage = event => consume(event.data);",
+      }),
+    ).toHaveLength(0);
+  });
+  it("erased-receiver", () => {
+    expect(
+      postmessageOriginRisk.scan?.({
+        absolutePath: "/synthetic/erased-require.tsx",
+        relativePath: "src/erased-require.tsx",
+        isGeneratedBundle: false,
+        content:
+          "interface connection {note:string}; const SockJS = require('sockjs-client'); const connection = new SockJS('/stream'); connection.onmessage = event => consume(event.data);",
+      }),
+    ).toHaveLength(0);
+  });
+  it("nested-type", () => {
+    expect(
+      postmessageOriginRisk.scan?.({
+        absolutePath: "/synthetic/erased-require.tsx",
+        relativePath: "src/erased-require.tsx",
+        isGeneratedBundle: false,
+        content:
+          "type Notes = ({nested:{constructor}}:{nested:{constructor:string}})=>void; const SockJS = require('sockjs-client'); const connection = new SockJS('/stream'); connection.onmessage = event => consume(event.data);",
+      }),
+    ).toHaveLength(0);
+  });
+  it("runtime-loader", () => {
+    expect(
+      postmessageOriginRisk.scan?.({
+        absolutePath: "/synthetic/erased-require.tsx",
+        relativePath: "src/erased-require.tsx",
+        isGeneratedBundle: false,
+        content:
+          "class Overrides { constructor(public ignored = Function(\"globalThis.require = () => function(){ return window; }\")()) {} }; new Overrides(); const SockJS = require('sockjs-client'); const connection = new SockJS('/stream'); connection.onmessage = event => consume(event.data);",
+      }),
+    ).toHaveLength(1);
+  });
+  it("runtime require companion", () => {
+    expect(
+      postmessageOriginRisk.scan?.({
+        absolutePath: "/synthetic/erased-require.tsx",
+        relativePath: "src/erased-require.tsx",
+        isGeneratedBundle: false,
+        content:
+          'interface require {note:string}; const require=()=>function(){return window}; const SockJS = require("sockjs-client"); const connection = new SockJS("/stream"); connection.onmessage = event => consume(event.data);',
+      }),
+    ).toHaveLength(1);
+  });
+});
+
+it("preserves outer ambient value contracts", () => {
+  expect(
+    postmessageOriginRisk.scan?.({
+      absolutePath: "/synthetic/ambient-require.tsx",
+      relativePath: "src/ambient-require.tsx",
+      isGeneratedBundle: false,
+      content:
+        'declare const require: unknown; { interface require {note:string}; const SockJS=require("sockjs-client");const connection=new SockJS("/stream");connection.onmessage=event=>consume(event.data); }',
+    }),
+  ).toHaveLength(1);
+});
+
+it("preserves ambient function contract 0", () => {
+  expect(
+    postmessageOriginRisk.scan?.({
+      absolutePath: "/synthetic/ambient-function-require.tsx",
+      relativePath: "src/ambient-function-require.tsx",
+      isGeneratedBundle: false,
+      content:
+        "declare function require(name: string): unknown; const SockJS = require('sockjs-client'); const connection = new SockJS('/stream'); connection.onmessage = event => consume(event.data);",
+    }),
+  ).toHaveLength(1);
+});
+
+it("preserves ambient function contract 1", () => {
+  expect(
+    postmessageOriginRisk.scan?.({
+      absolutePath: "/synthetic/ambient-function-require.tsx",
+      relativePath: "src/ambient-function-require.tsx",
+      isGeneratedBundle: false,
+      content:
+        "interface require {}; declare function require(name: string): unknown; const SockJS = require('sockjs-client'); const connection = new SockJS('/stream'); connection.onmessage = event => consume(event.data);",
+    }),
+  ).toHaveLength(1);
+});

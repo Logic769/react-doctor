@@ -314,6 +314,7 @@ export const LIBRARY_SNIPPET_POOL = [
 
 // Module scope — SSR hazards, guard aliases, contexts, caches, styled.
 export const MODULE_SCOPE_SNIPPET_POOL = [
+  `interface require { fuzzErasedLoaderNote: string } const FuzzErasedSockJS = require("sockjs-client"); const fuzzErasedConnection = new FuzzErasedSockJS("/stream"); fuzzErasedConnection.onmessage = (event) => consume(event.data);`,
   `const FuzzStreamClient = require("sockjs-client"); const fuzzStreamConnection = new FuzzStreamClient("/stream"); fuzzStreamConnection.onmessage = event => consume(event.data);`,
   `window.onmessage = event => consume(event.data);`,
   `import { create as createFuzzZustandStore } from "zustand"; export const useFuzzZustandStore = createFuzzZustandStore(() => ({ items: [] })); export const fuzzZustandSelection = useFuzzZustandStore((state) => ({ items: state.items }));`,

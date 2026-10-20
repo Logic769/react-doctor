@@ -1,7 +1,9 @@
+import { hasVisibleAmbientFunctionDeclaration } from "../../../utils/has-visible-ambient-function-declaration.js";
 import { analyzeScopes } from "../../../semantic/scope-analysis.js";
 import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import { attachParentReferences } from "../../../utils/attach-parent-references.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
+import { hasOnlyErasedTypeNameBindings } from "../../../utils/has-only-erased-type-name-bindings.js";
 import { getGlobalRequireModuleSource } from "../../../utils/get-global-require-module-source.js";
 import { getNodeEndIndex } from "../../../utils/get-node-end-index.js";
 import { getNodeStartIndex } from "../../../utils/get-node-start-index.js";
@@ -99,7 +101,22 @@ export const collectClosedSockjsMessageAssignments = (
 ): ReadonlySet<EsTreeNode> => {
   const assignments = new Set<EsTreeNode>();
   attachParentReferences(program);
-  const scopes = analyzeScopes(program);
+  const analysis = analyzeScopes(program);
+  const scopes: ScopeAnalysis = {
+    ...analysis,
+    isGlobalReference: (identifier) => {
+      if (
+        identifier.type === "Identifier" &&
+        identifier.name === "require" &&
+        hasVisibleAmbientFunctionDeclaration(analysis.scopeFor(identifier), identifier.name)
+      )
+        return false;
+      if (analysis.isGlobalReference(identifier)) return true;
+      if (identifier.type !== "Identifier" || identifier.name !== "require") return false;
+      const symbol = analysis.symbolFor(identifier);
+      return Boolean(symbol && hasOnlyErasedTypeNameBindings(symbol));
+    },
+  };
   const nodes: EsTreeNode[] = [];
   let hasUnsupportedProvider = false;
   walkAst(program, (node) => {
@@ -117,7 +134,12 @@ export const collectClosedSockjsMessageAssignments = (
       node.type === "Decorator"
     )
       hasUnsupportedProvider = true;
-    if (isTypeScriptTypePosition(node)) return false;
+    if (
+      node.type === "TSTypeAliasDeclaration" ||
+      node.type === "TSInterfaceDeclaration" ||
+      isTypeScriptTypePosition(node)
+    )
+      return false;
     nodes.push(node);
     if (
       node.type === "Identifier" &&
@@ -172,7 +194,7 @@ export const collectClosedSockjsMessageAssignments = (
     const call = node.parent;
     if (
       !reference ||
-      reference.resolvedSymbol !== null ||
+      (reference.resolvedSymbol !== null && !scopes.isGlobalReference(node)) ||
       reference.flag !== "read" ||
       call?.type !== "CallExpression" ||
       call.callee !== node ||
