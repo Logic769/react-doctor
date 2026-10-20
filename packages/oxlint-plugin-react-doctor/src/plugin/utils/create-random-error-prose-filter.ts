@@ -1,3 +1,5 @@
+import { hasVisibleAmbientFunctionDeclaration } from "./has-visible-ambient-function-declaration.js";
+import { hasOnlyErasedTypeNameBindings } from "./has-only-erased-type-name-bindings.js";
 import { analyzeScopes } from "../semantic/scope-analysis.js";
 import type { ScopeAnalysis, SymbolDescriptor } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
@@ -361,6 +363,12 @@ const hasErrorProviderContradiction = (
       findEnclosingFunction(node) === null ||
       isAstDescendant(node, lexicalOwner);
     if (node.type === "WithStatement") return isRelevantOwner;
+    if (
+      node.type === "TSDeclareFunction" &&
+      node.id &&
+      ERROR_PROVIDER_IDENTIFIER_NAMES.has(node.id.name)
+    )
+      return isRelevantOwner;
     if (node.type === "Identifier" && ERROR_PROVIDER_IDENTIFIER_NAMES.has(node.name)) {
       if (node.name === "Error") {
         return (
@@ -462,19 +470,44 @@ export const createRandomErrorProseFilter = ({
               node.type === "UpdateExpression" ||
               node.type === "UnaryExpression" ||
               node.type === "WithStatement" ||
+              (node.type === "TSDeclareFunction" &&
+                node.id &&
+                ERROR_PROVIDER_IDENTIFIER_NAMES.has(node.id.name)) ||
               (node.type === "Identifier" && ERROR_PROVIDER_IDENTIFIER_NAMES.has(node.name)) ||
               (node.type === "MemberExpression" &&
                 getStaticPropertyKeyName(node, { allowComputedString: true }) === "Error")
             )
               providerCandidates.push(node);
           });
+          const scopeAnalysis = analyzeScopes(program);
           analysis = {
             callsByStart,
             stringLiterals,
             providerCandidates,
             catchClauses,
             providerContradictions: new Map(),
-            scopes: analyzeScopes(program),
+            scopes: {
+              ...scopeAnalysis,
+              isGlobalReference: (identifier) => {
+                if (
+                  identifier.type === "Identifier" &&
+                  ERROR_PROVIDER_IDENTIFIER_NAMES.has(identifier.name) &&
+                  hasVisibleAmbientFunctionDeclaration(
+                    scopeAnalysis.scopeFor(identifier),
+                    identifier.name,
+                  )
+                )
+                  return false;
+                if (scopeAnalysis.isGlobalReference(identifier)) return true;
+                if (
+                  identifier.type !== "Identifier" ||
+                  !ERROR_PROVIDER_IDENTIFIER_NAMES.has(identifier.name)
+                )
+                  return false;
+                const symbol = scopeAnalysis.symbolFor(identifier);
+                return Boolean(symbol && hasOnlyErasedTypeNameBindings(symbol));
+              },
+            },
           };
         }
       }

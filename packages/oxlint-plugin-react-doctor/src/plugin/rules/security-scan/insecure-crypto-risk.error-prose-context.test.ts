@@ -1155,3 +1155,146 @@ describe("insecure-crypto-risk disjoint Error prose context", () => {
     ]);
   });
 });
+
+describe("erased Error provider bindings", () => {
+  it("nominal", () => {
+    expect(
+      runScanRule(insecureCryptoRisk, {
+        relativePath: "src/error-context.tsx",
+        content:
+          'class Data { constructor(){this.key=Math.random()} fail(){throw new Error("Invalid token in expression")} }',
+      }),
+    ).toHaveLength(0);
+  });
+  it("erased-Error", () => {
+    expect(
+      runScanRule(insecureCryptoRisk, {
+        relativePath: "src/error-context.tsx",
+        content:
+          'interface Error { note:string }; class Data { constructor(){this.key=Math.random()} fail(){throw new Error("Invalid token in expression")} }',
+      }),
+    ).toHaveLength(0);
+  });
+  it("erased-Math", () => {
+    expect(
+      runScanRule(insecureCryptoRisk, {
+        relativePath: "src/error-context.tsx",
+        content:
+          'interface Math { note:string }; class Data { constructor(){this.key=Math.random()} fail(){throw new Error("Invalid token in expression")} }',
+      }),
+    ).toHaveLength(0);
+  });
+  it("nested-type", () => {
+    expect(
+      runScanRule(insecureCryptoRisk, {
+        relativePath: "src/error-context.tsx",
+        content:
+          'type Notes = ({nested:{constructor}}:{nested:{constructor:string}})=>void; class Data { constructor(){this.key=Math.random()} fail(){throw new Error("Invalid token in expression")} }',
+      }),
+    ).toHaveLength(0);
+  });
+  it("erased-Function-runtime-mutation", () => {
+    expect(
+      runScanRule(insecureCryptoRisk, {
+        relativePath: "src/error-context.tsx",
+        content:
+          'interface Function {note:string}; Function("globalThis.Error = function(message){ globalThis.authToken=message; }")(); class Data { constructor(){this.key=Math.random()} fail(){throw new Error("Invalid token in expression")} }',
+      }),
+    ).toHaveLength(1);
+  });
+  it("runtime-param", () => {
+    expect(
+      runScanRule(insecureCryptoRisk, {
+        relativePath: "src/error-context.tsx",
+        content:
+          'class Overrides { constructor(public ignored = Function("globalThis.Error = function(message){ globalThis.authToken=message; }")()){} };new Overrides(); class Data { constructor(){this.key=Math.random()} fail(){throw new Error("Invalid token in expression")} }',
+      }),
+    ).toHaveLength(1);
+  });
+  it("erased-Function-provider-no-extra-security-prose", () => {
+    expect(
+      runScanRule(insecureCryptoRisk, {
+        relativePath: "src/error-context.tsx",
+        content:
+          'interface Function {note:string}; Function("globalThis.Error = function(message){ globalThis.saved=message; }")(); class Data { constructor(){this.key=Math.random()} fail(){throw new Error("Invalid token in expression")} }',
+      }),
+    ).toHaveLength(1);
+  });
+  it("runtime-Function-provider-no-extra-security-prose", () => {
+    expect(
+      runScanRule(insecureCryptoRisk, {
+        relativePath: "src/error-context.tsx",
+        content:
+          'Function("globalThis.Error = function(message){ globalThis.saved=message; }")(); class Data { constructor(){this.key=Math.random()} fail(){throw new Error("Invalid token in expression")} }',
+      }),
+    ).toHaveLength(1);
+  });
+  it("runtime Error companion remains opaque", () => {
+    expect(
+      runScanRule(insecureCryptoRisk, {
+        relativePath: "src/error-context.tsx",
+        content:
+          'interface Error {note:string}; const Error = function(message){consume(message)}; class Data { constructor(){this.key=Math.random()} fail(){throw new Error("Invalid token in expression")} }',
+      }),
+    ).toHaveLength(1);
+  });
+});
+
+it("preserves outer ambient value contracts", () => {
+  expect(
+    runScanRule(insecureCryptoRisk, {
+      relativePath: "src/ambient-error.tsx",
+      content:
+        'declare const Error: unknown; { interface Error {note:string}; class Data { constructor(){this.key=Math.random()} fail(){throw new Error("Invalid token in expression")} } }',
+    }),
+  ).toHaveLength(1);
+});
+
+it("preserves ambient function contract 0", () => {
+  expect(
+    runScanRule(insecureCryptoRisk, {
+      relativePath: "src/ambient-function-error.tsx",
+      content:
+        'declare function Error(message: string): unknown; class Data { constructor(){this.key=Math.random()} fail(){throw new Error("Invalid token in expression")} }',
+    }),
+  ).toHaveLength(1);
+});
+
+it("preserves ambient function contract 1", () => {
+  expect(
+    runScanRule(insecureCryptoRisk, {
+      relativePath: "src/ambient-function-error.tsx",
+      content:
+        'interface Error {}; function owner(){ declare function Error(message: string): unknown; class Data { constructor(){this.key=Math.random()} fail(){throw new Error("Invalid token in expression")} } }',
+    }),
+  ).toHaveLength(1);
+});
+
+describe("physical-line boundary for erased provider controls", () => {
+  it("keeps formatted generic key assignments outside the same-line security context", () => {
+    expect(
+      runScanRule(insecureCryptoRisk, {
+        relativePath: "src/error-context.tsx",
+        content: `interface Function { note: string; }
+Function("globalThis.Error = function(message){ globalThis.saved=message; }")();
+class Data {
+  constructor() {
+    this.key = Math.random();
+  }
+  fail() {
+    throw new Error("Invalid token in expression");
+  }
+}`,
+      }),
+    ).toHaveLength(0);
+  });
+  it("retains the same-line report when an erased Function name hides a provider capability", () => {
+    expect(
+      runScanRule(insecureCryptoRisk, {
+        relativePath: "src/error-context.tsx",
+        content:
+          'interface Function {note:string}; Function("globalThis.Error = function(message){ globalThis.saved=message; }")(); class Data { constructor(){this.key=Math.random()} fail(){throw new Error("Invalid token in expression")} }',
+      }),
+    ).toHaveLength(1);
+  });
+});
