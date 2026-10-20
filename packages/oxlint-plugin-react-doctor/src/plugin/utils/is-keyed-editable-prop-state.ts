@@ -2,6 +2,8 @@ import type { SymbolDescriptor } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
 import type { EsTreeNodeOfType } from "./es-tree-node-of-type.js";
 import { findEnclosingFunction } from "./find-enclosing-function.js";
+import { findTransparentExpressionRoot } from "./find-transparent-expression-root.js";
+import { stripParenExpression } from "./strip-paren-expression.js";
 import { findProgramRoot } from "./find-program-root.js";
 import { getAuthoritativeJsxAttribute } from "./get-authoritative-jsx-attribute.js";
 import { getClosedComponentJsxCalls } from "./get-closed-component-jsx-calls.js";
@@ -10,17 +12,13 @@ import { getFlatStringRecordFields } from "./get-flat-string-record-fields.js";
 import { getJsxAttributeName } from "./get-jsx-attribute-name.js";
 import { getImportDeclarationForSymbol } from "./get-import-declaration-for-symbol.js";
 import { getImportedName } from "./get-imported-name.js";
-import {
-  getReactDoctorStringArraySetting,
-  getReactDoctorStringSetting,
-} from "./get-react-doctor-setting.js";
 import { getStaticKeyName } from "./get-static-key-name.js";
 import { getStaticPropertyName } from "./get-static-property-name.js";
 import { hasCompleteSymbolReferences } from "./has-complete-symbol-references.js";
-import { hasUnsupportedKeyedDraftRuntime } from "./has-unsupported-keyed-draft-runtime.js";
+import { hasOrdinaryKeyedDraftReactProvider } from "./has-ordinary-keyed-draft-react-provider.js";
 import { isNodeOfType } from "./is-node-of-type.js";
 import { isReactApiCall } from "./is-react-api-call.js";
-import { isTypeScriptTypePosition } from "./is-typescript-type-position.js";
+import { isKeyedDraftTypeReference } from "./is-keyed-draft-type-reference.js";
 import { isWithinAssignmentTarget } from "./is-within-assignment-target.js";
 import type { RuleContext } from "./rule-context.js";
 
@@ -28,7 +26,7 @@ const getAttributeValue = (attribute: EsTreeNode | null): EsTreeNode | null =>
   isNodeOfType(attribute, "JSXAttribute") &&
   isNodeOfType(attribute.value, "JSXExpressionContainer") &&
   !isNodeOfType(attribute.value.expression, "JSXEmptyExpression")
-    ? attribute.value.expression
+    ? stripParenExpression(attribute.value.expression)
     : null;
 
 const hasUniqueAttributes = (opening: EsTreeNodeOfType<"JSXOpeningElement">): boolean => {
@@ -51,12 +49,13 @@ const hasClosedRecordReads = (
 ): boolean =>
   hasCompleteSymbolReferences(record, program, context.scopes) &&
   record.references.every((reference) => {
-    if (isTypeScriptTypePosition(reference.identifier)) return true;
+    if (isKeyedDraftTypeReference(reference.identifier)) return true;
     if (reference.flag !== "read") return false;
     const identifier = reference.identifier;
-    const parent = identifier.parent;
+    const expression = findTransparentExpressionRoot(identifier);
+    const parent = expression.parent;
     if (props.has(identifier)) return true;
-    if (isNodeOfType(parent, "MemberExpression") && parent.object === identifier) {
+    if (isNodeOfType(parent, "MemberExpression") && parent.object === expression) {
       const name = getStaticPropertyName(parent);
       return (
         !parent.computed &&
@@ -68,49 +67,12 @@ const hasClosedRecordReads = (
     }
     return Boolean(
       ((isNodeOfType(parent, "ConditionalExpression") || isNodeOfType(parent, "IfStatement")) &&
-        parent.test === identifier) ||
+        parent.test === expression) ||
       (isNodeOfType(parent, "UnaryExpression") &&
         parent.operator === "!" &&
-        parent.argument === identifier),
+        parent.argument === expression),
     );
   });
-
-const hasOrdinaryReactProvider = (
-  program: EsTreeNodeOfType<"Program">,
-  context: RuleContext,
-): boolean => {
-  if (/@jsx(?:ImportSource|Runtime)?\s/.test(context.sourceCode?.getText?.() ?? "")) return false;
-  if (getReactDoctorStringSetting(context.settings, "preactVersion")) return false;
-  const capabilities = getReactDoctorStringArraySetting(context.settings, "capabilities");
-  if (capabilities.includes("preact") && !capabilities.includes("react")) return false;
-  if (hasUnsupportedKeyedDraftRuntime(program)) return false;
-  for (const statement of program.body) {
-    if (!isNodeOfType(statement, "ImportDeclaration")) continue;
-    if (statement.source.value.startsWith("preact")) return false;
-    if (statement.source.value !== "react") continue;
-    for (const specifier of statement.specifiers) {
-      if (
-        statement.importKind === "type" ||
-        (isNodeOfType(specifier, "ImportSpecifier") && specifier.importKind === "type")
-      )
-        continue;
-      const symbol = context.scopes.symbolFor(specifier.local);
-      if (!symbol || !hasCompleteSymbolReferences(symbol, program, context.scopes)) return false;
-      for (const reference of symbol.references) {
-        if (isTypeScriptTypePosition(reference.identifier)) continue;
-        if (reference.flag !== "read") return false;
-        const callee = reference.identifier;
-        if (
-          !isNodeOfType(callee.parent, "CallExpression") ||
-          callee.parent.callee !== callee ||
-          callee.parent.optional
-        )
-          return false;
-      }
-    }
-  }
-  return true;
-};
 
 const getRecordProp = (record: SymbolDescriptor, component: EsTreeNode): string | null => {
   const property = record.bindingIdentifier.parent;
@@ -148,22 +110,24 @@ const isEditedFromControl = (
   setter: SymbolDescriptor,
   context: RuleContext,
 ): boolean => {
-  const call = reference.parent;
-  const handler = call?.parent;
+  const callee = findTransparentExpressionRoot(reference);
+  const call = callee.parent;
+  const callRoot = call && findTransparentExpressionRoot(call);
+  const handler = callRoot?.parent;
   if (
     !isNodeOfType(call, "CallExpression") ||
-    call.callee !== reference ||
+    stripParenExpression(call.callee) !== reference ||
     call.optional ||
     call.arguments.length !== 1 ||
     !isNodeOfType(handler, "ArrowFunctionExpression") ||
-    handler.body !== call ||
+    handler.body !== callRoot ||
     handler.async ||
     handler.typeParameters ||
     handler.params.length !== 1 ||
     !isNodeOfType(handler.params[0], "Identifier")
   )
     return false;
-  const container = handler.parent;
+  const container = findTransparentExpressionRoot(handler).parent;
   const attribute = container?.parent;
   const opening = attribute?.parent;
   if (
@@ -182,28 +146,37 @@ const isEditedFromControl = (
     context.scopes.symbolFor(reference) !== setter
   )
     return false;
-  let argument = call.arguments[0];
-  if (!argument) return false;
+  const rawArgument = call.arguments[0];
+  if (!rawArgument) return false;
+  let argument = stripParenExpression(rawArgument);
+  const fallback = isNodeOfType(argument, "LogicalExpression")
+    ? stripParenExpression(argument.right)
+    : null;
   if (
     isNodeOfType(argument, "LogicalExpression") &&
     argument.operator === "??" &&
-    isNodeOfType(argument.right, "Literal") &&
-    argument.right.value === ""
+    isNodeOfType(fallback, "Literal") &&
+    fallback.value === ""
   )
-    argument = argument.left;
+    argument = stripParenExpression(argument.left);
   if (changeProp === "onChange") {
     if (
       !isNodeOfType(argument, "MemberExpression") ||
       argument.computed ||
       argument.optional ||
       getStaticPropertyName(argument) !== "value" ||
-      !isNodeOfType(argument.object, "MemberExpression") ||
-      argument.object.computed ||
-      argument.object.optional ||
-      getStaticPropertyName(argument.object) !== "target"
+      !isNodeOfType(stripParenExpression(argument.object), "MemberExpression")
     )
       return false;
-    argument = argument.object.object;
+    const target = stripParenExpression(argument.object);
+    if (
+      !isNodeOfType(target, "MemberExpression") ||
+      target.computed ||
+      target.optional ||
+      getStaticPropertyName(target) !== "target"
+    )
+      return false;
+    argument = stripParenExpression(target.object);
   }
   return (
     isNodeOfType(argument, "Identifier") &&
@@ -217,12 +190,22 @@ export const isKeyedEditablePropState = (
 ): boolean => {
   const component = findEnclosingFunction(call);
   const program = findProgramRoot(call);
-  const declarator = call.parent;
-  const seed = call.arguments[0];
+  const declarator = findTransparentExpressionRoot(call).parent;
+  const rawSeed = call.arguments[0];
+  const seed = rawSeed && stripParenExpression(rawSeed);
+  const seedObject = isNodeOfType(seed, "MemberExpression")
+    ? stripParenExpression(seed.object)
+    : null;
+  const callee = stripParenExpression(call.callee);
   if (
     !component ||
     !program ||
-    !hasOrdinaryReactProvider(program, context) ||
+    !hasOrdinaryKeyedDraftReactProvider(
+      program,
+      context.scopes,
+      context.sourceCode?.getText?.() ?? "",
+      context.settings,
+    ) ||
     !isReactApiCall(call, "useState", context.scopes) ||
     call.optional ||
     call.arguments.length !== 1 ||
@@ -233,13 +216,13 @@ export const isKeyedEditablePropState = (
     !isNodeOfType(seed, "MemberExpression") ||
     seed.optional ||
     seed.computed ||
-    !isNodeOfType(seed.object, "Identifier")
+    !isNodeOfType(seedObject, "Identifier")
   )
     return false;
-  const hook = context.scopes.symbolFor(call.callee);
+  const hook = context.scopes.symbolFor(callee);
   const importedHook = hook && getImportDeclarationForSymbol(hook);
   if (
-    !isNodeOfType(call.callee, "Identifier") ||
+    !isNodeOfType(callee, "Identifier") ||
     !hook ||
     importedHook?.source.value !== "react" ||
     importedHook.importKind === "type" ||
@@ -255,7 +238,7 @@ export const isKeyedEditablePropState = (
     !isNodeOfType(setterBinding, "Identifier")
   )
     return false;
-  const record = context.scopes.symbolFor(seed.object);
+  const record = context.scopes.symbolFor(seedObject);
   const state = context.scopes.symbolFor(stateBinding);
   const setter = context.scopes.symbolFor(setterBinding);
   const seedField = getStaticPropertyName(seed);
@@ -263,6 +246,9 @@ export const isKeyedEditablePropState = (
   const propName = getRecordProp(record, component);
   const fields = getFlatStringRecordFields(record, context);
   const callers = getClosedComponentJsxCalls(component, context);
+  const setterReferences = setter.references.filter(
+    (reference) => !isKeyedDraftTypeReference(reference.identifier),
+  );
   if (
     !propName ||
     !fields?.has(seedField) ||
@@ -270,9 +256,11 @@ export const isKeyedEditablePropState = (
     !hasClosedRecordReads(record, fields, new Set(), program, context) ||
     !hasCompleteSymbolReferences(state, program, context.scopes) ||
     !hasCompleteSymbolReferences(setter, program, context.scopes) ||
-    state.references.some((reference) => reference.flag !== "read") ||
-    setter.references.length === 0 ||
-    !setter.references.every(
+    state.references.some(
+      (reference) => !isKeyedDraftTypeReference(reference.identifier) && reference.flag !== "read",
+    ) ||
+    setterReferences.length === 0 ||
+    !setterReferences.every(
       (reference) =>
         reference.flag === "read" &&
         isEditedFromControl(reference.identifier, state, setter, context),
@@ -289,7 +277,7 @@ export const isKeyedEditablePropState = (
       !isNodeOfType(key, "MemberExpression") ||
       key.computed ||
       key.optional ||
-      !isNodeOfType(key.object, "Identifier")
+      !isNodeOfType(stripParenExpression(key.object), "Identifier")
     )
       return false;
     const keyField = getStaticPropertyName(key);
@@ -299,7 +287,7 @@ export const isKeyedEditablePropState = (
       !fields.has(keyField) ||
       !callerRecord ||
       (callerRecord.kind !== "const" && callerRecord.kind !== "parameter") ||
-      context.scopes.symbolFor(key.object) !== callerRecord
+      context.scopes.symbolFor(stripParenExpression(key.object)) !== callerRecord
     )
       return false;
     const props = callerProps.get(callerRecord) ?? new Set<EsTreeNode>();

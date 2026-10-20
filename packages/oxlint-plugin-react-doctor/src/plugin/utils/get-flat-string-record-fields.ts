@@ -14,12 +14,21 @@ import { resolveModulePath } from "./resolve-module-path.js";
 import type { RuleContext } from "./rule-context.js";
 import { someAst } from "./some-ast.js";
 
+const conflictsByProgram = new WeakMap<EsTreeNode, WeakMap<EsTreeNode, boolean>>();
+
 const hasConflictingRecordDeclaration = (
   program: EsTreeNode,
   selected: EsTreeNode,
   name: string,
-): boolean =>
-  someAst(program, (node) => {
+): boolean => {
+  let conflictsByDeclaration = conflictsByProgram.get(program);
+  if (!conflictsByDeclaration) {
+    conflictsByDeclaration = new WeakMap();
+    conflictsByProgram.set(program, conflictsByDeclaration);
+  }
+  const cached = conflictsByDeclaration.get(selected);
+  if (cached !== undefined) return cached;
+  const conflicting = someAst(program, (node) => {
     if (node === selected) return false;
     if (
       isNodeOfType(node, "TSInterfaceDeclaration") ||
@@ -32,6 +41,9 @@ const hasConflictingRecordDeclaration = (
     }
     return isNodeOfType(node, "TSModuleDeclaration");
   });
+  conflictsByDeclaration.set(selected, conflicting);
+  return conflicting;
+};
 
 export const getFlatStringRecordFields = (
   record: SymbolDescriptor,

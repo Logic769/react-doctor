@@ -2,8 +2,9 @@ import type { EsTreeNode } from "./es-tree-node.js";
 import { getStaticKeyName } from "./get-static-key-name.js";
 import { getStaticPropertyName } from "./get-static-property-name.js";
 import { isNodeOfType } from "./is-node-of-type.js";
-import { isTypeScriptTypePosition } from "./is-typescript-type-position.js";
+import { isKeyedDraftTypeReference } from "./is-keyed-draft-type-reference.js";
 import { someAst } from "./some-ast.js";
+import { walkAst } from "./walk-ast.js";
 
 const UNSUPPORTED_RUNTIME_NAMES: ReadonlySet<string> = new Set([
   "eval",
@@ -36,33 +37,52 @@ export const hasUnsupportedKeyedDraftRuntime = (program: EsTreeNode): boolean =>
     }
     return false;
   });
-  return someAst(program, (node) => {
+  let unsupported = false;
+  walkAst(program, (node) => {
+    if (unsupported || isKeyedDraftTypeReference(node)) return false;
     if (
-      !isTypeScriptTypePosition(node) &&
-      ((isNodeOfType(node, "MemberExpression") && getStaticPropertyName(node) === "constructor") ||
-        (isNodeOfType(node, "Property") && getStaticKeyName(node.key) === "constructor"))
-    )
-      return true;
-    if (isNodeOfType(node, "ImportExpression") || isNodeOfType(node, "TSImportEqualsDeclaration"))
-      return true;
-    if (isNodeOfType(node, "ImportDeclaration")) {
-      return (
-        node.importKind !== "type" &&
-        (node.source.value === "react/jsx-runtime" || node.source.value === "react/jsx-dev-runtime")
-      );
+      (isNodeOfType(node, "MemberExpression") && getStaticPropertyName(node) === "constructor") ||
+      (isNodeOfType(node, "Property") &&
+        getStaticKeyName(node.key) === "constructor" &&
+        (isNodeOfType(node.parent, "ObjectPattern") || node.computed || node.shorthand))
+    ) {
+      unsupported = true;
+      return false;
+    }
+    if (isNodeOfType(node, "ImportExpression") || isNodeOfType(node, "TSImportEqualsDeclaration")) {
+      unsupported = true;
+      return false;
     }
     if (
-      !isNodeOfType(node, "Identifier") ||
-      !unsupportedRuntimeNames.has(node.name) ||
-      isTypeScriptTypePosition(node)
-    )
+      isNodeOfType(node, "ImportDeclaration") &&
+      node.importKind !== "type" &&
+      (node.source.value === "react/jsx-runtime" || node.source.value === "react/jsx-dev-runtime")
+    ) {
+      unsupported = true;
       return false;
+    }
+    if (!isNodeOfType(node, "Identifier") || !unsupportedRuntimeNames.has(node.name)) return;
     const parent = node.parent;
-    return !(
+    if (
+      parent &&
+      "key" in parent &&
+      parent.key === node &&
+      "computed" in parent &&
+      !parent.computed &&
+      (isNodeOfType(parent, "Property")
+        ? !parent.shorthand || parent.value !== node
+        : isNodeOfType(parent, "MethodDefinition") ||
+          isNodeOfType(parent, "PropertyDefinition") ||
+          isNodeOfType(parent, "AccessorProperty"))
+    )
+      return;
+    unsupported = !(
       (isNodeOfType(parent, "ImportSpecifier") ||
         isNodeOfType(parent, "ImportNamespaceSpecifier") ||
         isNodeOfType(parent, "ImportDefaultSpecifier")) &&
       parent.local === node
     );
+    if (unsupported) return false;
   });
+  return unsupported;
 };

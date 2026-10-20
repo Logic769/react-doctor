@@ -1,3 +1,5 @@
+import * as fs from "node:fs";
+import { CROSS_FILE_PARSE_MAX_BYTES } from "../constants/thresholds.js";
 import { analyzeScopes } from "../semantic/scope-analysis.js";
 import type { ScopeAnalysis, SymbolDescriptor } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
@@ -10,13 +12,20 @@ import { getJsxAttributeName } from "./get-jsx-attribute-name.js";
 import { getSingleReturnExpression } from "./get-single-return-expression.js";
 import { getStaticPropertyName } from "./get-static-property-name.js";
 import { hasCompleteSymbolReferences } from "./has-complete-symbol-references.js";
-import { hasUnsupportedKeyedDraftRuntime } from "./has-unsupported-keyed-draft-runtime.js";
+import { hasOrdinaryKeyedDraftReactProvider } from "./has-ordinary-keyed-draft-react-provider.js";
 import { isNodeOfType } from "./is-node-of-type.js";
-import { isTypeScriptTypePosition } from "./is-typescript-type-position.js";
+import { isKeyedDraftTypeReference } from "./is-keyed-draft-type-reference.js";
 import { resolveCrossFileValueExportWithFilePath } from "./resolve-cross-file-function-export.js";
 import type { RuleContext } from "./rule-context.js";
 import { someAst } from "./some-ast.js";
 import { stripParenExpression } from "./strip-paren-expression.js";
+
+interface KeyedDraftProviderFacts {
+  readonly scopes: ScopeAnalysis;
+  readonly sourceText: string;
+}
+
+const factsByProviderProgram = new WeakMap<EsTreeNode, KeyedDraftProviderFacts>();
 
 const isReadOnlyControlImport = (
   symbol: SymbolDescriptor,
@@ -25,7 +34,7 @@ const isReadOnlyControlImport = (
 ): boolean =>
   hasCompleteSymbolReferences(symbol, program, scopes) &&
   symbol.references.every((reference) => {
-    if (isTypeScriptTypePosition(reference.identifier)) return true;
+    if (isKeyedDraftTypeReference(reference.identifier)) return true;
     if (reference.flag !== "read") return false;
     let expression = reference.identifier;
     while (
@@ -59,6 +68,7 @@ const isReadOnlyControlImport = (
       alias &&
       hasCompleteSymbolReferences(alias, program, scopes) &&
       alias.references.every((aliasReference) => {
+        if (isKeyedDraftTypeReference(aliasReference.identifier)) return true;
         const aliasParent = aliasReference.identifier.parent;
         return (
           aliasReference.flag === "read" &&
@@ -140,7 +150,7 @@ const getForwardedChangeProp = (
       (binding) =>
         hasCompleteSymbolReferences(binding, program, scopes) &&
         binding.references.every((reference) => {
-          if (isTypeScriptTypePosition(reference.identifier)) return true;
+          if (isKeyedDraftTypeReference(reference.identifier)) return true;
           const parent = reference.identifier.parent;
           return (
             reference.flag === "read" &&
@@ -179,14 +189,17 @@ const getForwardedChangeProp = (
   if (!changeProp) return null;
   const spread = opening.attributes.at(-1);
   const restSymbol = scopes.symbolFor(rest.argument);
+  const restReferences = restSymbol?.references.filter(
+    (reference) => !isKeyedDraftTypeReference(reference.identifier),
+  );
   if (
     !restSymbol ||
     !isNodeOfType(spread, "JSXSpreadAttribute") ||
     scopes.symbolFor(spread.argument) !== restSymbol ||
     !hasCompleteSymbolReferences(restSymbol, program, scopes) ||
-    restSymbol.references.length !== 1 ||
-    restSymbol.references[0]?.identifier !== spread.argument ||
-    restSymbol.references[0]?.flag !== "read"
+    restReferences?.length !== 1 ||
+    restReferences[0]?.identifier !== spread.argument ||
+    restReferences[0]?.flag !== "read"
   )
     return null;
   if (
@@ -243,6 +256,7 @@ export const getControlledInputChangeProp = (
   if (!symbol || !hasCompleteSymbolReferences(symbol, program, context.scopes)) return null;
   if (
     symbol.references.some((reference) => {
+      if (isKeyedDraftTypeReference(reference.identifier)) return false;
       const parent = reference.identifier.parent;
       return (
         reference.flag !== "read" ||
@@ -258,6 +272,7 @@ export const getControlledInputChangeProp = (
   let expression = symbol.initializer;
   let providerProgram: EsTreeNode = program;
   let providerScopes = context.scopes;
+  let providerSourceText = context.sourceCode?.getText?.() ?? "";
   const imported = getImportDeclarationForSymbol(symbol);
   if (imported) {
     const name = getImportedName(symbol.declarationNode);
@@ -277,11 +292,31 @@ export const getControlledInputChangeProp = (
     if (!resolved) return null;
     expression = resolved.exportedNode;
     providerProgram = resolved.programNode;
-    providerScopes = analyzeScopes(providerProgram);
+    let providerFacts = factsByProviderProgram.get(providerProgram);
+    if (!providerFacts) {
+      let sourceText: string;
+      try {
+        const fileStat = fs.statSync(resolved.filePath);
+        if (!fileStat.isFile() || fileStat.size > CROSS_FILE_PARSE_MAX_BYTES) return null;
+        sourceText = fs.readFileSync(resolved.filePath, "utf8");
+      } catch {
+        return null;
+      }
+      providerFacts = { scopes: analyzeScopes(providerProgram), sourceText };
+      factsByProviderProgram.set(providerProgram, providerFacts);
+    }
+    providerScopes = providerFacts.scopes;
+    providerSourceText = providerFacts.sourceText;
   }
   if (
     !expression ||
-    hasUnsupportedKeyedDraftRuntime(providerProgram) ||
+    !isNodeOfType(providerProgram, "Program") ||
+    !hasOrdinaryKeyedDraftReactProvider(
+      providerProgram,
+      providerScopes,
+      providerSourceText,
+      context.settings,
+    ) ||
     someAst(
       providerProgram,
       (node) =>

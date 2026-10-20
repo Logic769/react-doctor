@@ -624,4 +624,447 @@ describe("no-derived-useState — keyed editable drafts preserve same-identity e
     resetFilesystemCaches();
     checkDraft(source, 1);
   });
+  it.each([
+    {
+      name: "review-nominal-keyed-editor",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 0,
+      providers: {},
+    },
+    {
+      name: "review-seed-as-string",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label as string);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 0,
+      providers: {},
+    },
+    {
+      name: "review-seed-non-null",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label!);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 0,
+      providers: {},
+    },
+    {
+      name: "review-hook-callee-as",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=(useState as any)(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 0,
+      providers: {},
+    },
+    {
+      name: "review-hook-callee-non-null",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState!(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 0,
+      providers: {},
+    },
+    {
+      name: "review-hook-result-as",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=(useState(entity.label) as [string,any]);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 0,
+      providers: {},
+    },
+    {
+      name: "review-record-seed-receiver-as",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState((entity as Entity).label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 0,
+      providers: {},
+    },
+    {
+      name: "review-state-controlled-value-as",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft as string} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 0,
+      providers: {},
+    },
+    {
+      name: "review-controlled-callback-as",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={(event=>setDraft(event.target.value)) as any}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 0,
+      providers: {},
+    },
+    {
+      name: "review-controlled-setter-callee-as",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>(setDraft as any)(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 0,
+      providers: {},
+    },
+    {
+      name: "review-event-value-as",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value as string)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 0,
+      providers: {},
+    },
+    {
+      name: "review-event-target-as",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft((event.target as HTMLInputElement).value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 0,
+      providers: {},
+    },
+    {
+      name: "review-caller-key-as",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug as string} entity={entity}/>;",
+      warningCount: 0,
+      providers: {},
+    },
+    {
+      name: "review-caller-prop-as",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity as Entity}/>;",
+      warningCount: 0,
+      providers: {},
+    },
+    {
+      name: "review-hook-erased-name",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;\ninterface useState {note:string}",
+      warningCount: 0,
+      providers: {},
+    },
+    {
+      name: "review-editor-erased-name",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;\ninterface EditForm {note:string}",
+      warningCount: 0,
+      providers: {},
+    },
+    {
+      name: "review-nominal-base-ui",
+      code: "import {Input} from '@base-ui/react/input';\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <Input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 0,
+      providers: {},
+    },
+    {
+      name: "review-base-ui-erased-name",
+      code: "import {Input} from '@base-ui/react/input';\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <Input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;\ninterface Input {note:string}",
+      warningCount: 0,
+      providers: {},
+    },
+    {
+      name: "review-negative-missing-key",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm entity={entity}/>;",
+      warningCount: 1,
+      providers: {},
+    },
+    {
+      name: "review-negative-hook-erased-name",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm entity={entity}/>;\ninterface useState {note:string}",
+      warningCount: 1,
+      providers: {},
+    },
+    {
+      name: "review-negative-editor-erased-name",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm entity={entity}/>;\ninterface EditForm {note:string}",
+      warningCount: 1,
+      providers: {},
+    },
+    {
+      name: "review-negative-base-ui-erased-name",
+      code: "import {Input} from '@base-ui/react/input';\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <Input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm entity={entity}/>;\ninterface Input {note:string}",
+      warningCount: 1,
+      providers: {},
+    },
+    {
+      name: "provider-nominal-imported-native-wrapper",
+      code: "import {FieldInput} from './field-input';\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <FieldInput value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 0,
+      providers: {
+        "src/field-input.tsx": "export const FieldInput=({...props})=><input {...props}/>;",
+      },
+    },
+    {
+      name: "provider-provider-preact-pragma",
+      code: "import {FieldInput} from './field-input';\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <FieldInput value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 1,
+      providers: {
+        "src/field-input.tsx":
+          "/** @jsxImportSource preact */\nexport const FieldInput=({...props})=><input {...props}/>;",
+      },
+    },
+    {
+      name: "provider-provider-jsx-factory",
+      code: "import {FieldInput} from './field-input';\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <FieldInput value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 1,
+      providers: {
+        "src/field-input.tsx":
+          "/** @jsx customFactory */\nexport const FieldInput=({...props})=><input {...props}/>;",
+      },
+    },
+    {
+      name: "provider-provider-jsx-runtime",
+      code: "import {FieldInput} from './field-input';\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <FieldInput value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 1,
+      providers: {
+        "src/field-input.tsx":
+          "/** @jsxRuntime automatic */\nexport const FieldInput=({...props})=><input {...props}/>;",
+      },
+    },
+    {
+      name: "provider-provider-preact-import",
+      code: "import {FieldInput} from './field-input';\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <FieldInput value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 1,
+      providers: {
+        "src/field-input.tsx":
+          "import {h} from 'preact';\nexport const FieldInput=({...props})=><input {...props}/>;",
+      },
+    },
+    {
+      name: "provider-provider-preact-factory",
+      code: "import {FieldInput} from './field-input';\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <FieldInput value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 1,
+      providers: {
+        "src/field-input.tsx":
+          "/** @jsx h */\nimport {h} from 'preact';\nexport const FieldInput=({...props})=><input {...props}/>;",
+      },
+    },
+    {
+      name: "inert-nominal",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 0,
+      providers: {},
+    },
+    {
+      name: "inert-inert-object-keys",
+      code: 'const notes = { Function: "description", React: "description", Reflect: "description", eval: "description", window: "description" };\nimport {useState} from \'react\';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;',
+      warningCount: 0,
+      providers: {},
+    },
+    {
+      name: "inert-static-class-method-names",
+      code: "class Notes { Function(){} React(){} Reflect(){} eval(){} }\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 0,
+      providers: {},
+    },
+    {
+      name: "inert-inert-interface-keys",
+      code: "interface Notes { Function: string; React: string; Reflect: string; }\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 0,
+      providers: {},
+    },
+    {
+      name: "inert-runtime-shorthand-reference",
+      code: "const notes = { Function };\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 1,
+      providers: {},
+    },
+    {
+      name: "inert-computed-runtime-reference",
+      code: "const notes = { [Function]: \"description\" };\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 1,
+      providers: {},
+    },
+    {
+      name: "inert-unindexed-catch-default",
+      code: "try { throw {}; } catch ({value = Function}) {}\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 1,
+      providers: {},
+    },
+    {
+      name: "ambient-function-competitor",
+      code: "declare function EditForm(props: unknown): unknown;\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 1,
+      providers: {},
+    },
+    {
+      name: "ambient-value-competitor",
+      code: "declare const EditForm: unknown;\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 1,
+      providers: {},
+    },
+    {
+      name: "runtime-namespace-competitor",
+      code: "namespace EditForm { export const marker = 1; }\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 1,
+      providers: {},
+    },
+  ])("preserves the bounded draft proof: $name", ({ code, warningCount, providers }) => {
+    for (const [relativePath, source] of Object.entries(providers))
+      writeFixture(relativePath, source);
+    const filename = writeFixture("src/component.tsx", code);
+    const result = runRule(noDerivedUseState, code, { filename });
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(warningCount);
+  });
+  it("refreshes a provider renderer proof after an equal-size timestamp-preserving edit", () => {
+    const ordinaryPrefix = "/* ordinary renderer */";
+    const opaquePrefix = "/** @jsx custom       */";
+    const prefixLength = Math.max(ordinaryPrefix.length, opaquePrefix.length);
+    const providerBody = "export const FieldInput=({...props})=><input {...props}/>;";
+    const provider = writeFixture(
+      "src/field-input.tsx",
+      ordinaryPrefix.padEnd(prefixLength) + providerBody,
+    );
+    const source = withControl(
+      "<FieldInput value={draft} onChange={event=>setDraft(event.target.value)}/>",
+      "import {FieldInput} from './field-input';\n",
+    );
+    checkDraft(source, 0);
+    const previous = fs.statSync(provider);
+    fs.writeFileSync(provider, opaquePrefix.padEnd(prefixLength) + providerBody);
+    fs.utimesSync(provider, previous.atime, previous.mtime);
+    expect(fs.statSync(provider).size).toBe(previous.size);
+    resetFilesystemCaches();
+    checkDraft(source, 1);
+  });
+  it.each([
+    {
+      name: "wrapped-record-field-assignment",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{(entity as Entity).label = \"changed\";const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 1,
+      providers: {},
+    },
+    {
+      name: "wrapped-record-field-update",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{delete (entity as Entity).label;const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 1,
+      providers: {},
+    },
+    {
+      name: "optional-hook-call",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState?.(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 1,
+      providers: {},
+    },
+    {
+      name: "optional-seed-receiver",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity?.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      warningCount: 1,
+      providers: {},
+    },
+  ])("keeps unsupported value mutations opaque: $name", ({ code, warningCount }) => {
+    const filename = writeFixture("src/component.tsx", code);
+    const result = runRule(noDerivedUseState, code, { filename });
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(warningCount);
+  });
+  it.each([
+    {
+      name: "inert-object-constructor-key",
+      code: "const notes = { constructor: \"description\" };\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      expected: 0,
+    },
+    {
+      name: "actual-constructor-destructure",
+      code: "const {constructor:makeCode}=(()=>{});makeCode(\"return 1\")();\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      expected: 1,
+    },
+    {
+      name: "actual-constructor-member",
+      code: "(()=>{}).constructor(\"return 1\")();\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      expected: 1,
+    },
+  ])("distinguishes constructor names from capabilities: $name", ({ code, expected }) => {
+    const filename = writeFixture("src/component.tsx", code);
+    const result = runRule(noDerivedUseState, code, { filename });
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(expected);
+  });
+  it.each([
+    {
+      name: "erased-nested-constructor-binding",
+      code: "type Notes=({nested:{constructor}}:{nested:{constructor:string}})=>void;\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      expected: 0,
+    },
+    {
+      name: "erased-function-binding",
+      code: "type Notes=({Function}:{Function:string})=>void;\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      expected: 0,
+    },
+    {
+      name: "runtime-constructor-destructure",
+      code: "const {constructor:makeCode}=(()=>{});makeCode(\"return 1\")();\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      expected: 1,
+    },
+  ])(
+    "keeps erased declaration subtrees outside runtime provider proof: $name",
+    ({ code, expected }) => {
+      const filename = writeFixture("src/component.tsx", code);
+      const result = runRule(noDerivedUseState, code, { filename });
+      expect(result.parseErrors).toEqual([]);
+      expect(result.diagnostics).toHaveLength(expected);
+    },
+  );
+  it.each([
+    {
+      name: "erased-function-pattern-useState",
+      code: "type Notes=({useState}:{useState:string})=>void;\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      expected: 0,
+    },
+    {
+      name: "erased-function-pattern-EditForm",
+      code: "type Notes=({EditForm}:{EditForm:string})=>void;\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      expected: 0,
+    },
+    {
+      name: "erased-function-pattern-entity",
+      code: "type Notes=({entity}:{entity:string})=>void;\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      expected: 0,
+    },
+    {
+      name: "erased-function-pattern-draft",
+      code: "type Notes=({draft}:{draft:string})=>void;\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      expected: 0,
+    },
+    {
+      name: "erased-function-pattern-setDraft",
+      code: "type Notes=({setDraft}:{setDraft:string})=>void;\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      expected: 0,
+    },
+    {
+      name: "erased-function-pattern-Input",
+      code: "type Notes=({Input}:{Input:string})=>void;\nimport {useState} from 'react'; import {Input} from '@base-ui/react/input';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <Input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      expected: 0,
+    },
+    {
+      name: "nominal-Input",
+      code: "import {useState} from 'react'; import {Input} from '@base-ui/react/input';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <Input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      expected: 0,
+    },
+  ])(
+    "ignores wholly erased binding patterns when closing runtime references: $name",
+    ({ code, expected }) => {
+      const filename = writeFixture("src/component.tsx", code);
+      const result = runRule(noDerivedUseState, code, { filename });
+      expect(result.parseErrors).toEqual([]);
+      expect(result.diagnostics).toHaveLength(expected);
+    },
+  );
+  it.each([
+    {
+      name: "erased-type-only-component-export",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;\nexport type {EditForm};",
+      expected: 0,
+    },
+    {
+      name: "erased-type-only-hook-export",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;\nexport type {useState};",
+      expected: 0,
+    },
+    {
+      name: "runtime-component-export",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;\nexport {EditForm};",
+      expected: 1,
+    },
+    {
+      name: "erased-annotation-constructor-pattern",
+      code: "declare const notes: ({nested:{constructor}}:{nested:{constructor:string}})=>void;\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      expected: 0,
+    },
+    {
+      name: "erased-annotation-hook-pattern",
+      code: "declare const notes: ({useState}:{useState:string})=>void;\nimport {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;",
+      expected: 0,
+    },
+    {
+      name: "inline-type-only-component-export",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;\nexport {type EditForm};",
+      expected: 0,
+    },
+    {
+      name: "inline-type-only-hook-export",
+      code: "import {useState} from 'react';\ninterface Entity {slug:string;label:string}\nconst EditForm=({entity}:{entity:Entity})=>{const [draft,setDraft]=useState(entity.label);return <input value={draft} onChange={event=>setDraft(event.target.value)}/>};\nexport const Screen=({entity}:{entity:Entity})=><EditForm key={entity.slug} entity={entity}/>;\nexport {type useState};",
+      expected: 0,
+    },
+  ])(
+    "keeps erased references closed without accepting runtime exports: $name",
+    ({ code, expected }) => {
+      const filename = writeFixture("src/component.tsx", code);
+      const result = runRule(noDerivedUseState, code, { filename });
+      expect(result.parseErrors).toEqual([]);
+      expect(result.diagnostics).toHaveLength(expected);
+    },
+  );
 });
