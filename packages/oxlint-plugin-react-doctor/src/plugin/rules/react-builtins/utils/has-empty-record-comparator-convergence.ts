@@ -515,7 +515,7 @@ export const hasEmptyRecordComparatorConvergence = ({
     return supported;
   });
   if (!supported) return false;
-  return !someAst(scopes.rootScope.node, (candidate) => {
+  const isUnsupportedRuntimeCandidate = (candidate: EsTreeNode): boolean => {
     if (
       [
         "TSEnumDeclaration",
@@ -641,5 +641,17 @@ export const hasEmptyRecordComparatorConvergence = ({
         return true;
     }
     return false;
+  };
+  let hasUnsupportedRuntime = false;
+  walkAst(scopes.rootScope.node, (candidate) => {
+    if (
+      hasUnsupportedRuntime ||
+      isNodeOfType(candidate, "TSInterfaceDeclaration") ||
+      isNodeOfType(candidate, "TSTypeAliasDeclaration")
+    )
+      return false;
+    hasUnsupportedRuntime = isUnsupportedRuntimeCandidate(candidate);
+    return !hasUnsupportedRuntime;
   });
+  return !hasUnsupportedRuntime;
 };

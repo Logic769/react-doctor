@@ -470,6 +470,41 @@ const cases = [
       },
     ],
   },
+  {
+    name: "erased-nested-provider-name",
+    code: "type Note = { nested: { Function: string } };\nimport React from 'react';\nimport compare from 'react-fast-compare';\nexport class Panel extends React.Component {\n state = { hidden: true, record: { enabled: true }, other: 0 };\n componentDidUpdate(previousProps, previousState) {\nif (!compare(previousState.record, this.state.record)) { this.setState({ record: {} }); }\n }\n render() { return null; }\n}\n",
+    options: {
+      filename: "synthetic-empty-record-boundary.tsx",
+      includeLocations: true,
+    },
+    expected: [],
+  },
+  {
+    name: "erased-nested-interface",
+    code: "interface Note { nested: { Object: string } };\nimport React from 'react';\nimport compare from 'react-fast-compare';\nexport class Panel extends React.Component {\n state = { hidden: true, record: { enabled: true }, other: 0 };\n componentDidUpdate(previousProps, previousState) {\nif (!compare(previousState.record, this.state.record)) { this.setState({ record: {} }); }\n }\n render() { return null; }\n}\n",
+    options: {
+      filename: "synthetic-empty-record-boundary.tsx",
+      includeLocations: true,
+    },
+    expected: [],
+  },
+  {
+    name: "unsupported-runtime-parameter-property",
+    code: "class Setup { constructor(public value = 1) {} };\nimport React from 'react';\nimport compare from 'react-fast-compare';\nexport class Panel extends React.Component {\n state = { hidden: true, record: { enabled: true }, other: 0 };\n componentDidUpdate(previousProps, previousState) {\nif (!compare(previousState.record, this.state.record)) { this.setState({ record: {} }); }\n }\n render() { return null; }\n}\n",
+    options: {
+      filename: "synthetic-empty-record-boundary.tsx",
+      includeLocations: true,
+    },
+    expected: [
+      {
+        column: 57,
+        line: 7,
+        message:
+          "Calling setState in componentDidUpdate can trigger another update immediately, loop forever, and freeze the component.",
+        nodeType: "MemberExpression",
+      },
+    ],
+  },
 ];
 
 describe("empty-record comparator convergence", () => {
