@@ -1,8 +1,10 @@
+import { hasVisibleAmbientFunctionDeclaration } from "../../utils/has-visible-ambient-function-declaration.js";
 import { defineRule } from "../../utils/define-rule.js";
 import type { EsTreeNode } from "../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../utils/es-tree-node-of-type.js";
 import { getJsxPropStringValue } from "../../utils/get-jsx-prop-string-value.js";
 import { hasJsxPropIgnoreCase } from "../../utils/has-jsx-prop-ignore-case.js";
+import { hasOnlyErasedTypeNameBindings } from "../../utils/has-only-erased-type-name-bindings.js";
 import { hasJsxSpreadAttribute } from "../../utils/has-jsx-spread-attribute.js";
 import { isReactApiCall } from "../../utils/is-react-api-call.js";
 import { isNodeOfType } from "../../utils/is-node-of-type.js";
@@ -123,12 +125,38 @@ export const iframeMissingSandbox = defineRule({
     },
     CallExpression(node: EsTreeNodeOfType<"CallExpression">) {
       if (
-        !isReactApiCall(node, "createElement", context.scopes, {
-          allowGlobalReactNamespace: true,
-          allowUnboundBareCalls: true,
-          resolveNamedAliases: false,
-          resolveConditionalAliases: false,
-        })
+        !isReactApiCall(
+          node,
+          "createElement",
+          {
+            ...context.scopes,
+            isGlobalReference: (identifier) => {
+              if (
+                identifier.type === "Identifier" &&
+                (identifier.name === "React" || identifier.name === "createElement") &&
+                hasVisibleAmbientFunctionDeclaration(
+                  context.scopes.scopeFor(identifier),
+                  identifier.name,
+                )
+              )
+                return false;
+              if (context.scopes.isGlobalReference(identifier)) return true;
+              if (
+                identifier.type !== "Identifier" ||
+                (identifier.name !== "React" && identifier.name !== "createElement")
+              )
+                return false;
+              const symbol = context.scopes.symbolFor(identifier);
+              return Boolean(symbol && hasOnlyErasedTypeNameBindings(symbol));
+            },
+          },
+          {
+            allowGlobalReactNamespace: true,
+            allowUnboundBareCalls: true,
+            resolveNamedAliases: false,
+            resolveConditionalAliases: false,
+          },
+        )
       ) {
         return;
       }

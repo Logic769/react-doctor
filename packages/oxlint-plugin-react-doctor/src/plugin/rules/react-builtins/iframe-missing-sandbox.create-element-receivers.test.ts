@@ -222,6 +222,54 @@ describe("iframe missing sandbox createElement receivers", () => {
       code: 'const createElement=document.createElement.bind(document); createElement("iframe");',
       diagnostics: [],
     },
+    {
+      name: "erased-global-react-interface",
+      code: 'interface React { note: string }; React.createElement("iframe", null);',
+      diagnostics: [
+        {
+          message:
+            "An `<iframe>` with no `sandbox` is a security hole: the embedded page gets full access to your site.",
+          nodeType: "CallExpression",
+        },
+      ],
+    },
+    {
+      name: "erased-bare-create-element-alias",
+      code: 'type createElement = string; createElement("iframe", null);',
+      diagnostics: [
+        {
+          message:
+            "An `<iframe>` with no `sandbox` is a security hole: the embedded page gets full access to your site.",
+          nodeType: "CallExpression",
+        },
+      ],
+    },
+    {
+      name: "erased-react-import-companion",
+      code: 'import { createElement } from "react"; interface createElement { note: string }; createElement("iframe", null);',
+      diagnostics: [
+        {
+          message:
+            "An `<iframe>` with no `sandbox` is a security hole: the embedded page gets full access to your site.",
+          nodeType: "CallExpression",
+        },
+      ],
+    },
+    {
+      name: "erased-interface-with-runtime-class-companion",
+      code: 'interface React { note: string }; class React { static createElement() { return document.createElement("iframe"); } }; React.createElement("iframe", null);',
+      diagnostics: [],
+    },
+    {
+      name: "erased-outer-global-name-with-runtime-parameter",
+      code: 'type React = string; const build = (React) => React.createElement("iframe", null);',
+      diagnostics: [],
+    },
+    {
+      name: "erased-bare-name-with-runtime-function-companion",
+      code: 'type createElement = string; function createElement() { return document.createElement("iframe"); } createElement("iframe", null);',
+      diagnostics: [],
+    },
   ];
 
   for (const testCase of testCases) {
@@ -232,4 +280,31 @@ describe("iframe missing sandbox createElement receivers", () => {
       });
     });
   }
+});
+
+it("preserves outer ambient value contracts", () => {
+  expect(
+    runRule(
+      iframeMissingSandbox,
+      'declare const React: {createElement:unknown}; { interface React { note:string }; React.createElement("iframe",null); }',
+    ).diagnostics,
+  ).toHaveLength(0);
+});
+
+it("preserves ambient function contract 0", () => {
+  expect(
+    runRule(
+      iframeMissingSandbox,
+      'declare function React(): unknown; React.createElement("iframe",null);',
+    ).diagnostics,
+  ).toHaveLength(0);
+});
+
+it("preserves ambient function contract 1", () => {
+  expect(
+    runRule(
+      iframeMissingSandbox,
+      'interface React {}; function owner(){ declare function React(): unknown; React.createElement("iframe",null); }',
+    ).diagnostics,
+  ).toHaveLength(0);
 });
