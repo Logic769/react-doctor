@@ -47,6 +47,12 @@ export const FocusPanel = ({ entity }: { entity: object }) => {
 const BASE_FACADE = `import { DOMEditor } from "slate-dom";
 export const FocusApi = DOMEditor;
 `;
+const TYPED_CURRENT_FOCUS_FACADE = `import { DOMEditor as CurrentEditor } from "slate-dom";
+export interface FocusApi extends CurrentEditor {
+  readonly label?: string;
+}
+export const FocusApi: FocusApi = CurrentEditor;
+`;
 const DIRECT_SDK_CODE = BASE_CODE.replace(
   'import { FocusApi } from "./focus-api";',
   'import { DOMEditor as FocusApi } from "slate-dom";',
@@ -439,6 +445,28 @@ const cases: FocusReadCase[] = [
     code: BASE_CODE.replace(
       "export const FocusPanel",
       'import { default as OtherFocusApi } from "./focus-api.ts";\nexport const FocusPanel',
+    ),
+  },
+
+  {
+    name: "facade-erased-interface-heritage-retains-one-runtime-origin",
+    matches: true,
+    facade: TYPED_CURRENT_FOCUS_FACADE,
+  },
+  {
+    name: "facade-runtime-extra-reference-beside-erased-heritage-declines",
+    matches: false,
+    facade: TYPED_CURRENT_FOCUS_FACADE.replace(
+      "export const FocusApi",
+      "void CurrentEditor;\nexport const FocusApi",
+    ),
+  },
+  {
+    name: "facade-runtime-provider-write-beside-erased-heritage-declines",
+    matches: false,
+    facade: TYPED_CURRENT_FOCUS_FACADE.replace(
+      "export const FocusApi",
+      "CurrentEditor.isFocused = () => false;\nexport const FocusApi",
     ),
   },
 ];

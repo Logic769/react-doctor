@@ -284,6 +284,9 @@ export const isSlateCurrentFocusProvider = (
       return false;
     const { resolved, providerProgram, initializer, providerScopes, facadeSymbol, importedSymbol } =
       origin;
+    const importedRuntimeReferences = importedSymbol.references.filter(
+      (reference) => !isTypeScriptTypePosition(reference.identifier),
+    );
     if (
       !facadeSymbol ||
       !importedSymbol ||
@@ -294,8 +297,8 @@ export const isSlateCurrentFocusProvider = (
       !hasReadonlyFocusProviderReferences(facadeSymbol, providerScopes) ||
       !hasReadonlyFocusProviderReferences(importedSymbol, providerScopes) ||
       facadeSymbol.references.length !== 0 ||
-      importedSymbol.references.length !== 1 ||
-      importedSymbol.references[0]?.identifier !== initializer ||
+      importedRuntimeReferences.length !== 1 ||
+      importedRuntimeReferences[0]?.identifier !== initializer ||
       !hasOrdinaryFocusProviderCapabilities(providerProgram, providerScopes) ||
       !hasClosedSlateFocusImports(providerProgram, resolved.filePath, importedSymbol)
     )
