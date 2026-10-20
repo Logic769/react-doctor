@@ -679,6 +679,99 @@ const fixtures: ReadonlyArray<SchedulerFixture> = [
       },
     ],
   },
+  {
+    name: "erased-window-interface",
+    files: {
+      "/src/example.tsx":
+        "import {useState} from 'react';\nimport {useQueue} from './queue';\nexport const Example=()=>{const [value,setValue]=useState(0);const queue=useQueue(()=>{});return <button onClick={()=>setValue(previous=>{queue();return previous+1;})}>{value}</button>;};",
+      "/src/queue.ts":
+        "interface window {}\nimport * as React from 'react';\nexport function useQueue(callback){const timer=React.useRef(0);const queue=React.useCallback(()=>{window.clearTimeout(timer.current);timer.current=window.setTimeout(()=>callback(),0);},[callback]);return queue;}",
+    },
+    options: {
+      filename: "/src/example.tsx",
+      includeLocations: true,
+    },
+    expectedCertificateDiagnostics: [
+      {
+        column: 138,
+        line: 3,
+        message:
+          "This side-effecting call runs inside a state updater, which React may invoke more than once. Move it outside the setter after computing the next state.",
+        nodeType: "CallExpression",
+      },
+    ],
+    expectedRuleDiagnostics: [
+      {
+        column: 138,
+        line: 3,
+        message:
+          "This side-effecting call runs inside a state updater, which React may invoke more than once. Move it outside the setter after computing the next state.",
+        nodeType: "CallExpression",
+      },
+    ],
+  },
+  {
+    name: "erased-react-interface",
+    files: {
+      "/src/example.tsx":
+        "import {useState} from 'react';\nimport {useQueue} from './queue';\nexport const Example=()=>{const [value,setValue]=useState(0);const queue=useQueue(()=>{});return <button onClick={()=>setValue(previous=>{queue();return previous+1;})}>{value}</button>;};",
+      "/src/queue.ts":
+        "interface React {}\nimport * as React from 'react';\nexport function useQueue(callback){const timer=React.useRef(0);const queue=React.useCallback(()=>{window.clearTimeout(timer.current);timer.current=window.setTimeout(()=>callback(),0);},[callback]);return queue;}",
+    },
+    options: {
+      filename: "/src/example.tsx",
+      includeLocations: true,
+    },
+    expectedCertificateDiagnostics: [
+      {
+        column: 138,
+        line: 3,
+        message:
+          "This side-effecting call runs inside a state updater, which React may invoke more than once. Move it outside the setter after computing the next state.",
+        nodeType: "CallExpression",
+      },
+    ],
+    expectedRuleDiagnostics: [
+      {
+        column: 138,
+        line: 3,
+        message:
+          "This side-effecting call runs inside a state updater, which React may invoke more than once. Move it outside the setter after computing the next state.",
+        nodeType: "CallExpression",
+      },
+    ],
+  },
+  {
+    name: "nested-erased-capability",
+    files: {
+      "/src/example.tsx":
+        "import {useState} from 'react';\nimport {useQueue} from './queue';\nexport const Example=()=>{const [value,setValue]=useState(0);const queue=useQueue(()=>{});return <button onClick={()=>setValue(previous=>{queue();return previous+1;})}>{value}</button>;};",
+      "/src/queue.ts":
+        "type Note = ({nested: {constructor}}: {nested:{constructor:string}}) => void;\nimport * as React from 'react';\nexport function useQueue(callback){const timer=React.useRef(0);const queue=React.useCallback(()=>{window.clearTimeout(timer.current);timer.current=window.setTimeout(()=>callback(),0);},[callback]);return queue;}",
+    },
+    options: {
+      filename: "/src/example.tsx",
+      includeLocations: true,
+    },
+    expectedCertificateDiagnostics: [
+      {
+        column: 138,
+        line: 3,
+        message:
+          "This side-effecting call runs inside a state updater, which React may invoke more than once. Move it outside the setter after computing the next state.",
+        nodeType: "CallExpression",
+      },
+    ],
+    expectedRuleDiagnostics: [
+      {
+        column: 138,
+        line: 3,
+        message:
+          "This side-effecting call runs inside a state updater, which React may invoke more than once. Move it outside the setter after computing the next state.",
+        nodeType: "CallExpression",
+      },
+    ],
+  },
 ];
 
 describe("returned native scheduler in a state updater", () => {

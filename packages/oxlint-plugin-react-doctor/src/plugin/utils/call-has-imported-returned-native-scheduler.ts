@@ -1,3 +1,12 @@
+import {
+  GLOBAL_OBJECT_NAMES,
+  DYNAMIC_CODE_NAMES,
+  PROVIDER_CAPABILITY_NAMES,
+  TIMER_NAMES,
+  RUNTIME_PROVIDER_NODES,
+  SCHEDULER_PROVIDER_NAMES,
+} from "./returned-scheduler/constants.js";
+import { isNativeProviderReference } from "./returned-scheduler/is-native-provider-reference.js";
 import { analyzeScopes } from "../semantic/scope-analysis.js";
 import type { ScopeAnalysis, SymbolDescriptor } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
@@ -28,32 +37,6 @@ interface SchedulerProgramFacts {
 }
 
 const factsByProgram = new WeakMap<EsTreeNode, SchedulerProgramFacts>();
-const globalObjectNames = new Set(["window", "self", "globalThis", "Object"]);
-const dynamicCodeNames = new Set(["eval", "Function"]);
-const providerCapabilityNames = new Set([
-  "eval",
-  "Function",
-  "constructor",
-  "__defineGetter__",
-  "__defineSetter__",
-  "getPrototypeOf",
-  "getOwnPropertyDescriptor",
-  "getOwnPropertyDescriptors",
-]);
-const timerNames = new Set(["setTimeout", "clearTimeout"]);
-const runtimeProviderNodes = new Set([
-  "WithStatement",
-  "ImportExpression",
-  "TSEnumDeclaration",
-  "TSEnumBody",
-  "TSEnumMember",
-  "TSModuleDeclaration",
-  "TSModuleBlock",
-  "TSImportEqualsDeclaration",
-  "TSExportAssignment",
-  "TSParameterProperty",
-  "Decorator",
-]);
 
 const isStaticNamePosition = (node: EsTreeNode): boolean => {
   const parent = node.parent;
@@ -113,7 +96,7 @@ const getProgramFacts = (
   let providersClosed = true;
   walkAst(program, (node) => {
     if (!providersClosed) return false;
-    if (runtimeProviderNodes.has(node.type)) {
+    if (RUNTIME_PROVIDER_NODES.has(node.type)) {
       providersClosed = false;
       return false;
     }
@@ -124,7 +107,7 @@ const getProgramFacts = (
         (property) =>
           isNodeOfType(property, "Property") &&
           (property.computed ||
-            providerCapabilityNames.has(getStaticPropertyKeyName(property) ?? "")),
+            PROVIDER_CAPABILITY_NAMES.has(getStaticPropertyKeyName(property) ?? "")),
       )
     ) {
       providersClosed = false;
@@ -132,7 +115,7 @@ const getProgramFacts = (
     }
     if (
       isNodeOfType(node, "MemberExpression") &&
-      providerCapabilityNames.has(getStaticPropertyName(node) ?? "")
+      PROVIDER_CAPABILITY_NAMES.has(getStaticPropertyName(node) ?? "")
     ) {
       providersClosed = false;
       return false;
@@ -141,26 +124,37 @@ const getProgramFacts = (
     const symbol = scopes.symbolFor(node);
     if (symbol?.bindingIdentifier === node) return;
     const reference = scopes.referenceFor(node);
-    if (dynamicCodeNames.has(node.name) || node.name === "Reflect") {
+    if (DYNAMIC_CODE_NAMES.has(node.name) || node.name === "Reflect") {
       providersClosed = false;
       return false;
     }
     if (!reference) {
       if (
-        globalObjectNames.has(node.name) ||
-        timerNames.has(node.name) ||
+        GLOBAL_OBJECT_NAMES.has(node.name) ||
+        TIMER_NAMES.has(node.name) ||
         reactBindingNames.has(node.name)
       )
         providersClosed = false;
       return;
     }
-    if (timerNames.has(node.name) && scopes.isGlobalReference(node) && reference.flag !== "read") {
+    if (
+      TIMER_NAMES.has(node.name) &&
+      isNativeProviderReference(node, scopes) &&
+      reference.flag !== "read"
+    ) {
+      providersClosed = false;
+      return false;
+    }
+    if (SCHEDULER_PROVIDER_NAMES.has(node.name) && !isNativeProviderReference(node, scopes)) {
       providersClosed = false;
       return false;
     }
     const reactDeclaration = symbol && getImportDeclarationForSymbol(symbol);
     const isReactImport = reactDeclaration?.source.value === "react";
-    if (!isReactImport && !(globalObjectNames.has(node.name) && scopes.isGlobalReference(node)))
+    if (
+      !isReactImport &&
+      !(GLOBAL_OBJECT_NAMES.has(node.name) && isNativeProviderReference(node, scopes))
+    )
       return;
     const root = findTransparentExpressionRoot(node);
     const parent = root.parent;
@@ -255,7 +249,7 @@ const isNativeTimerCall = (
   return (
     isNodeOfType(receiver, "Identifier") &&
     receiver.name === "window" &&
-    scopes.isGlobalReference(receiver)
+    isNativeProviderReference(receiver, scopes)
   );
 };
 
