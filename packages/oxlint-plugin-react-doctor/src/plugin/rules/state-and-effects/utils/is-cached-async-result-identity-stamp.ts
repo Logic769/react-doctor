@@ -7,6 +7,8 @@ import { findTransparentExpressionRoot } from "../../../utils/find-transparent-e
 import { getStaticKeyName } from "../../../utils/get-static-key-name.js";
 import { getStaticPropertyName } from "../../../utils/get-static-property-name.js";
 import { getSymbolTypeAnnotation } from "../../../utils/get-symbol-type-annotation.js";
+import { hasOnlyErasedTypeNameBindings } from "../../../utils/has-only-erased-type-name-bindings.js";
+import { hasVisibleAmbientFunctionDeclaration } from "../../../utils/has-visible-ambient-function-declaration.js";
 import { hasEnclosingTypeParameterNamed } from "../../../utils/has-enclosing-type-parameter-named.js";
 import { isAstDescendant } from "../../../utils/is-ast-descendant.js";
 import { isFunctionLike } from "../../../utils/is-function-like.js";
@@ -23,6 +25,15 @@ interface IdentityStampBindings {
   readonly permittedWrites: Set<EsTreeNode>;
   readonly context: RuleContext;
 }
+
+const isNativeIdentityStampMap = (identifier: EsTreeNode, context: RuleContext): boolean => {
+  if (!isNodeOfType(identifier, "Identifier") || identifier.name !== "Map") return false;
+  if (hasVisibleAmbientFunctionDeclaration(context.scopes.scopeFor(identifier), identifier.name))
+    return false;
+  if (context.scopes.isGlobalReference(identifier)) return true;
+  const symbol = context.scopes.symbolFor(identifier);
+  return Boolean(symbol && hasOnlyErasedTypeNameBindings(symbol));
+};
 
 const isNullExpression = (node: EsTreeNode | null | undefined): boolean => {
   const candidate = node ? stripParenExpression(node) : null;
@@ -210,7 +221,7 @@ const hasUnmodifiedIdentityStampProviders = (
     if (
       node.name === "Map" &&
       (!context.scopes.referenceFor(node) ||
-        !context.scopes.isGlobalReference(node) ||
+        !isNativeIdentityStampMap(node, context) ||
         !isNodeOfType(node.parent, "NewExpression") ||
         node.parent.callee !== node)
     )
@@ -506,7 +517,7 @@ const isCachedAsyncResultIdentityStampProof = (
     map.arguments.length !== 0 ||
     !isNodeOfType(map.callee, "Identifier") ||
     map.callee.name !== "Map" ||
-    !context.scopes.isGlobalReference(map.callee)
+    !isNativeIdentityStampMap(map.callee, context)
   )
     return false;
   const effectStatements = effectFunction.body.body;

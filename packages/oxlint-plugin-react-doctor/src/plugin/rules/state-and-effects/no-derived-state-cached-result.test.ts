@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import { runRule } from "../../../test-utils/run-rule.js";
+import { noDerivedStateEffect } from "./no-derived-state-effect.js";
 import { noDerivedState } from "./no-derived-state.js";
 
 const cachedResultComponent = `
@@ -267,5 +268,68 @@ Object.assign(globalThis, { Map: WrongMap });
     expect(result.diagnostics.map((diagnostic) => diagnostic.message)).toEqual([
       'Storing "copy" in state when you can derive it from other values costs an extra render.',
     ]);
+  });
+
+  it.each([
+    "interface Map {}",
+    "type Map = unknown;",
+    "interface useState {}",
+    "interface useRef {}",
+    "interface useEffect {}",
+  ])("ignores erased provider names: %s", (declaration) => {
+    const code = cachedResultComponent.replace("interface Item", `${declaration}\ninterface Item`);
+    for (const rule of [noDerivedState, noDerivedStateEffect]) {
+      const result = runRule(rule, code);
+      expect(result.parseErrors).toEqual([]);
+      expect(result.diagnostics).toEqual([]);
+    }
+  });
+
+  it.each([
+    "declare const Map: new (...args: unknown[]) => unknown;",
+    "declare function Map(...args: unknown[]): unknown;",
+    "const Map = CustomMap;",
+  ])("retains unknown value providers: %s", (declaration) => {
+    const code = cachedResultComponent.replace("interface Item", `${declaration}\ninterface Item`);
+    for (const rule of [noDerivedState, noDerivedStateEffect]) {
+      const result = runRule(rule, code);
+      expect(result.parseErrors).toEqual([]);
+      expect(result.diagnostics).toHaveLength(1);
+    }
+  });
+
+  it.each([
+    "declare const Map: new (...args: unknown[]) => unknown;",
+    "declare function Map(...args: unknown[]): unknown;",
+  ])("preserves outer ambient providers through inner interfaces: %s", (declaration) => {
+    const code = cachedResultComponent
+      .replace("interface Item", `${declaration}\ninterface Item`)
+      .replace("  const records =", "  interface Map {}\n  const records =");
+    for (const rule of [noDerivedState, noDerivedStateEffect]) {
+      const result = runRule(rule, code);
+      expect(result.parseErrors).toEqual([]);
+      expect(result.diagnostics).toHaveLength(1);
+    }
+  });
+
+  it.each([cachedResultComponent, cachedResultWithCleanup])(
+    "suppresses the equivalent fallback rule for the same certified identity stamp",
+    (code) => {
+      const result = runRule(noDerivedStateEffect, code);
+      expect(result.parseErrors).toEqual([]);
+      expect(result.diagnostics).toEqual([]);
+    },
+  );
+
+  it("keeps unrelated fallback findings after excluding a certified stamp", () => {
+    const result = runRule(
+      noDerivedStateEffect,
+      cachedResultComponent.replace(
+        "const displayedItem =",
+        'const [copy, setCopy] = useState(""); useEffect(() => { setCopy(itemId); }, [itemId]); const displayedItem =',
+      ),
+    );
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(1);
   });
 });
