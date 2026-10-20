@@ -99,18 +99,7 @@ const hasOrdinaryReactProvider = (
       for (const reference of symbol.references) {
         if (isTypeScriptTypePosition(reference.identifier)) continue;
         if (reference.flag !== "read") return false;
-        let callee = reference.identifier;
-        if (!isNodeOfType(specifier, "ImportSpecifier")) {
-          const member = callee.parent;
-          if (
-            !isNodeOfType(member, "MemberExpression") ||
-            member.object !== callee ||
-            member.computed ||
-            member.optional
-          )
-            return false;
-          callee = member;
-        }
+        const callee = reference.identifier;
         if (
           !isNodeOfType(callee.parent, "CallExpression") ||
           callee.parent.callee !== callee ||

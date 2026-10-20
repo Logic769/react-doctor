@@ -192,7 +192,7 @@ const getForwardedChangeProp = (
       if (!isNodeOfType(attribute, "JSXAttribute")) return true;
       const name = getJsxAttributeName(attribute.name);
       if (
-        ["value", "onChange", "onValueChange", "render", "readOnly", "disabled"].includes(
+        ["value", "onChange", "onValueChange", "render", "readOnly", "disabled", "hidden"].includes(
           name ?? "",
         )
       )
@@ -226,7 +226,7 @@ export const getControlledInputChangeProp = (
     opening.attributes.some(
       (attribute) =>
         isNodeOfType(attribute, "JSXAttribute") &&
-        ["render", "readOnly", "disabled", "type"].includes(
+        ["render", "readOnly", "disabled", "hidden", "type"].includes(
           getJsxAttributeName(attribute.name) ?? "",
         ),
     )

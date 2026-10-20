@@ -473,7 +473,7 @@ describe("no-derived-useState — keyed editable drafts preserve same-identity e
     );
   });
 
-  it.each(["readOnly", "disabled", 'type="hidden"'])(
+  it.each(["readOnly", "disabled", "hidden", 'type="hidden"'])(
     "declines a noneditable wrapper control: %s",
     (attribute) => {
       writeFixture(
@@ -519,7 +519,7 @@ describe("no-derived-useState — keyed editable drafts preserve same-identity e
     checkDraft(editableSource.replace("return <input", `${statement}return <input`), 1);
   });
 
-  it.each(["render={customRender}", "readOnly", "disabled"])(
+  it.each(["render={customRender}", "readOnly", "disabled", "hidden"])(
     "declines an overridden control role: %s",
     (attribute) => {
       checkDraft(
@@ -531,6 +531,52 @@ describe("no-derived-useState — keyed editable drafts preserve same-identity e
       );
     },
   );
+
+  it.each([
+    "import R from 'react';R.valueOf().createElement=fake;",
+    "import * as R from 'react';R.__defineGetter__('createElement',()=>fake);",
+    "import {default as R} from 'react';R.valueOf().createElement=fake;",
+  ])("declines a runtime React namespace alias: %s", (provider) => {
+    checkDraft(provider + editableSource, 1);
+  });
+
+  it("keeps a React namespace used only for type annotations", () => {
+    checkDraft(
+      "import * as R from 'react';type Props=R.ComponentProps<'input'>;" + editableSource,
+      0,
+    );
+  });
+
+  it("declines a React namespace mutation inside an input wrapper", () => {
+    writeFixture(
+      "src/field-input.tsx",
+      "import R from 'react';import {Input as BaseInput} from '@base-ui/react/input';R.valueOf().createElement=fake;export const FieldInput=({...props})=><BaseInput {...props}/>;",
+    );
+    checkDraft(
+      withControl(
+        "<FieldInput value={draft} onChange={event=>setDraft(event.target.value)}/>",
+        "import {FieldInput} from './field-input';\n",
+      ),
+      1,
+    );
+  });
+
+  it.each([
+    "(()=>{}).constructor('return globalThis')();",
+    "(()=>{})['constructor']('return globalThis')();",
+    "const {constructor:makeCode}=(()=>{});makeCode('return globalThis')();",
+  ])("declines a visible function constructor capability: %s", (statement) => {
+    checkDraft(statement + editableSource, 1);
+  });
+
+  it("declines a hidden textarea", () => {
+    checkDraft(
+      withControl(
+        "<textarea hidden value={draft} onChange={event=>setDraft(event.target.value)}/>",
+      ),
+      1,
+    );
+  });
 
   it("refreshes an imported record domain after the host reset with equal size and timestamp", () => {
     const provider = writeFixture(
