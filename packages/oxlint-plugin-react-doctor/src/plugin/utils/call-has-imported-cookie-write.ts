@@ -1,8 +1,19 @@
+import {
+  COOKIE_GLOBAL_OBJECT_NAMES,
+  COOKIE_EXPORT_CAPABILITY_NAMES,
+  COOKIE_NATIVE_PROVIDER_NAMES,
+  UNSUPPORTED_COOKIE_RUNTIME_NODES,
+  COOKIE_ARITHMETIC_OPERATORS,
+  DYNAMIC_PROVIDER_NAMES,
+  DYNAMIC_PROVIDER_KEYS,
+} from "./cookie-write/constants.js";
+import { isNativeProviderReference } from "./cookie-write/is-native-provider-reference.js";
 import { analyzeScopes } from "../semantic/scope-analysis.js";
 import type { ScopeAnalysis } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
 import type { EsTreeNodeOfType } from "./es-tree-node-of-type.js";
 import { findProgramRoot } from "./find-program-root.js";
+import { getStaticPropertyKeyName } from "./get-static-property-key-name.js";
 import { getStaticPropertyName } from "./get-static-property-name.js";
 import { isNodeOfType } from "./is-node-of-type.js";
 import { isTypeScriptTypePosition } from "./is-typescript-type-position.js";
@@ -16,38 +27,44 @@ import { walkAst } from "./walk-ast.js";
 interface CookieProgramFacts {
   readonly scopes: ScopeAnalysis;
   readonly providersClosed: boolean;
+  readonly exportsClosed: boolean;
   readonly writesByFunction: WeakMap<EsTreeNode, boolean>;
 }
 
 const cookieProgramFacts = new WeakMap<EsTreeNode, CookieProgramFacts>();
-const cookieGlobalObjectNames = new Set(["globalThis", "window", "self"]);
-const cookieNativeProviderNames = new Set([
-  "document",
-  "Document",
-  "HTMLDocument",
-  "encodeURIComponent",
-]);
-const unsupportedCookieRuntimeNodes = new Set([
-  "ImportExpression",
-  "TSEnumDeclaration",
-  "TSEnumBody",
-  "TSEnumMember",
-  "TSModuleDeclaration",
-  "TSModuleBlock",
-  "TSImportEqualsDeclaration",
-  "TSExportAssignment",
-  "TSParameterProperty",
-]);
-const cookieArithmeticOperators = new Set(["+", "-", "*", "/", "%", "**"]);
 
 const getCookieProgramFacts = (program: EsTreeNode): CookieProgramFacts => {
   const cached = cookieProgramFacts.get(program);
   if (cached) return cached;
   const scopes = analyzeScopes(program);
   let providersClosed = true;
+  let exportsClosed = true;
   walkAst(program, (node) => {
-    if (!providersClosed) return false;
-    if (unsupportedCookieRuntimeNodes.has(node.type)) {
+    if (
+      !providersClosed ||
+      isNodeOfType(node, "TSInterfaceDeclaration") ||
+      isNodeOfType(node, "TSTypeAliasDeclaration")
+    )
+      return false;
+    if (isNodeOfType(node, "MemberExpression")) {
+      const propertyName = getStaticPropertyName(node);
+      if (propertyName === null || DYNAMIC_PROVIDER_KEYS.has(propertyName)) {
+        providersClosed = false;
+        return false;
+      }
+    }
+    if (isNodeOfType(node, "Property") && isNodeOfType(node.parent, "ObjectPattern")) {
+      const propertyName = getStaticPropertyKeyName(node, { allowComputedString: true });
+      if (propertyName === null || DYNAMIC_PROVIDER_KEYS.has(propertyName)) {
+        providersClosed = false;
+        return false;
+      }
+    }
+    if (isNodeOfType(node, "RestElement") && isNodeOfType(node.parent, "ObjectPattern")) {
+      providersClosed = false;
+      return false;
+    }
+    if (UNSUPPORTED_COOKIE_RUNTIME_NODES.has(node.type)) {
       providersClosed = false;
       return false;
     }
@@ -75,8 +92,13 @@ const getCookieProgramFacts = (program: EsTreeNode): CookieProgramFacts => {
         parent.label === node)
     )
       return;
+    if (COOKIE_EXPORT_CAPABILITY_NAMES.has(node.name)) exportsClosed = false;
+    if (DYNAMIC_PROVIDER_NAMES.has(node.name)) {
+      providersClosed = false;
+      return false;
+    }
     if (!scopes.referenceFor(node)) {
-      if (cookieNativeProviderNames.has(node.name) || cookieGlobalObjectNames.has(node.name))
+      if (COOKIE_NATIVE_PROVIDER_NAMES.has(node.name) || COOKIE_GLOBAL_OBJECT_NAMES.has(node.name))
         providersClosed = false;
       return;
     }
@@ -84,15 +106,15 @@ const getCookieProgramFacts = (program: EsTreeNode): CookieProgramFacts => {
       providersClosed = false;
       return false;
     }
-    if (cookieGlobalObjectNames.has(node.name)) {
+    if (COOKIE_GLOBAL_OBJECT_NAMES.has(node.name)) {
       const propertyName =
         isNodeOfType(parent, "MemberExpression") && parent.object === node
           ? getStaticPropertyName(parent)
           : null;
-      providersClosed = propertyName !== null && !cookieNativeProviderNames.has(propertyName);
+      providersClosed = propertyName !== null && !COOKIE_NATIVE_PROVIDER_NAMES.has(propertyName);
       return;
     }
-    if (!scopes.isGlobalReference(node)) return;
+    if (!isNativeProviderReference(node, scopes)) return;
     if (node.name === "encodeURIComponent") {
       providersClosed = Boolean(
         isNodeOfType(parent, "CallExpression") && parent.callee === node && !parent.optional,
@@ -121,7 +143,12 @@ const getCookieProgramFacts = (program: EsTreeNode): CookieProgramFacts => {
       typeof elementType.value === "string",
     );
   });
-  const facts = { scopes, providersClosed, writesByFunction: new WeakMap<EsTreeNode, boolean>() };
+  const facts = {
+    scopes,
+    providersClosed,
+    exportsClosed,
+    writesByFunction: new WeakMap<EsTreeNode, boolean>(),
+  };
   cookieProgramFacts.set(program, facts);
   return facts;
 };
@@ -148,7 +175,7 @@ const isCookieStringData = (
   }
   if (
     isNodeOfType(candidate, "BinaryExpression") &&
-    cookieArithmeticOperators.has(candidate.operator)
+    COOKIE_ARITHMETIC_OPERATORS.has(candidate.operator)
   ) {
     return (
       isCookieStringData(candidate.left, scopes, parameterSymbolIds) &&
@@ -167,7 +194,7 @@ const isCookieStringData = (
   return Boolean(
     isNodeOfType(callee, "Identifier") &&
     callee.name === "encodeURIComponent" &&
-    scopes.isGlobalReference(callee) &&
+    isNativeProviderReference(callee, scopes) &&
     argument &&
     !isNodeOfType(argument, "SpreadElement") &&
     otherArguments.length === 0 &&
@@ -236,7 +263,7 @@ const functionHasSingleCookieWrite = (
     return Boolean(
       isNodeOfType(receiver, "Identifier") &&
       receiver.name === "document" &&
-      facts.scopes.isGlobalReference(receiver) &&
+      isNativeProviderReference(receiver, facts.scopes) &&
       isCookieStringData(assignment.right, facts.scopes, parameterSymbolIds),
     );
   };
@@ -281,6 +308,7 @@ export const callHasImportedCookieWrite = (
   return (
     callerFacts.providersClosed &&
     foreignFacts.providersClosed &&
+    foreignFacts.exportsClosed &&
     functionHasSingleCookieWrite(resolved.functionNode, foreignFacts)
   );
 };

@@ -288,6 +288,242 @@ const cookieFixtures: ReadonlyArray<ImportedCookieFixture> = [
     },
     diagnostics: [],
   },
+  {
+    name: "function-document-replacement",
+    code: 'import { useState } from "react";\nimport { setCookie } from "./persist";\nexport const Preference = () => {\n  const [count, setCount] = useState(0);\n  return <button onClick={() => setCount(previous => {\n    setCookie("view", "compact");\n    return previous + 1;\n  })}>{count}</button>;\n};\n',
+    files: {
+      "persist.ts":
+        "Function(\"globalThis.document = { cookie: '' }\")();\nexport const setCookie = (name: string, value: string) => {\n  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/`;\n};\n",
+      "tsconfig.json": '{"compilerOptions": {"paths": {"@/*": ["./*"]}, "jsx": "react-jsx"}}\n',
+    },
+    diagnostics: [],
+  },
+  {
+    name: "global-function-document-replacement",
+    code: 'import { useState } from "react";\nimport { setCookie } from "./persist";\nexport const Preference = () => {\n  const [count, setCount] = useState(0);\n  return <button onClick={() => setCount(previous => {\n    setCookie("view", "compact");\n    return previous + 1;\n  })}>{count}</button>;\n};\n',
+    files: {
+      "persist.ts":
+        "globalThis.Function(\"globalThis.document = { cookie: '' }\")();\nexport const setCookie = (name: string, value: string) => {\n  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/`;\n};\n",
+      "tsconfig.json": '{"compilerOptions": {"paths": {"@/*": ["./*"]}, "jsx": "react-jsx"}}\n',
+    },
+    diagnostics: [],
+  },
+  {
+    name: "object-document-replacement",
+    code: 'import { useState } from "react";\nimport { setCookie } from "./persist";\nexport const Preference = () => {\n  const [count, setCount] = useState(0);\n  return <button onClick={() => setCount(previous => {\n    setCookie("view", "compact");\n    return previous + 1;\n  })}>{count}</button>;\n};\n',
+    files: {
+      "persist.ts":
+        'Object.defineProperty(globalThis, "document", {value: {cookie: ""}, configurable: true});\nexport const setCookie = (name: string, value: string) => {\n  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/`;\n};\n',
+      "tsconfig.json": '{"compilerOptions": {"paths": {"@/*": ["./*"]}, "jsx": "react-jsx"}}\n',
+    },
+    diagnostics: [],
+  },
+  {
+    name: "erased-document-interface",
+    code: 'import { useState } from "react";\nimport { setCookie } from "./persist";\nexport const Preference = () => {\n  const [count, setCount] = useState(0);\n  return <button onClick={() => setCount(previous => {\n    setCookie("view", "compact");\n    return previous + 1;\n  })}>{count}</button>;\n};\n',
+    files: {
+      "persist.ts":
+        "interface document {}\nexport const setCookie = (name: string, value: string) => {\n  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/`;\n};\n",
+      "tsconfig.json": '{"compilerOptions": {"paths": {"@/*": ["./*"]}, "jsx": "react-jsx"}}\n',
+    },
+    diagnostics: [
+      {
+        column: 4,
+        line: 6,
+        message:
+          "This side-effecting call runs inside a state updater, which React may invoke more than once. Move it outside the setter after computing the next state.",
+        nodeType: "CallExpression",
+      },
+    ],
+  },
+  {
+    name: "erased-encode-interface",
+    code: 'import { useState } from "react";\nimport { setCookie } from "./persist";\nexport const Preference = () => {\n  const [count, setCount] = useState(0);\n  return <button onClick={() => setCount(previous => {\n    setCookie("view", "compact");\n    return previous + 1;\n  })}>{count}</button>;\n};\n',
+    files: {
+      "persist.ts":
+        "interface encodeURIComponent {}\nexport const setCookie = (name: string, value: string) => {\n  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/`;\n};\n",
+      "tsconfig.json": '{"compilerOptions": {"paths": {"@/*": ["./*"]}, "jsx": "react-jsx"}}\n',
+    },
+    diagnostics: [
+      {
+        column: 4,
+        line: 6,
+        message:
+          "This side-effecting call runs inside a state updater, which React may invoke more than once. Move it outside the setter after computing the next state.",
+        nodeType: "CallExpression",
+      },
+    ],
+  },
+  {
+    name: "erased-nested-provider-pattern",
+    code: 'import { useState } from "react";\nimport { setCookie } from "./persist";\nexport const Preference = () => {\n  const [count, setCount] = useState(0);\n  return <button onClick={() => setCount(previous => {\n    setCookie("view", "compact");\n    return previous + 1;\n  })}>{count}</button>;\n};\n',
+    files: {
+      "persist.ts":
+        "type Note = ({nested: {Document}}: {nested:{Document:string}}) => void;\nexport const setCookie = (name: string, value: string) => {\n  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/`;\n};\n",
+      "tsconfig.json": '{"compilerOptions": {"paths": {"@/*": ["./*"]}, "jsx": "react-jsx"}}\n',
+    },
+    diagnostics: [
+      {
+        column: 4,
+        line: 6,
+        message:
+          "This side-effecting call runs inside a state updater, which React may invoke more than once. Move it outside the setter after computing the next state.",
+        nodeType: "CallExpression",
+      },
+    ],
+  },
+  {
+    name: "runtime-parameter-default",
+    code: 'import { useState } from "react";\nimport { setCookie } from "./persist";\nexport const Preference = () => {\n  const [count, setCount] = useState(0);\n  return <button onClick={() => setCount(previous => {\n    setCookie("view", "compact");\n    return previous + 1;\n  })}>{count}</button>;\n};\n',
+    files: {
+      "persist.ts":
+        "class Configure {constructor(public value = Function(\"globalThis.document = { cookie: '' }\")()) {}}\nnew Configure();\nexport const setCookie = (name: string, value: string) => {\n  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/`;\n};\n",
+      "tsconfig.json": '{"compilerOptions": {"paths": {"@/*": ["./*"]}, "jsx": "react-jsx"}}\n',
+    },
+    diagnostics: [],
+  },
+  {
+    name: "erased-Function-still-rejects-runtime-provider-replacement",
+    code: 'import { useState } from "react";\nimport { setCookie } from "./persist";\nexport const Preference = () => {\n  const [count, setCount] = useState(0);\n  return <button onClick={() => setCount(previous => {\n    setCookie("view", "compact");\n    return previous + 1;\n  })}>{count}</button>;\n};\n',
+    files: {
+      "persist.ts":
+        "interface Function {}\nFunction(\"globalThis.document = { cookie: '' }\")();\nexport const setCookie = (name: string, value: string) => {\n  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/`;\n};\n",
+      "tsconfig.json": '{"compilerOptions": {"paths": {"@/*": ["./*"]}, "jsx": "react-jsx"}}\n',
+    },
+    diagnostics: [],
+  },
+  {
+    name: "ambient-document-function",
+    code: 'import { useState } from "react";\nimport { setCookie } from "./persist";\nexport const Preference = () => {\n  const [count, setCount] = useState(0);\n  return <button onClick={() => setCount(previous => {\n    setCookie("view", "compact");\n    return previous + 1;\n  })}>{count}</button>;\n};\n',
+    files: {
+      "persist.ts":
+        "declare function document(): void;\nexport const setCookie = (name: string, value: string) => {\n  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/`;\n};\n",
+      "tsconfig.json": '{"compilerOptions": {"paths": {"@/*": ["./*"]}, "jsx": "react-jsx"}}\n',
+    },
+    diagnostics: [],
+  },
+  {
+    name: "ambient-document-const",
+    code: 'import { useState } from "react";\nimport { setCookie } from "./persist";\nexport const Preference = () => {\n  const [count, setCount] = useState(0);\n  return <button onClick={() => setCount(previous => {\n    setCookie("view", "compact");\n    return previous + 1;\n  })}>{count}</button>;\n};\n',
+    files: {
+      "persist.ts":
+        "declare const document: {cookie: string};\nexport const setCookie = (name: string, value: string) => {\n  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/`;\n};\n",
+      "tsconfig.json": '{"compilerOptions": {"paths": {"@/*": ["./*"]}, "jsx": "react-jsx"}}\n',
+    },
+    diagnostics: [],
+  },
+  {
+    name: "erased-interface-ambient-companion",
+    code: 'import { useState } from "react";\nimport { setCookie } from "./persist";\nexport const Preference = () => {\n  const [count, setCount] = useState(0);\n  return <button onClick={() => setCount(previous => {\n    setCookie("view", "compact");\n    return previous + 1;\n  })}>{count}</button>;\n};\n',
+    files: {
+      "persist.ts":
+        "interface document {}\ndeclare const document: {cookie: string};\nexport const setCookie = (name: string, value: string) => {\n  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/`;\n};\n",
+      "tsconfig.json": '{"compilerOptions": {"paths": {"@/*": ["./*"]}, "jsx": "react-jsx"}}\n',
+    },
+    diagnostics: [],
+  },
+  {
+    name: "ambient-encode-function",
+    code: 'import { useState } from "react";\nimport { setCookie } from "./persist";\nexport const Preference = () => {\n  const [count, setCount] = useState(0);\n  return <button onClick={() => setCount(previous => {\n    setCookie("view", "compact");\n    return previous + 1;\n  })}>{count}</button>;\n};\n',
+    files: {
+      "persist.ts":
+        "declare function encodeURIComponent(value: string): string;\nexport const setCookie = (name: string, value: string) => {\n  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/`;\n};\n",
+      "tsconfig.json": '{"compilerOptions": {"paths": {"@/*": ["./*"]}, "jsx": "react-jsx"}}\n',
+    },
+    diagnostics: [],
+  },
+  {
+    name: "default-exported-ambient-document-provider",
+    code: 'import { useState } from "react";\nimport { setCookie } from "./persist";\nexport const Preference = () => {\n  const [count, setCount] = useState(0);\n  return <button onClick={() => setCount(previous => {\n    setCookie("view", "compact");\n    return previous + 1;\n  })}>{count}</button>;\n};\n',
+    files: {
+      "persist.ts":
+        "export default function document(): void;\nexport const setCookie = (name: string, value: string) => {\n  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/`;\n};\n",
+      "tsconfig.json": '{"compilerOptions": {"paths": {"@/*": ["./*"]}, "jsx": "react-jsx"}}\n',
+    },
+    diagnostics: [],
+  },
+  {
+    name: "fresh-document-getter-function",
+    code: 'import { useState } from "react";\nimport { setCookie } from "./persist";\nexport const Preference = () => {\n  const [count, setCount] = useState(0);\n  return <button onClick={() => setCount(previous => {\n    setCookie("view", "compact");\n    return previous + 1;\n  })}>{count}</button>;\n};\n',
+    files: {
+      "persist.ts":
+        'Function("Object.defineProperty(globalThis, \\"document\\", { configurable: true, get: () => ({ cookie: \\"\\" }) });")();\nexport const setCookie = (name: string, value: string) => {\n  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/`;\n};\n',
+      "tsconfig.json": '{"compilerOptions": {"paths": {"@/*": ["./*"]}, "jsx": "react-jsx"}}\n',
+    },
+    diagnostics: [],
+  },
+  {
+    name: "fresh-document-getter-global-function",
+    code: 'import { useState } from "react";\nimport { setCookie } from "./persist";\nexport const Preference = () => {\n  const [count, setCount] = useState(0);\n  return <button onClick={() => setCount(previous => {\n    setCookie("view", "compact");\n    return previous + 1;\n  })}>{count}</button>;\n};\n',
+    files: {
+      "persist.ts":
+        'globalThis.Function("Object.defineProperty(globalThis, \\"document\\", { configurable: true, get: () => ({ cookie: \\"\\" }) });")();\nexport const setCookie = (name: string, value: string) => {\n  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/`;\n};\n',
+      "tsconfig.json": '{"compilerOptions": {"paths": {"@/*": ["./*"]}, "jsx": "react-jsx"}}\n',
+    },
+    diagnostics: [],
+  },
+  {
+    name: "unindexed-catch-default-fresh-getter",
+    code: 'import { useState } from "react";\nimport { setCookie } from "./persist";\nexport const Preference = () => {\n  const [count, setCount] = useState(0);\n  return <button onClick={() => setCount(previous => {\n    setCookie("view", "compact");\n    return previous + 1;\n  })}>{count}</button>;\n};\n',
+    files: {
+      "persist.ts":
+        'try { throw {}; } catch ({ _ignored = Function("Object.defineProperty(globalThis, \\"document\\", { configurable: true, get: () => ({ cookie: \\"\\" }) });")() }) {}\nexport const setCookie = (name: string, value: string) => {\n  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/`;\n};\n',
+      "tsconfig.json": '{"compilerOptions": {"paths": {"@/*": ["./*"]}, "jsx": "react-jsx"}}\n',
+    },
+    diagnostics: [],
+  },
+  {
+    name: "mixed-commonjs-module-replaces-export",
+    code: 'import { useState } from "react";\nimport { setCookie } from "./persist.cts";\nexport const Preference = () => {\n  const [count, setCount] = useState(0);\n  return <button onClick={() => setCount(previous => {\n    setCookie("view", "compact");\n    return previous + 1;\n  })}>{count}</button>;\n};\n',
+    files: {
+      "persist.cts":
+        "export const setCookie = (name: string, value: string) => {\n  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/`;\n};\nmodule.exports = { setCookie: () => undefined };\n",
+    },
+    diagnostics: [],
+  },
+  {
+    name: "mixed-commonjs-exports-replaces-export",
+    code: 'import { useState } from "react";\nimport { setCookie } from "./persist.cts";\nexport const Preference = () => {\n  const [count, setCount] = useState(0);\n  return <button onClick={() => setCount(previous => {\n    setCookie("view", "compact");\n    return previous + 1;\n  })}>{count}</button>;\n};\n',
+    files: {
+      "persist.cts":
+        "export const setCookie = (name: string, value: string) => {\n  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/`;\n};\nexports.setCookie = () => undefined;\n",
+    },
+    diagnostics: [],
+  },
+  {
+    name: "commonjs-capability-type-names-are-erased",
+    code: 'import { useState } from "react";\nimport { setCookie } from "./persist";\nexport const Preference = () => {\n  const [count, setCount] = useState(0);\n  return <button onClick={() => setCount(previous => {\n    setCookie("view", "compact");\n    return previous + 1;\n  })}>{count}</button>;\n};\n',
+    files: {
+      "persist.ts":
+        "interface module { exports: string }\ntype exports = { module: string };\nexport const setCookie = (name: string, value: string) => {\n  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/`;\n};\n",
+    },
+    diagnostics: [
+      {
+        column: 4,
+        line: 6,
+        message:
+          "This side-effecting call runs inside a state updater, which React may invoke more than once. Move it outside the setter after computing the next state.",
+        nodeType: "CallExpression",
+      },
+    ],
+  },
+  {
+    name: "commonjs-capability-static-keys-are-data",
+    code: 'import { useState } from "react";\nimport { setCookie } from "./persist";\nexport const Preference = () => {\n  const [count, setCount] = useState(0);\n  return <button onClick={() => setCount(previous => {\n    setCookie("view", "compact");\n    return previous + 1;\n  })}>{count}</button>;\n};\n',
+    files: {
+      "persist.ts":
+        'const metadata = { module: "label", exports: "label" };\nvoid metadata;\nexport const setCookie = (name: string, value: string) => {\n  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/`;\n};\n',
+    },
+    diagnostics: [
+      {
+        column: 4,
+        line: 6,
+        message:
+          "This side-effecting call runs inside a state updater, which React may invoke more than once. Move it outside the setter after computing the next state.",
+        nodeType: "CallExpression",
+      },
+    ],
+  },
 ];
 
 const runCookieFixture = (fixture: ImportedCookieFixture) => {
