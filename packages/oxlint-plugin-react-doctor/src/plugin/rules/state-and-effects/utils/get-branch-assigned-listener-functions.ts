@@ -1,8 +1,14 @@
-import type { SymbolDescriptor } from "../../../semantic/scope-analysis.js";
+import { hasOnlyErasedTypeNameBindings } from "../../../utils/has-only-erased-type-name-bindings.js";
+import { hasVisibleAmbientFunctionDeclaration } from "../../../utils/has-visible-ambient-function-declaration.js";
+import { isProvenGlobalNamespaceReference } from "../../../utils/is-proven-global-namespace-reference.js";
+import { isWithinAssignmentTarget } from "../../../utils/is-within-assignment-target.js";
+import { isPropertyNamePosition } from "../../../utils/is-property-name-position.js";
+import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import { collectReturnedCleanupFunctions } from "../../../utils/collect-returned-cleanup-functions.js";
 import { collectSynchronouslyInvokedLocalFunctions } from "../../../utils/collect-effect-invoked-functions.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
+import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
 import { findProgramRoot } from "../../../utils/find-program-root.js";
 import { isFunctionLike } from "../../../utils/is-function-like.js";
 import { isEventHandlerAttribute } from "../../../utils/is-event-handler-attribute.js";
@@ -15,7 +21,9 @@ import { resolveExpressionKey } from "../../../utils/resolve-expression-key.js";
 import { isProvenBrowserApiReceiver } from "../../../utils/is-proven-browser-api-receiver.js";
 import { resolveReactUseStatePair } from "../../../utils/resolve-react-use-state-pair.js";
 import type { RuleContext } from "../../../utils/rule-context.js";
-import { someAst } from "../../../utils/some-ast.js";
+import { walkAst } from "../../../utils/walk-ast.js";
+import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
+import { getStaticPropertyKeyName } from "../../../utils/get-static-property-key-name.js";
 import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
 
 interface BranchListenerAssignment {
@@ -35,62 +43,207 @@ const nativeConstructorNames = new Set([
   "Image",
   "Option",
 ]);
-const reflectiveMutationNames = new Set([
+const ordinaryObjectPropertyNames = new Set([
+  "create",
+  "entries",
+  "freeze",
+  "fromEntries",
+  "hasOwn",
+  "is",
+  "isExtensible",
+  "isFrozen",
+  "isSealed",
+  "keys",
+  "length",
+  "name",
+  "preventExtensions",
+  "seal",
+  "values",
+]);
+const reflectiveProviderCapabilityNames = new Set([
   "assign",
   "defineProperty",
   "defineProperties",
   "setPrototypeOf",
   "set",
   "deleteProperty",
+  "get",
+  "getPrototypeOf",
+  "getOwnPropertyDescriptor",
+  "getOwnPropertyDescriptors",
+  "construct",
+  "apply",
 ]);
 
-const dynamicScopeByProgram = new WeakMap<EsTreeNode, boolean>();
+const dynamicScopeByAnalysis = new WeakMap<ScopeAnalysis, boolean>();
 
 const isProviderWriteTarget = (node: EsTreeNode): boolean => {
-  if (isNodeOfType(node, "Identifier"))
+  const target = stripParenExpression(node);
+  if (isNodeOfType(target, "Identifier"))
     return (
-      nativeConstructorNames.has(node.name) ||
-      node.name === "window" ||
-      node.name === "document" ||
-      node.name === "self" ||
-      node.name === "globalThis"
+      nativeConstructorNames.has(target.name) ||
+      target.name === "window" ||
+      target.name === "document" ||
+      target.name === "self" ||
+      target.name === "globalThis"
     );
-  if (!isNodeOfType(node, "MemberExpression")) return false;
-  const propertyName = getStaticPropertyName(node);
+  if (!isNodeOfType(target, "MemberExpression")) return false;
+  const propertyName = getStaticPropertyName(target);
   return (
-    (node.computed && propertyName === null) ||
+    (target.computed && propertyName === null) ||
     nativeConstructorNames.has(propertyName ?? "") ||
+    propertyName === "window" ||
+    propertyName === "document" ||
+    propertyName === "self" ||
+    propertyName === "globalThis" ||
     propertyName === "addEventListener" ||
     propertyName === "removeEventListener"
   );
 };
 
-const hasDynamicScope = (program: EsTreeNode): boolean => {
-  const cached = dynamicScopeByProgram.get(program);
+const hasDynamicScope = (program: EsTreeNode, context: RuleContext): boolean => {
+  const cached = dynamicScopeByAnalysis.get(context.scopes);
   if (cached !== undefined) return cached;
-  const result = someAst(program, (node) => {
-    const callee = isNodeOfType(node, "CallExpression") ? stripParenExpression(node.callee) : null;
-    return (
-      node.type === "WithStatement" ||
+  const objectProviderScopes: ScopeAnalysis = {
+    ...context.scopes,
+    isGlobalReference: (identifier) => {
+      if (
+        !isNodeOfType(identifier, "Identifier") ||
+        (identifier.name !== "Object" &&
+          identifier.name !== "window" &&
+          identifier.name !== "self" &&
+          identifier.name !== "global" &&
+          identifier.name !== "globalThis")
+      )
+        return context.scopes.isGlobalReference(identifier);
+      if (
+        hasVisibleAmbientFunctionDeclaration(context.scopes.scopeFor(identifier), identifier.name)
+      )
+        return false;
+      if (context.scopes.isGlobalReference(identifier)) return true;
+      const symbol = context.scopes.symbolFor(identifier);
+      return Boolean(symbol && hasOnlyErasedTypeNameBindings(symbol));
+    },
+  };
+  let result = false;
+  walkAst(program, (node) => {
+    if (result) return false;
+    if (
       node.type === "TSParameterProperty" ||
       node.type === "TSEnumDeclaration" ||
       node.type === "TSModuleDeclaration" ||
       node.type === "TSImportEqualsDeclaration" ||
-      node.type === "TSExportAssignment" ||
+      node.type === "TSExportAssignment"
+    ) {
+      result = true;
+      return false;
+    }
+    if (
+      node.type === "TSTypeAliasDeclaration" ||
+      node.type === "TSInterfaceDeclaration" ||
+      (node.type === "ImportDeclaration" && node.importKind === "type") ||
+      (node.type === "ImportSpecifier" && node.importKind === "type") ||
+      (node.type === "ExportNamedDeclaration" && node.exportKind === "type") ||
+      (node.type === "ExportSpecifier" && node.exportKind === "type") ||
+      isTypeScriptTypePosition(node)
+    )
+      return false;
+    const callee = isNodeOfType(node, "CallExpression") ? stripParenExpression(node.callee) : null;
+    const destructuredProviderName =
+      node.type === "Property" && node.parent?.type === "ObjectPattern"
+        ? getStaticPropertyKeyName(node, { allowComputedString: true })
+        : null;
+    const parent = node.parent;
+    const expressionRoot = findTransparentExpressionRoot(node);
+    const expressionParent = expressionRoot.parent;
+    const objectReadProperty =
+      isNodeOfType(expressionParent, "MemberExpression") &&
+      expressionParent.object === expressionRoot
+        ? getStaticPropertyName(expressionParent)
+        : null;
+    const isOrdinaryObjectRead =
+      ((isNodeOfType(node, "Identifier") && node.name === "Object") ||
+        (isNodeOfType(node, "MemberExpression") && getStaticPropertyName(node) === "Object")) &&
+      !isWithinAssignmentTarget(node) &&
+      isProvenGlobalNamespaceReference(node, "Object", objectProviderScopes) &&
+      ((objectReadProperty !== null && ordinaryObjectPropertyNames.has(objectReadProperty)) ||
+        (isNodeOfType(expressionParent, "UnaryExpression") &&
+          expressionParent.operator === "typeof"));
+    const isRuntimeCapabilityIdentifier =
+      isNodeOfType(node, "Identifier") &&
+      (node.name === "Function" ||
+        node.name === "eval" ||
+        node.name === "Reflect" ||
+        (node.name === "Object" && !isOrdinaryObjectRead)) &&
+      context.scopes.symbolFor(node)?.bindingIdentifier !== node &&
+      !(parent?.type === "AssignmentPattern" && parent.left === node) &&
+      parent?.type !== "RestElement" &&
+      parent?.type !== "ArrayPattern" &&
+      !(
+        parent?.type === "Property" &&
+        parent.parent?.type === "ObjectPattern" &&
+        parent.value === node
+      ) &&
+      !(parent?.type === "VariableDeclarator" && parent.id === node) &&
+      !(parent?.type === "CatchClause" && parent.param === node) &&
+      !(
+        parent &&
+        isFunctionLike(parent) &&
+        parent.params.some((parameter) => parameter === node)
+      ) &&
+      parent?.type !== "ImportSpecifier" &&
+      parent?.type !== "ImportDefaultSpecifier" &&
+      parent?.type !== "ImportNamespaceSpecifier" &&
+      !(parent?.type === "ExportSpecifier" && parent.exported === node && parent.local !== node) &&
+      !(parent?.type === "LabeledStatement" && parent.label === node) &&
+      !(
+        (parent?.type === "BreakStatement" || parent?.type === "ContinueStatement") &&
+        parent.label === node
+      ) &&
+      !(
+        (parent?.type === "MethodDefinition" ||
+          parent?.type === "PropertyDefinition" ||
+          parent?.type === "AccessorProperty") &&
+        parent.key === node &&
+        !parent.computed
+      ) &&
+      (!isPropertyNamePosition(node) ||
+        (parent?.type === "Property" &&
+          parent.parent?.type === "ObjectExpression" &&
+          parent.value === node));
+    result =
+      node.type === "WithStatement" ||
+      isRuntimeCapabilityIdentifier ||
+      (isNodeOfType(node, "MemberExpression") &&
+        (getStaticPropertyName(node) === "Reflect" ||
+          (getStaticPropertyName(node) === "Object" && !isOrdinaryObjectRead))) ||
+      (isNodeOfType(node, "MemberExpression") &&
+        (getStaticPropertyName(node) === "Function" ||
+          getStaticPropertyName(node) === "eval" ||
+          getStaticPropertyName(node) === "constructor")) ||
+      (node.type === "TSDeclareFunction" &&
+        node.id &&
+        (nativeConstructorNames.has(node.id.name) ||
+          node.id.name === "window" ||
+          node.id.name === "document" ||
+          node.id.name === "self" ||
+          node.id.name === "globalThis")) ||
+      (node.type === "Property" &&
+        node.parent?.type === "ObjectPattern" &&
+        ((node.computed && destructuredProviderName === null) ||
+          reflectiveProviderCapabilityNames.has(destructuredProviderName ?? "") ||
+          destructuredProviderName === "constructor" ||
+          destructuredProviderName === "Function" ||
+          destructuredProviderName === "eval")) ||
       (isNodeOfType(callee, "Identifier") && callee.name === "eval") ||
       (isNodeOfType(node, "AssignmentExpression") && isProviderWriteTarget(node.left)) ||
       (isNodeOfType(node, "UpdateExpression") && isProviderWriteTarget(node.argument)) ||
       (isNodeOfType(node, "UnaryExpression") &&
         node.operator === "delete" &&
-        isProviderWriteTarget(node.argument)) ||
-      (isNodeOfType(node, "CallExpression") &&
-        isNodeOfType(node.callee, "MemberExpression") &&
-        isNodeOfType(node.callee.object, "Identifier") &&
-        (node.callee.object.name === "Object" || node.callee.object.name === "Reflect") &&
-        reflectiveMutationNames.has(getStaticPropertyName(node.callee) ?? ""))
-    );
+        isProviderWriteTarget(node.argument));
+    return result ? false : undefined;
   });
-  dynamicScopeByProgram.set(program, result);
+  dynamicScopeByAnalysis.set(context.scopes, result);
   return result;
 };
 
@@ -102,15 +255,12 @@ const getBranchAssignment = (
   if (!isNodeOfType(branch, "BlockStatement")) return null;
   const [statement, ...remainingStatements] = branch.body;
   if (remainingStatements.length || !isNodeOfType(statement, "ExpressionStatement")) return null;
-  const assignment = statement.expression;
-  if (
-    !isNodeOfType(assignment, "AssignmentExpression") ||
-    assignment.operator !== "=" ||
-    !isNodeOfType(assignment.left, "Identifier") ||
-    context.scopes.symbolFor(assignment.left)?.id !== symbol.id
-  )
+  const assignment = stripParenExpression(statement.expression);
+  if (!isNodeOfType(assignment, "AssignmentExpression") || assignment.operator !== "=") return null;
+  const target = stripParenExpression(assignment.left);
+  if (!isNodeOfType(target, "Identifier") || context.scopes.symbolFor(target)?.id !== symbol.id)
     return null;
-  const callback = assignment.right;
+  const callback = stripParenExpression(assignment.right);
   if (
     (!isNodeOfType(callback, "ArrowFunctionExpression") &&
       !isNodeOfType(callback, "FunctionExpression")) ||
@@ -189,44 +339,47 @@ const isEventOnlyFunction = (
 };
 
 const isNativeTargetValue = (value: EsTreeNode, context: RuleContext): boolean => {
-  let initializer = value;
+  let initializer = stripParenExpression(value);
   if (isNodeOfType(initializer, "Identifier")) {
     const symbol = resolveConstIdentifierAlias(initializer, context.scopes);
     if (
       symbol?.kind !== "const" ||
       !symbol.initializer ||
-      symbol.references.some((reference) => reference.flag !== "read")
+      symbol.references.some(
+        (reference) => reference.flag !== "read" || isWithinAssignmentTarget(reference.identifier),
+      )
     )
       return false;
-    initializer = symbol.initializer;
+    initializer = stripParenExpression(symbol.initializer);
   }
   if (!isNodeOfType(initializer, "NewExpression")) return false;
+  const callee = stripParenExpression(initializer.callee);
   return (
     isProvenBrowserApiReceiver(initializer, "dom-event-target", context.scopes) ||
-    (isNodeOfType(initializer.callee, "Identifier") &&
-      initializer.callee.name === "Audio" &&
-      context.scopes.isGlobalReference(initializer.callee))
+    (isNodeOfType(callee, "Identifier") &&
+      callee.name === "Audio" &&
+      context.scopes.isGlobalReference(callee))
   );
 };
 
 const hasNativeReceiverValue = (receiver: EsTreeNode, context: RuleContext): boolean => {
   if (!isNodeOfType(receiver, "Identifier")) return false;
+  if (
+    (receiver.name === "window" ||
+      receiver.name === "document" ||
+      receiver.name === "self" ||
+      receiver.name === "globalThis") &&
+    context.scopes.isGlobalReference(receiver)
+  )
+    return true;
   const symbol = resolveConstIdentifierAlias(receiver, context.scopes, true);
-  if (!symbol)
-    return (
-      (receiver.name === "window" ||
-        receiver.name === "document" ||
-        receiver.name === "self" ||
-        receiver.name === "globalThis") &&
-      context.scopes.isGlobalReference(receiver)
-    );
-  if (isDirectParameter(symbol)) {
-    return symbol.references.every((reference) => reference.flag === "read");
-  }
+  if (!symbol) return false;
   if (
     symbol.kind !== "const" ||
     !symbol.initializer ||
-    symbol.references.some((reference) => reference.flag !== "read")
+    symbol.references.some(
+      (reference) => reference.flag !== "read" || isWithinAssignmentTarget(reference.identifier),
+    )
   )
     return false;
   if (isNativeTargetValue(receiver, context)) return true;
@@ -238,7 +391,8 @@ const hasNativeReceiverValue = (receiver: EsTreeNode, context: RuleContext): boo
   )
     return false;
   const [state, setter] = declarator.id.elements;
-  const [seed, ...additionalArguments] = declarator.init.arguments;
+  const [seedArgument, ...additionalArguments] = declarator.init.arguments;
+  const seed = seedArgument ? stripParenExpression(seedArgument) : null;
   if (
     state !== symbol.bindingIdentifier ||
     !isNodeOfType(setter, "Identifier") ||
@@ -254,16 +408,17 @@ const hasNativeReceiverValue = (receiver: EsTreeNode, context: RuleContext): boo
   let hasNativeValue = isNativeTargetValue(seed, context);
   if (!hasNativeValue && !(isNodeOfType(seed, "Literal") && seed.value === null)) return false;
   for (const reference of pair.setterSymbol.references) {
-    const call = reference.identifier.parent;
+    const call = findTransparentExpressionRoot(reference.identifier).parent;
     const owner = context.cfg.enclosingFunction(reference.identifier);
     if (
       !isNodeOfType(call, "CallExpression") ||
-      call.callee !== reference.identifier ||
+      stripParenExpression(call.callee) !== reference.identifier ||
       !owner ||
       renderFunctions.has(owner)
     )
       return false;
-    const [value, ...additionalValues] = call.arguments;
+    const [valueArgument, ...additionalValues] = call.arguments;
+    const value = valueArgument ? stripParenExpression(valueArgument) : null;
     if (!value || isNodeOfType(value, "SpreadElement") || additionalValues.length) return false;
     if (isNativeTargetValue(value, context)) hasNativeValue = true;
     else if (!isNodeOfType(value, "Literal") || value.value !== null) return false;
@@ -275,9 +430,16 @@ const getPredicateBranches = (
   predicate: EsTreeNode,
   context: RuleContext,
 ): BranchListenerPredicate | null => {
-  if (!isNodeOfType(predicate, "Identifier")) return null;
-  const symbol = context.scopes.symbolFor(predicate);
-  if (!symbol || symbol.references.some((reference) => reference.flag !== "read")) return null;
+  const reference = stripParenExpression(predicate);
+  if (!isNodeOfType(reference, "Identifier")) return null;
+  const symbol = context.scopes.symbolFor(reference);
+  if (
+    !symbol ||
+    symbol.references.some(
+      (reference) => reference.flag !== "read" || isWithinAssignmentTarget(reference.identifier),
+    )
+  )
+    return null;
   if (isDirectParameter(symbol)) return { consequent: true, alternate: true };
   const declarator = symbol.declarationNode;
   if (
@@ -288,7 +450,8 @@ const getPredicateBranches = (
   )
     return null;
   const [state, setter] = declarator.id.elements;
-  const [seed, ...additionalArguments] = declarator.init.arguments;
+  const [seedArgument, ...additionalArguments] = declarator.init.arguments;
+  const seed = seedArgument ? stripParenExpression(seedArgument) : null;
   if (
     state !== symbol.bindingIdentifier ||
     !isNodeOfType(setter, "Identifier") ||
@@ -303,11 +466,11 @@ const getPredicateBranches = (
   const renderFunctions = collectSynchronouslyInvokedLocalFunctions(component, context.scopes);
   if (
     pair.setterSymbol.references.some((reference) => {
-      const call = reference.identifier.parent;
+      const call = findTransparentExpressionRoot(reference.identifier).parent;
       const owner = context.cfg.enclosingFunction(reference.identifier);
       return (
         !isNodeOfType(call, "CallExpression") ||
-        call.callee !== reference.identifier ||
+        stripParenExpression(call.callee) !== reference.identifier ||
         !owner ||
         renderFunctions.has(owner) ||
         !isEventOnlyFunction(owner, component, context)
@@ -324,34 +487,40 @@ const isMatchingCleanupReference = (
   cleanupFunctions: ReadonlySet<EsTreeNode>,
   context: RuleContext,
 ): boolean => {
-  const call = identifier.parent;
+  const call = findTransparentExpressionRoot(identifier).parent;
+  if (!isNodeOfType(call, "CallExpression") || call.optional) return false;
+  const callee = stripParenExpression(call.callee);
+  const registrationCallee = stripParenExpression(registration.callee);
   if (
-    !isNodeOfType(call, "CallExpression") ||
-    call.optional ||
-    !isNodeOfType(call.callee, "MemberExpression") ||
-    call.callee.computed ||
-    call.callee.optional ||
-    !isNodeOfType(call.callee.property, "Identifier") ||
-    call.callee.property.name !== "removeEventListener" ||
-    !isNodeOfType(call.callee.object, "Identifier") ||
-    !isNodeOfType(registration.callee, "MemberExpression") ||
-    !isNodeOfType(registration.callee.object, "Identifier")
+    !isNodeOfType(callee, "MemberExpression") ||
+    callee.computed ||
+    callee.optional ||
+    !isNodeOfType(callee.property, "Identifier") ||
+    callee.property.name !== "removeEventListener" ||
+    !isNodeOfType(stripParenExpression(callee.object), "Identifier") ||
+    !isNodeOfType(registrationCallee, "MemberExpression") ||
+    !isNodeOfType(stripParenExpression(registrationCallee.object), "Identifier")
   )
     return false;
-  const [event, callback, ...otherArguments] = call.arguments;
-  const [registeredEvent] = registration.arguments;
+  const [eventArgument, callback, ...otherArguments] = call.arguments;
+  const [registeredEventArgument] = registration.arguments;
+  const event = eventArgument ? stripParenExpression(eventArgument) : null;
+  const registeredEvent = registeredEventArgument
+    ? stripParenExpression(registeredEventArgument)
+    : null;
   const owner = context.cfg.enclosingFunction(call);
   return Boolean(
     !otherArguments.length &&
-    callback === identifier &&
+    callback &&
+    stripParenExpression(callback) === identifier &&
     isNodeOfType(event, "Literal") &&
     isNodeOfType(registeredEvent, "Literal") &&
     event.value === registeredEvent.value &&
     owner &&
     cleanupFunctions.has(owner) &&
-    resolveExpressionKey(call.callee.object, context) !== null &&
-    resolveExpressionKey(call.callee.object, context) ===
-      resolveExpressionKey(registration.callee.object, context),
+    resolveExpressionKey(callee.object, context) !== null &&
+    resolveExpressionKey(callee.object, context) ===
+      resolveExpressionKey(registrationCallee.object, context),
   );
 };
 
@@ -359,8 +528,13 @@ export const getBranchAssignedListenerFunctions = (
   registration: EsTreeNodeOfType<"CallExpression">,
   context: RuleContext,
 ): EsTreeNode[] => {
-  const [event, listener, ...otherArguments] = registration.arguments;
-  const callee = registration.callee;
+  const [eventArgument, listenerArgument, ...otherArguments] = registration.arguments;
+  const event = eventArgument ? stripParenExpression(eventArgument) : null;
+  const listener = listenerArgument ? stripParenExpression(listenerArgument) : null;
+  const callee = stripParenExpression(registration.callee);
+  const receiver = isNodeOfType(callee, "MemberExpression")
+    ? stripParenExpression(callee.object)
+    : null;
   if (
     registration.optional ||
     otherArguments.length ||
@@ -372,19 +546,45 @@ export const getBranchAssignedListenerFunctions = (
     callee.optional ||
     !isNodeOfType(callee.property, "Identifier") ||
     callee.property.name !== "addEventListener" ||
-    !isNodeOfType(callee.object, "Identifier")
+    !isNodeOfType(receiver, "Identifier")
   )
     return [];
-  if (!hasNativeReceiverValue(callee.object, context)) return [];
+  const nativeProviderContext: RuleContext = {
+    ...context,
+    get cfg() {
+      return context.cfg;
+    },
+    scopes: {
+      ...context.scopes,
+      isGlobalReference: (identifier) => {
+        const providerName = identifier.type === "Identifier" ? identifier.name : null;
+        const isNativeProviderName =
+          providerName !== null &&
+          (nativeConstructorNames.has(providerName) ||
+            providerName === "window" ||
+            providerName === "document" ||
+            providerName === "self" ||
+            providerName === "globalThis");
+        if (!isNativeProviderName) return context.scopes.isGlobalReference(identifier);
+        if (hasVisibleAmbientFunctionDeclaration(context.scopes.scopeFor(identifier), providerName))
+          return false;
+        if (context.scopes.isGlobalReference(identifier)) return true;
+        const symbol = context.scopes.symbolFor(identifier);
+        return Boolean(symbol && hasOnlyErasedTypeNameBindings(symbol));
+      },
+    },
+  };
+  if (!hasNativeReceiverValue(receiver, nativeProviderContext)) return [];
   const program = findProgramRoot(registration);
-  if (!program || hasDynamicScope(program)) return [];
+  if (!program || hasDynamicScope(program, context)) return [];
   const effect = context.cfg.enclosingFunction(registration);
-  const effectCall = effect?.parent;
+  const effectCall = effect ? findTransparentExpressionRoot(effect).parent : null;
   if (
     !effect ||
     !isFunctionLike(effect) ||
     !isNodeOfType(effectCall, "CallExpression") ||
-    effectCall.arguments[0] !== effect ||
+    !effectCall.arguments[0] ||
+    stripParenExpression(effectCall.arguments[0]) !== effect ||
     !isReactApiCall(effectCall, "useEffect", context.scopes, {
       allowGlobalReactNamespace: true,
       allowUnboundBareCalls: true,
@@ -403,11 +603,14 @@ export const getBranchAssignedListenerFunctions = (
       ancestor.type === "SwitchStatement"
     )
       return [];
-    if (isNodeOfType(ancestor, "IfStatement") && !isNodeOfType(ancestor.test, "Identifier"))
+    if (
+      isNodeOfType(ancestor, "IfStatement") &&
+      !isNodeOfType(stripParenExpression(ancestor.test), "Identifier")
+    )
       return [];
     ancestor = ancestor.parent;
   }
-  const statement = registration.parent;
+  const statement = findTransparentExpressionRoot(registration).parent;
   const block = statement?.parent;
   if (!isNodeOfType(statement, "ExpressionStatement") || !isNodeOfType(block, "BlockStatement"))
     return [];
@@ -415,6 +618,7 @@ export const getBranchAssignedListenerFunctions = (
   let conditional: EsTreeNode | null = null;
   for (const sibling of block.body) {
     if (sibling === statement) break;
+    if (sibling.type === "EmptyStatement") continue;
     declaration = conditional;
     conditional = sibling;
   }
@@ -448,18 +652,19 @@ export const getBranchAssignedListenerFunctions = (
   const assignments = new Set<EsTreeNode>([consequent.assignment.left, alternate.assignment.left]);
   const cleanupFunctions = new Set(collectReturnedCleanupFunctions(effect, context.scopes));
   if (
-    !symbol.references.every((reference) =>
-      assignments.has(reference.identifier)
-        ? reference.flag === "write"
-        : reference.flag === "read" &&
-          (reference.identifier === listener ||
-            isMatchingCleanupReference(
-              reference.identifier,
-              registration,
-              cleanupFunctions,
-              context,
-            )),
-    )
+    !symbol.references.every((reference) => {
+      const referenceRoot = findTransparentExpressionRoot(reference.identifier);
+      if (assignments.has(referenceRoot))
+        return (
+          reference.flag === "write" ||
+          (reference.flag === "read" && referenceRoot !== reference.identifier)
+        );
+      return (
+        reference.flag === "read" &&
+        (reference.identifier === listener ||
+          isMatchingCleanupReference(reference.identifier, registration, cleanupFunctions, context))
+      );
+    })
   )
     return [];
   return [
