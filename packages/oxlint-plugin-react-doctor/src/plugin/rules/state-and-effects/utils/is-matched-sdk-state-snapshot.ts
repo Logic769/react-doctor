@@ -1,3 +1,4 @@
+import { getRuntimeSymbolReferences } from "../../../utils/get-runtime-symbol-references.js";
 import type { SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
@@ -12,10 +13,11 @@ import { getValueImportSource } from "../../../utils/get-value-import-declaratio
 import { hasCompleteSymbolReferences } from "../../../utils/has-complete-symbol-references.js";
 import { hasEnclosingTypeParameterNamed } from "../../../utils/has-enclosing-type-parameter-named.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
-import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
+import { isKeyedDraftTypeReference } from "../../../utils/is-keyed-draft-type-reference.js";
 import { isWithinAssignmentTarget } from "../../../utils/is-within-assignment-target.js";
 import type { RuleContext } from "../../../utils/rule-context.js";
 import { walkAst } from "../../../utils/walk-ast.js";
+import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
 import type { EffectStateWriteFact } from "./collect-effect-state-write-facts.js";
 import { hasSupportedTwilioVideoSnapshotApi } from "./has-supported-twilio-video-snapshot-api.js";
 import {
@@ -31,7 +33,7 @@ interface MatchedSdkStateSnapshotInput {
 }
 
 const hasReadonlyReferences = (symbol: SymbolDescriptor): boolean =>
-  symbol.references.every(
+  getRuntimeSymbolReferences(symbol).every(
     (reference) => reference.flag === "read" && !isWithinAssignmentTarget(reference.identifier),
   );
 
@@ -42,8 +44,10 @@ const hasOnlySelectedReferences = (
 ): boolean =>
   hasCompleteSymbolReferences(symbol, context.scopes.rootScope.node, context.scopes) &&
   hasReadonlyReferences(symbol) &&
-  symbol.references.length === identifiers.length &&
-  symbol.references.every((reference) => identifiers.includes(reference.identifier));
+  getRuntimeSymbolReferences(symbol).length === identifiers.length &&
+  getRuntimeSymbolReferences(symbol).every((reference) =>
+    identifiers.includes(reference.identifier),
+  );
 
 const isReadonlyNamedReactCall = (
   node: EsTreeNode,
@@ -59,7 +63,7 @@ const isReadonlyNamedReactCall = (
     getImportedName(symbol.declarationNode) === importedName &&
     hasCompleteSymbolReferences(symbol, context.scopes.rootScope.node, context.scopes) &&
     hasReadonlyReferences(symbol) &&
-    symbol.references.every(
+    getRuntimeSymbolReferences(symbol).every(
       (reference) =>
         isNodeOfType(reference.identifier.parent, "CallExpression") &&
         !reference.identifier.parent.optional &&
@@ -88,16 +92,17 @@ const getOrdinaryCallbackCall = (node: EsTreeNode): EsTreeNodeOfType<"CallExpres
 };
 
 const getSnapshotReceiver = (node: EsTreeNode): EsTreeNodeOfType<"Identifier"> | null => {
+  const expression = stripParenExpression(node);
   if (
-    !isNodeOfType(node, "MemberExpression") ||
-    node.optional ||
-    node.computed ||
-    !isNodeOfType(node.object, "Identifier") ||
-    !isNodeOfType(node.property, "Identifier") ||
-    node.property.name !== "networkQualityLevel"
+    !isNodeOfType(expression, "MemberExpression") ||
+    expression.optional ||
+    expression.computed ||
+    !isNodeOfType(expression.object, "Identifier") ||
+    !isNodeOfType(expression.property, "Identifier") ||
+    expression.property.name !== "networkQualityLevel"
   )
     return null;
-  return node.object;
+  return expression.object;
 };
 
 const getListenerReceiver = (
@@ -176,7 +181,22 @@ const hasOrdinarySdkSnapshotProviders = (context: RuleContext): boolean => {
       supported = false;
       return false;
     }
-    if (isTypeScriptTypePosition(node)) return false;
+    if (isKeyedDraftTypeReference(node)) return false;
+    const parent = node.parent;
+    if (
+      parent &&
+      "key" in parent &&
+      parent.key === node &&
+      "computed" in parent &&
+      !parent.computed &&
+      (isNodeOfType(parent, "Property")
+        ? !parent.shorthand || parent.value !== node
+        : isNodeOfType(parent, "MethodDefinition") ||
+          isNodeOfType(parent, "PropertyDefinition") ||
+          isNodeOfType(parent, "AccessorProperty"))
+    )
+      return false;
+
     if (isNodeOfType(node, "Identifier") && SDK_SNAPSHOT_UNSUPPORTED_IDENTIFIERS.has(node.name)) {
       supported = false;
       return false;
@@ -190,7 +210,8 @@ const hasOrdinarySdkSnapshotProviders = (context: RuleContext): boolean => {
               isNodeOfType(node.property, "Literal") && typeof node.property.value === "number"
             )))) ||
       (isNodeOfType(node, "Property") &&
-        (SDK_SNAPSHOT_UNSUPPORTED_MEMBERS.has(getStaticKeyName(node.key) ?? "") ||
+        (((isNodeOfType(node.parent, "ObjectPattern") || node.computed || node.shorthand) &&
+          SDK_SNAPSHOT_UNSUPPORTED_MEMBERS.has(getStaticKeyName(node.key) ?? "")) ||
           (node.computed && !isNodeOfType(node.key, "Literal"))))
     ) {
       supported = false;
@@ -214,7 +235,7 @@ const hasOrdinarySdkSnapshotProviders = (context: RuleContext): boolean => {
         return false;
       }
       if (
-        symbol.references.some(
+        getRuntimeSymbolReferences(symbol).some(
           (reference) =>
             !isNodeOfType(reference.identifier.parent, "CallExpression") ||
             reference.identifier.parent.optional ||

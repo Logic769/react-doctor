@@ -994,3 +994,31 @@ describe.each([
     expect(hosted).toEqual(direct);
   });
 });
+
+describe("SDK snapshot erased bindings and transparent values", () => {
+  it.each([
+    ["erased React hook", "interface useState {}\n"],
+    ["type-only hook exports", "export type {useState,useEffect};\n"],
+    ["inert object keys", "const notes={Function:'description',constructor:'description'};\n"],
+    ["inert method keys", "class Notes { static Function(){return 'description'} }\n"],
+  ])("preserves the ordinary snapshot beside %s", (_name, prefix) => {
+    const code = prefix + sdkSnapshotCases[0].code;
+    const result = runRule(noDerivedState, code, {
+      filename: path.join(fixtureDirectory, "source.tsx"),
+      forceJsx: true,
+    });
+    expect(result).toEqual({ diagnostics: [], parseErrors: [] });
+  });
+  it("preserves transparent snapshot value assertions", () => {
+    const code = sdkSnapshotCases[0].code.replaceAll(
+      "remote.networkQualityLevel",
+      "(remote.networkQualityLevel as number)",
+    );
+    expect(
+      runRule(noDerivedState, code, {
+        filename: path.join(fixtureDirectory, "source.tsx"),
+        forceJsx: true,
+      }),
+    ).toEqual({ diagnostics: [], parseErrors: [] });
+  });
+});
