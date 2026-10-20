@@ -1,3 +1,5 @@
+import { UNSUPPORTED_FACTORY_RUNTIME_TYPES } from "./private-factory/constants.js";
+import { hasClosedReactFactoryProviders } from "./private-factory/has-closed-react-factory-providers.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
 import { findEnclosingFunction } from "../../../utils/find-enclosing-function.js";
@@ -12,18 +14,6 @@ import { resolveReactUseStatePair } from "../../../utils/resolve-react-use-state
 import type { RuleContext } from "../../../utils/rule-context.js";
 import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
 import { walkAst } from "../../../utils/walk-ast.js";
-
-const UNSUPPORTED_FACTORY_RUNTIME_TYPES = new Set([
-  "TSEnumDeclaration",
-  "TSEnumBody",
-  "TSEnumMember",
-  "TSModuleDeclaration",
-  "TSModuleBlock",
-  "TSImportEqualsDeclaration",
-  "TSExportAssignment",
-  "TSParameterProperty",
-  "WithStatement",
-]);
 
 const isPlainFactoryArgument = (expression: EsTreeNode): boolean => {
   if (isNodeOfType(expression, "Identifier") || isNodeOfType(expression, "Literal")) return true;
@@ -113,7 +103,7 @@ export const getPrivateFactoryNativeStateSetter = (
   )
     return null;
   const program = findProgramRoot(factory);
-  if (!program) return null;
+  if (!program || !hasClosedReactFactoryProviders(program, context)) return null;
   let isClosed = true;
   walkAst(program, (node): boolean | void => {
     if (!isClosed) return false;
@@ -121,7 +111,12 @@ export const getPrivateFactoryNativeStateSetter = (
       isClosed = false;
       return false;
     }
-    if (isTypeScriptTypePosition(node)) return false;
+    if (
+      isNodeOfType(node, "TSInterfaceDeclaration") ||
+      isNodeOfType(node, "TSTypeAliasDeclaration")
+    )
+      return false;
+    if (isTypeScriptTypePosition(node)) return;
     if (isNodeOfType(node, "CallExpression")) {
       const invokedExpression = stripParenExpression(node.callee);
       if (isNodeOfType(invokedExpression, "Identifier") && invokedExpression.name === "eval") {

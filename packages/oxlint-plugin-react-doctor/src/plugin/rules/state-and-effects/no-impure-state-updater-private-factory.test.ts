@@ -121,6 +121,20 @@ export const Counter = (props) => {
 };`,
     options: { filename: "private-factory-state-setter.tsx" },
   },
+  {
+    name: "erased-react-interface",
+    code: 'import * as React from "react";\ninterface React {}\n\nlet observed = 0;\nconst createHandlers = (applyState, configuration) => ({\n  onClick: () => applyState((previous) => {\n    observed = previous;\n    return previous;\n  }),\n});\nexport const Counter = (props) => {\n  const [count, setCount] = React.useState(0);\n  return <button {...createHandlers(setCount, props.config)}>{count}</button>;\n};',
+    options: {
+      filename: "private-factory-state-setter.tsx",
+    },
+  },
+  {
+    name: "ordinary-global-react",
+    code: "\n\nlet observed = 0;\nconst createHandlers = (applyState, configuration) => ({\n  onClick: () => applyState((previous) => {\n    observed = previous;\n    return previous;\n  }),\n});\nexport const Counter = (props) => {\n  const [count, setCount] = React.useState(0);\n  return <button {...createHandlers(setCount, props.config)}>{count}</button>;\n};",
+    options: {
+      filename: "private-factory-state-setter.tsx",
+    },
+  },
 ];
 
 const safeFactoryCases: FactoryCase[] = [
@@ -187,6 +201,69 @@ export const Counter = (props) => {
   return <button {...createHandlers(setCount, props.config)}>{count}</button>;
 };`,
     options: { filename: "private-factory-state-setter.tsx" },
+  },
+  {
+    name: "namespace-provider-replaced",
+    code: 'import * as React from "react";\nReact.useState = initial => [initial, callback => callback(initial)];\n\nlet observed = 0;\nconst createHandlers = (applyState, configuration) => ({\n  onClick: () => applyState((previous) => {\n    observed = previous;\n    return previous;\n  }),\n});\nexport const Counter = (props) => {\n  const [count, setCount] = React.useState(0);\n  return <button {...createHandlers(setCount, props.config)}>{count}</button>;\n};',
+    options: {
+      filename: "private-factory-state-setter.tsx",
+    },
+  },
+  {
+    name: "namespace-provider-escaped",
+    code: 'import * as React from "react";\nconst runtime = React; runtime.useState = initial => [initial, callback => callback(initial)];\n\nlet observed = 0;\nconst createHandlers = (applyState, configuration) => ({\n  onClick: () => applyState((previous) => {\n    observed = previous;\n    return previous;\n  }),\n});\nexport const Counter = (props) => {\n  const [count, setCount] = React.useState(0);\n  return <button {...createHandlers(setCount, props.config)}>{count}</button>;\n};',
+    options: {
+      filename: "private-factory-state-setter.tsx",
+    },
+  },
+  {
+    name: "default-namespace-provider-replaced",
+    code: 'import React from "react";\nReact.useState = initial => [initial, callback => callback(initial)];\n\nlet observed = 0;\nconst createHandlers = (applyState, configuration) => ({\n  onClick: () => applyState((previous) => {\n    observed = previous;\n    return previous;\n  }),\n});\nexport const Counter = (props) => {\n  const [count, setCount] = React.useState(0);\n  return <button {...createHandlers(setCount, props.config)}>{count}</button>;\n};',
+    options: {
+      filename: "private-factory-state-setter.tsx",
+    },
+  },
+  {
+    name: "default-namespace-provider-escaped",
+    code: 'import React from "react";\nconst runtime = React; runtime.useState = initial => [initial, callback => callback(initial)];\n\nlet observed = 0;\nconst createHandlers = (applyState, configuration) => ({\n  onClick: () => applyState((previous) => {\n    observed = previous;\n    return previous;\n  }),\n});\nexport const Counter = (props) => {\n  const [count, setCount] = React.useState(0);\n  return <button {...createHandlers(setCount, props.config)}>{count}</button>;\n};',
+    options: {
+      filename: "private-factory-state-setter.tsx",
+    },
+  },
+  {
+    name: "type-only namespace cannot provide native setter",
+    code: 'import type * as React from "react";\n\nlet observed = 0;\nconst createHandlers = (applyState, configuration) => ({\n  onClick: () => applyState((previous) => {\n    observed = previous;\n    return previous;\n  }),\n});\nexport const Counter = (props) => {\n  const [count, setCount] = React.useState(0);\n  return <button {...createHandlers(setCount, props.config)}>{count}</button>;\n};',
+    options: {
+      filename: "private-factory-state-setter.tsx",
+    },
+  },
+  {
+    name: "type-only default cannot provide native setter",
+    code: 'import type React from "react";\n\nlet observed = 0;\nconst createHandlers = (applyState, configuration) => ({\n  onClick: () => applyState((previous) => {\n    observed = previous;\n    return previous;\n  }),\n});\nexport const Counter = (props) => {\n  const [count, setCount] = React.useState(0);\n  return <button {...createHandlers(setCount, props.config)}>{count}</button>;\n};',
+    options: {
+      filename: "private-factory-state-setter.tsx",
+    },
+  },
+  {
+    name: "type-only named import cannot provide native setter",
+    code: 'import { type useState } from "react";\n\nlet observed = 0;\nconst createHandlers = (applyState, configuration) => ({\n  onClick: () => applyState((previous) => {\n    observed = previous;\n    return previous;\n  }),\n});\nexport const Counter = (props) => {\n  const [count, setCount] = useState(0);\n  return <button {...createHandlers(setCount, props.config)}>{count}</button>;\n};',
+    options: {
+      filename: "private-factory-state-setter.tsx",
+    },
+  },
+  {
+    name: "assigned-global-react",
+    code: "const fakeReact = { useState: initial => [initial, callback => callback(initial)] }; Object.assign(globalThis, { React: fakeReact });\n\n\nlet observed = 0;\nconst createHandlers = (applyState, configuration) => ({\n  onClick: () => applyState((previous) => {\n    observed = previous;\n    return previous;\n  }),\n});\nexport const Counter = (props) => {\n  const [count, setCount] = React.useState(0);\n  return <button {...createHandlers(setCount, props.config)}>{count}</button>;\n};",
+    options: {
+      filename: "private-factory-state-setter.tsx",
+    },
+  },
+  {
+    name: "aliased-global-react",
+    code: "const runtime = globalThis; runtime.React = { useState: initial => [initial, callback => callback(initial)] };\n\n\nlet observed = 0;\nconst createHandlers = (applyState, configuration) => ({\n  onClick: () => applyState((previous) => {\n    observed = previous;\n    return previous;\n  }),\n});\nexport const Counter = (props) => {\n  const [count, setCount] = React.useState(0);\n  return <button {...createHandlers(setCount, props.config)}>{count}</button>;\n};",
+    options: {
+      filename: "private-factory-state-setter.tsx",
+    },
   },
 ];
 
