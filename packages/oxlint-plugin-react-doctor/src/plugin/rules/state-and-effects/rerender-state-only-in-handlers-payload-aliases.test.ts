@@ -461,6 +461,16 @@ return <button onClick={() => setRequest("go")}>Send</button>;
 `,
     expectedDiagnosticCount: 1,
   },
+  {
+    name: "erased-callback-interface",
+    code: 'import { useEffect, useState } from "react";\ninterface PanelProps { publish: (payload: string) => void; }\nconst Panel = ({ publish }: PanelProps) => {\ninterface publish {}\nconst [request, setRequest] = useState("");\nuseEffect(() => { if (request.length > 3) setRequest(""); }, [request]);\nuseEffect(() => { const payload = request; publish(payload); }, [request]);\nreturn <button onClick={() => setRequest("go")}>Send</button>;\n};\n',
+    expectedDiagnosticCount: 0,
+  },
+  {
+    name: "erased-callback-alias",
+    code: 'import { useEffect, useState } from "react";\ninterface PanelProps { publish: (payload: string) => void; }\nconst Panel = ({ publish }: PanelProps) => {\ntype publish = string;\nconst [request, setRequest] = useState("");\nuseEffect(() => { if (request.length > 3) setRequest(""); }, [request]);\nuseEffect(() => { const payload = request; publish(payload); }, [request]);\nreturn <button onClick={() => setRequest("go")}>Send</button>;\n};\n',
+    expectedDiagnosticCount: 0,
+  },
 ];
 
 it.each(cases)("$name", ({ code, expectedDiagnosticCount }) => {
