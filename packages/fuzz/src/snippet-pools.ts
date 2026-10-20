@@ -315,6 +315,7 @@ export const LIBRARY_SNIPPET_POOL = [
 
 // Module scope — SSR hazards, guard aliases, contexts, caches, styled.
 export const MODULE_SCOPE_SNIPPET_POOL = [
+  `import { useRef as useFuzzEntryRef, useState as useFuzzEntryState } from "react"; const FuzzErasedRefEntry = () => { const gate = useFuzzEntryRef(false); interface gate {} const [value, setValue] = useFuzzEntryState(0); const reset = () => fetch("/reset"); const visit = () => { if (!gate.current) reset(); }; return <button onClick={() => setValue(previous => { if (gate.current) visit(); return previous + 1; })}>{value}</button>; };`,
   `import { create as createFuzzZustandStore } from "zustand"; export const useFuzzZustandStore = createFuzzZustandStore(() => ({ items: [] })); export const fuzzZustandSelection = useFuzzZustandStore((state) => ({ items: state.items }));`,
   `import { create as createFuzzZustandTarget } from "zustand"; const useFuzzZustandTarget = createFuzzZustandTarget(() => ({ value: 0, other: 0 })); export const FuzzZustandWholeStoreTarget = () => { const { value: fuzzZustandValue } = useFuzzZustandTarget(); return <output>{fuzzZustandValue}</output>; };`,
   `import { create as createFuzzZustandGetStore } from "zustand"; const useFuzzZustandGetStore = createFuzzZustandGetStore((_set, get) => ({ count: get().count }));`,

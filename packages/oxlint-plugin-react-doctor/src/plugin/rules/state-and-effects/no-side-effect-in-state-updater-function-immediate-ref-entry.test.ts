@@ -309,6 +309,18 @@ const entryFixtures: EntryFixture[] = [
     providers: {},
     hasCertifiedEntry: false,
   },
+  {
+    name: "erased-gate-interface",
+    code: "import {useCallback,useRef,useState} from 'react';\nexport const Widget=({enabled})=>{const gate=useRef(false);interface gate {}const [value,setValue]=useState(0);const [visible,setVisible]=useState(false);const reset=()=>{analytics.track('reset');};const scroll=useCallback(()=>{try{if(!gate.current && enabled){reset();}else{setVisible(true);}}catch(error){report(error);}},[enabled]); const update=()=>setValue(previous=>{if(enabled && gate.current){scroll();} return previous+1;});return <button onClick={update}>{value}</button>;};",
+    providers: {},
+    hasCertifiedEntry: true,
+  },
+  {
+    name: "native-valid export assignment without reflective capability",
+    code: "import {useCallback,useRef,useState} from 'react';\nconst Widget=({enabled})=>{const gate=useRef(false);const [value,setValue]=useState(0);const [visible,setVisible]=useState(false);const reset=()=>{analytics.track('reset');};const scroll=useCallback(()=>{try{if(!gate.current && enabled){reset();}else{setVisible(true);}}catch(error){report(error);}},[enabled]); const update=()=>setValue(previous=>{if(enabled && gate.current){scroll();} return previous+1;});return <button onClick={update}>{value}</button>;};\nexport = Widget;\n",
+    providers: {},
+    hasCertifiedEntry: false,
+  },
 ];
 
 const directories: string[] = [];
