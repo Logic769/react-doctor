@@ -532,16 +532,33 @@ export const isImportedMutatingRequest = (node: EsTreeNode, proof: RequestAction
     if (
       !resolved ||
       !isFunctionLike(resolved.node) ||
-      !resolved.node.async ||
       resolved.node.generator ||
       !proof.closedFunction(resolved.node, resolved.facts) ||
-      !isNodeOfType(resolved.node.body, "BlockStatement") ||
       call.arguments.some((argument) => isNodeOfType(argument, "SpreadElement"))
     )
       return false;
     const bindings = new Map<SymbolDescriptor, RequestArgument>();
     for (let index = 0; index < resolved.node.params.length; index += 1) {
       const parameter = resolved.node.params[index];
+      if (isNodeOfType(parameter, "AssignmentPattern")) {
+        const defaultValue = stripParenExpression(parameter.right);
+        const primitiveDefault =
+          isNodeOfType(defaultValue, "Literal") &&
+          !("regex" in defaultValue) &&
+          !("bigint" in defaultValue) &&
+          (defaultValue.value === null ||
+            typeof defaultValue.value === "string" ||
+            typeof defaultValue.value === "boolean" ||
+            typeof defaultValue.value === "number");
+        if (
+          !primitiveDefault &&
+          !(
+            isNodeOfType(defaultValue, "ObjectExpression") && defaultValue.properties.length === 0
+          ) &&
+          !(isNodeOfType(defaultValue, "ArrayExpression") && defaultValue.elements.length === 0)
+        )
+          return false;
+      }
       const binding = isNodeOfType(parameter, "AssignmentPattern") ? parameter.left : parameter;
       const actual = call.arguments[index];
       if (!actual || !isNodeOfType(binding, "Identifier")) return false;
@@ -549,17 +566,15 @@ export const isImportedMutatingRequest = (node: EsTreeNode, proof: RequestAction
       if (!symbol || !proof.closed(symbol, resolved.facts)) return false;
       bindings.set(symbol, { ...selected, node: actual });
     }
-    const first = resolved.node.body.body[0];
-    if (
-      resolved.node.body.body.length === 1 &&
-      isNodeOfType(first, "ReturnStatement") &&
-      first.argument
-    )
+    const forwarded = getSingleReturnExpression(resolved.node);
+    if (forwarded)
       return requestCall({
-        node: stripParenExpression(first.argument),
+        node: stripParenExpression(forwarded),
         facts: resolved.facts,
         bindings,
       });
+    if (!resolved.node.async || !isNodeOfType(resolved.node.body, "BlockStatement")) return false;
+    const first = resolved.node.body.body[0];
     if (
       !isNodeOfType(first, "VariableDeclaration") ||
       first.kind !== "const" ||

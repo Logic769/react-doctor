@@ -225,22 +225,26 @@ export const isImportedJotaiVisibilityAction = (
       callback.async ||
       callback.generator ||
       callback.params.length !== 0 ||
-      !isNodeOfType(callback.body, "BlockStatement") ||
-      callback.body.body.length !== 1 ||
+      !callback.body ||
       !isNodeOfType(dependencies, "ArrayExpression") ||
       dependencies.elements.length !== 1
     )
       return null;
-    const statement = callback.body.body[0];
+    let setterCall: EsTreeNode = stripParenExpression(callback.body);
+    if (isNodeOfType(callback.body, "BlockStatement")) {
+      const statement = callback.body.body[0];
+      if (callback.body.body.length !== 1 || !isNodeOfType(statement, "ExpressionStatement"))
+        return null;
+      setterCall = stripParenExpression(statement.expression);
+    }
     if (
-      !isNodeOfType(statement, "ExpressionStatement") ||
-      !isNodeOfType(statement.expression, "CallExpression") ||
-      statement.expression.optional ||
-      statement.expression.arguments.length !== 1 ||
-      !isNodeOfType(statement.expression.callee, "Identifier")
+      !isNodeOfType(setterCall, "CallExpression") ||
+      setterCall.optional ||
+      setterCall.arguments.length !== 1 ||
+      !isNodeOfType(setterCall.callee, "Identifier")
     )
       return null;
-    const setter = hook.facts.scopes.symbolFor(statement.expression.callee);
+    const setter = hook.facts.scopes.symbolFor(setterCall.callee);
     if (
       !setter ||
       !proof.closed(setter, hook.facts) ||
@@ -274,7 +278,7 @@ export const isImportedJotaiVisibilityAction = (
       return null;
     const atom = atomForHook(setter.initializer, "useSetAtom", hook.facts);
     if (!atom || !isNodeOfType(atom.initializer, "CallExpression")) return null;
-    const nextValue = statement.expression.arguments[0];
+    const nextValue = setterCall.arguments[0];
     if (!isNodeOfType(nextValue, "ObjectExpression")) return null;
     const writtenKeys = new Set<string>();
     for (const member of nextValue.properties) {
@@ -309,7 +313,7 @@ export const isImportedJotaiVisibilityAction = (
     const visibilityKey = visibility[0].key.name;
     const initial = atom.initializer.arguments[0];
     const initialVisibility = initial ? proof.property(initial, visibilityKey) : null;
-    if (!isNodeOfType(initialVisibility, "Literal") || initialVisibility.value !== false)
+    if (!isNodeOfType(initialVisibility, "Literal") || typeof initialVisibility.value !== "boolean")
       return null;
     return { atom, facts: hook.facts, visibilityKey };
   };

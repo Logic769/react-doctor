@@ -15,6 +15,8 @@ interface ImportedActionFixtureOptions {
   readonly jsx?: string;
   readonly parameter?: string;
   readonly destructure?: string;
+  readonly requestForwarder?: string;
+  readonly closeCallback?: string;
   readonly requestMethod?: string;
   readonly requestPath?: string;
   readonly configured?: boolean;
@@ -47,7 +49,7 @@ const writeFixture = (options: ImportedActionFixtureOptions = {}): string => {
     `import client from '${options.configured ? "./client" : "axios"}';
 import join from 'url-join';
 export async function request(verb, endpoint, body) { const response = await client[verb](join('/v2', endpoint), body); return response.data; }
-export async function send(endpoint, body = {}) { return request('${options.requestMethod ?? "post"}', ${options.requestPath ?? "endpoint"}, body); }
+${options.requestForwarder ?? `export async function send(endpoint, body = {}) { return request('${options.requestMethod ?? "post"}', ${options.requestPath ?? "endpoint"}, body); }`}
 `,
   );
   write(
@@ -71,7 +73,7 @@ return client;
 ${options.providerPrefix ?? ""}
 const panelAtom=atom(${options.atomArguments ?? "{open:false,entries:[]}"});
 export const usePanelStatus=()=>useAtomValue(panelAtom);
-export const usePanelActions=()=>{const writePanel=useSetAtom(panelAtom${options.storeArgument ?? ""});const close=useCallback(()=>{writePanel({open:false,entries:[]})},${options.actionDependencies ?? "[writePanel]"});return {close}};
+export const usePanelActions=()=>{const writePanel=useSetAtom(panelAtom${options.storeArgument ?? ""});const close=useCallback(${options.closeCallback ?? "()=>{writePanel({open:false,entries:[]})}"},${options.actionDependencies ?? "[writePanel]"});return {close}};
 `,
   );
   const source = `import {useCallback} from 'react';import {send} from '@network';import {usePanelStatus,usePanelActions} from './panel-state';
@@ -105,6 +107,88 @@ const expectNoFinding = (source: string): void => {
 };
 
 describe("imported request and same-store visibility action", () => {
+  it("declines a request default that claims reentry before forwarding", () =>
+    expectNoFinding(
+      writeFixture({
+        requestForwarder:
+          "let claimed=false;const claimOnce=()=>{if(claimed)throw new Error('already running');claimed=true;return {}};export const send=(endpoint,body=claimOnce())=>request('post',endpoint,body);",
+        handler: "await send('/records.save',undefined);dismiss();",
+      }),
+    ));
+  it("declines an async single-return wrapper whose default claims reentry", () =>
+    expectNoFinding(
+      writeFixture({
+        requestForwarder:
+          "let claimed=false;const claimOnce=()=>{if(claimed)throw new Error('already running');claimed=true;return {}};export async function send(endpoint,body=claimOnce()){return request('post',endpoint,body);}",
+        handler: "await send('/records.save',undefined);dismiss();",
+      }),
+    ));
+  it("declines an effectful method default even when its actual argument is supplied", () =>
+    expectNoFinding(
+      writeFixture({
+        requestForwarder:
+          "const chooseMethod=()=>{recordAttempt();return 'post'};export const send=(endpoint,body,method=chooseMethod())=>request(method,endpoint,body);",
+        handler: "await send('/records.save',{},'post');dismiss();",
+      }),
+    ));
+  it.each(["null", "'fallback'", "false", "0", "{}", "[]"])(
+    "preserves inert request defaults: %s",
+    (defaultValue) =>
+      expectFinding(
+        writeFixture({
+          requestForwarder: `export const send=(endpoint,body=${defaultValue})=>request('post',endpoint,body);`,
+        }),
+      ),
+  );
+  it.each(["/token/", "1n", "{value:recordAttempt()}", "[recordAttempt()]"])(
+    "declines a nonpermitted request default: %s",
+    (defaultValue) =>
+      expectNoFinding(
+        writeFixture({
+          requestForwarder: `export const send=(endpoint,body=${defaultValue})=>request('post',endpoint,body);`,
+        }),
+      ),
+  );
+  it.each([
+    [
+      "a synchronous concise wrapper",
+      "export const send=(endpoint,body={})=>request('post',endpoint,body);",
+    ],
+    [
+      "a synchronous single-return wrapper",
+      "export function send(endpoint,body={}){return request('post',endpoint,body);}",
+    ],
+  ])("follows %s without accepting additional effects", (_name, requestForwarder) =>
+    expectFinding(writeFixture({ requestForwarder })),
+  );
+  it("accepts initially open primitive state when current visibility gates the child", () =>
+    expectFinding(writeFixture({ atomArguments: "{open:true,entries:[]}" })));
+  it("follows a synchronous concise close callback with the same setter dependency", () =>
+    expectFinding(writeFixture({ closeCallback: "()=>writePanel({open:false,entries:[]})" })));
+  it("combines synchronous forwarding, initially open state and a concise close callback", () =>
+    expectFinding(
+      writeFixture({
+        requestForwarder: "export const send=(endpoint,body={})=>request('post',endpoint,body);",
+        atomArguments: "{open:true,entries:[]}",
+        closeCallback: "()=>writePanel({open:false,entries:[]})",
+        parentGate: "return status.open?<Dialog dismiss={close}/>:null;",
+      }),
+    ));
+  it.each([
+    "export function send(endpoint,body={}){recordAttempt();return request('post',endpoint,body);}",
+    "export const send=(endpoint,body={})=>(recordAttempt(),request('post',endpoint,body));",
+  ])("declines a synchronous forwarder with an extra effect: %s", (requestForwarder) =>
+    expectNoFinding(writeFixture({ requestForwarder })),
+  );
+  it("declines a nonboolean initial visibility property", () =>
+    expectNoFinding(writeFixture({ atomArguments: "{open:'shown',entries:[]}" })));
+  it.each([
+    "()=>{recordClose();writePanel({open:false,entries:[]})}",
+    "()=>(recordClose(),writePanel({open:false,entries:[]}))",
+    "async()=>writePanel({open:false,entries:[]})",
+  ])("declines an effectful or asynchronous close callback: %s", (closeCallback) =>
+    expectNoFinding(writeFixture({ closeCallback })),
+  );
   it("follows a canonical client wrapper and a leading parent visibility exit", () =>
     expectFinding(writeFixture()));
   it("follows the bounded configured client and props-object destructuring", () =>
