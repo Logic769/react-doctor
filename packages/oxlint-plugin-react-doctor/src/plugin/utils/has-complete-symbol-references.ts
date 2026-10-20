@@ -77,6 +77,8 @@ export const hasCompleteSymbolReferences = (
   let isComplete = true;
   walkAst(program, (node) => {
     if (!isComplete) return false;
+    const runtimeTypeScript = hasRuntimeTypeScriptAncestor(node);
+    if (!runtimeTypeScript && isTypeScriptTypePosition(node)) return false;
     if (
       (!isNodeOfType(node, "Identifier") && !isNodeOfType(node, "JSXIdentifier")) ||
       node.name !== symbol.name ||
@@ -84,8 +86,6 @@ export const hasCompleteSymbolReferences = (
       isNonReferenceName(node)
     )
       return;
-    const runtimeTypeScript = hasRuntimeTypeScriptAncestor(node);
-    if (!runtimeTypeScript && isTypeScriptTypePosition(node)) return;
     const resolved = scopes.symbolFor(node);
     if (resolved && resolved !== symbol && !isErasedBinding(resolved)) return;
     const reference = scopes.referenceFor(node);

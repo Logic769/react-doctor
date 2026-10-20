@@ -10,6 +10,56 @@ interface NativeEventWriterCase {
 
 const nativeEventWriterCases: NativeEventWriterCase[] = [
   {
+    name: "retains the runtime TypeScript enum fence",
+    reportsPropReseed: true,
+    code: `import { useEffect, useRef, useState } from "react";
+enum RuntimeMode { Active }
+export const Panel = ({ seed }) => {
+  const [value, setValue] = useState(seed);
+  const writeValue = (nextValue) => setValue(nextValue);
+  const latest = useRef({ writeValue });
+  latest.current = { writeValue };
+  const activate = () => writeValue(!value);
+  useEffect(() => { setValue(seed); }, [seed]);
+  return <button onClick={activate}>{String(value)}</button>;
+};`,
+  },
+  {
+    name: "ignores erased destructured type parameters in the runtime prop census",
+    reportsPropReseed: false,
+    code: `import { useEffect, useRef, useState } from "react";
+interface PanelSlots { render?: ({ seed }: { seed: boolean }) => unknown; }
+export const Panel = ({ seed, onValueChange }) => {
+  const [value, setValue] = useState(seed);
+  const controlled = seed !== undefined && onValueChange !== undefined;
+  const displayedValue = controlled ? Boolean(seed) : value;
+  const writeValue = (nextValue) => { if (!controlled) setValue(nextValue); onValueChange?.(nextValue); };
+  const latest = useRef({ writeValue });
+  latest.current = { writeValue };
+  const activate = () => writeValue(!displayedValue);
+  useEffect(() => { setValue(seed); }, [seed]);
+  return <button onClick={activate}>{String(displayedValue)}</button>;
+};`,
+  },
+  {
+    name: "retains runtime prop mutations inside transparent type assertions",
+    reportsPropReseed: true,
+    code: `import { useEffect, useRef, useState } from "react";
+interface PanelSlots { render?: ({ seed }: { seed: boolean }) => unknown; }
+export const Panel = ({ seed, onValueChange }) => {
+  const [value, setValue] = useState(seed);
+  const controlled = seed !== undefined && onValueChange !== undefined;
+  const displayedValue = controlled ? Boolean(seed) : value;
+  const changedSeed = ((seed = undefined) as boolean | undefined);
+  const writeValue = (nextValue) => { if (!controlled) setValue(nextValue); onValueChange?.(nextValue); };
+  const latest = useRef({ writeValue });
+  latest.current = { writeValue };
+  const activate = () => writeValue(!displayedValue);
+  useEffect(() => { setValue(seed); }, [seed]);
+  return <button onClick={activate}>{String(displayedValue)}</button>;
+};`,
+  },
+  {
     name: "retains an odd own-state toggle through a ref-stored writer",
     reportsPropReseed: false,
     code: `import { useEffect, useRef, useState } from "react";
