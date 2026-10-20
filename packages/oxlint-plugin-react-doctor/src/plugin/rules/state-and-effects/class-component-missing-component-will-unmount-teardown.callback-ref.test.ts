@@ -2033,3 +2033,38 @@ describe("visible global classic JSX provider boundaries", () => {
       ).toEqual({ diagnostics: candidate.diagnostics, parseErrors: [] });
     });
 });
+
+describe("erased-only React provider companion", () => {
+  it("nominal", () => {
+    expect(
+      runRule(
+        classComponentMissingComponentWillUnmountTeardown,
+        "import * as React from 'react';\nexport class Panel extends React.PureComponent {\n node;\n captureNode=(value)=>{this.node=value;};\n handleScroll=()=>{this.setState({seen:true});};\n componentDidMount(){this.node.addEventListener('scroll',this.handleScroll,{passive:true});}\n componentWillUnmount(){this.node.removeEventListener('scroll',this.handleScroll);}\n render(){return <div ref={this.captureNode}/>;}\n}\n",
+      ).diagnostics,
+    ).toHaveLength(0);
+  });
+  it("erased-react", () => {
+    expect(
+      runRule(
+        classComponentMissingComponentWillUnmountTeardown,
+        "interface React { note: string };\nimport * as React from 'react';\nexport class Panel extends React.PureComponent {\n node;\n captureNode=(value)=>{this.node=value;};\n handleScroll=()=>{this.setState({seen:true});};\n componentDidMount(){this.node.addEventListener('scroll',this.handleScroll,{passive:true});}\n componentWillUnmount(){this.node.removeEventListener('scroll',this.handleScroll);}\n render(){return <div ref={this.captureNode}/>;}\n}\n",
+      ).diagnostics,
+    ).toHaveLength(0);
+  });
+  it("nested-type", () => {
+    expect(
+      runRule(
+        classComponentMissingComponentWillUnmountTeardown,
+        "type Notes = ({nested:{constructor}}:{nested:{constructor:string}})=>void;\nimport * as React from 'react';\nexport class Panel extends React.PureComponent {\n node;\n captureNode=(value)=>{this.node=value;};\n handleScroll=()=>{this.setState({seen:true});};\n componentDidMount(){this.node.addEventListener('scroll',this.handleScroll,{passive:true});}\n componentWillUnmount(){this.node.removeEventListener('scroll',this.handleScroll);}\n render(){return <div ref={this.captureNode}/>;}\n}\n",
+      ).diagnostics,
+    ).toHaveLength(0);
+  });
+  it("runtime-param", () => {
+    expect(
+      runRule(
+        classComponentMissingComponentWillUnmountTeardown,
+        "class Overrides { constructor(public ignored = Function(\"Object.prototype.addEventListener = function(){}\")()){} };new Overrides();\nimport * as React from 'react';\nexport class Panel extends React.PureComponent {\n node;\n captureNode=(value)=>{this.node=value;};\n handleScroll=()=>{this.setState({seen:true});};\n componentDidMount(){this.node.addEventListener('scroll',this.handleScroll,{passive:true});}\n componentWillUnmount(){this.node.removeEventListener('scroll',this.handleScroll);}\n render(){return <div ref={this.captureNode}/>;}\n}\n",
+      ).diagnostics,
+    ).toHaveLength(1);
+  });
+});

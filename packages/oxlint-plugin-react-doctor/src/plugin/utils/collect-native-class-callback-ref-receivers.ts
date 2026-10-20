@@ -579,7 +579,8 @@ export const collectNativeClassCallbackRefReceivers = (
       }
     }
   const classicProvider = context.scopes.rootScope.symbols.find(
-    (symbol) => symbol.name === "React",
+    (symbol) =>
+      symbol.name === "React" && symbol.kind !== "ts-interface" && symbol.kind !== "ts-type-alias",
   );
   if (classicProvider && !reactProviderSymbols.has(classicProvider)) return emptyReceivers;
   let closed = true;
