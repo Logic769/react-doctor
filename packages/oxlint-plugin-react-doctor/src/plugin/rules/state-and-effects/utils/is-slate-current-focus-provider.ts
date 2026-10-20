@@ -1,3 +1,4 @@
+import { getRuntimeSymbolReferences } from "../../../utils/get-runtime-symbol-references.js";
 import {
   analyzeScopes,
   type ScopeAnalysis,
@@ -13,7 +14,7 @@ import { getValueImportSource } from "../../../utils/get-value-import-declaratio
 import { hasCompleteSymbolReferences } from "../../../utils/has-complete-symbol-references.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { isTypeOnlyImport } from "../../../utils/is-type-only-import.js";
-import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
+import { isKeyedDraftTypeReference } from "../../../utils/is-keyed-draft-type-reference.js";
 import { isWithinAssignmentTarget } from "../../../utils/is-within-assignment-target.js";
 import { resolveCrossFileValueExportWithFilePath } from "../../../utils/resolve-cross-file-function-export.js";
 import { resolveModulePath } from "../../../utils/resolve-module-path.js";
@@ -37,7 +38,7 @@ const hasReadonlyFocusProviderReferences = (
   scopes: ScopeAnalysis,
 ): boolean =>
   hasCompleteSymbolReferences(symbol, scopes.rootScope.node, scopes) &&
-  symbol.references.every(
+  getRuntimeSymbolReferences(symbol).every(
     (reference) => reference.flag === "read" && !isWithinAssignmentTarget(reference.identifier),
   );
 
@@ -67,7 +68,7 @@ const hasClosedReactNamespaceReferences = (
   scopes: ScopeAnalysis,
 ): boolean =>
   hasReadonlyFocusProviderReferences(symbol, scopes) &&
-  symbol.references.every((reference) => {
+  getRuntimeSymbolReferences(symbol).every((reference) => {
     const member = reference.identifier.parent;
     const call = member?.parent;
     return Boolean(
@@ -97,7 +98,7 @@ const hasOrdinaryFocusProviderCapabilities = (
       supported = false;
       return false;
     }
-    if (isTypeScriptTypePosition(node)) return false;
+    if (isKeyedDraftTypeReference(node)) return false;
     if (
       isNodeOfType(node, "Identifier") &&
       scopes.referenceFor(node) &&
@@ -111,7 +112,8 @@ const hasOrdinaryFocusProviderCapabilities = (
         (SLATE_CURRENT_FOCUS_UNSUPPORTED_MEMBERS.has(getStaticPropertyName(node) ?? "") ||
           (node.computed && getStaticPropertyName(node) === null))) ||
       (isNodeOfType(node, "Property") &&
-        (SLATE_CURRENT_FOCUS_UNSUPPORTED_MEMBERS.has(getStaticKeyName(node.key) ?? "") ||
+        (((isNodeOfType(node.parent, "ObjectPattern") || node.computed || node.shorthand) &&
+          SLATE_CURRENT_FOCUS_UNSUPPORTED_MEMBERS.has(getStaticKeyName(node.key) ?? "")) ||
           (node.computed && !isNodeOfType(node.key, "Literal"))))
     ) {
       supported = false;
@@ -257,7 +259,9 @@ export const isSlateCurrentFocusProvider = (
       !isNodeOfType(symbol.declarationNode, "ImportSpecifier") ||
       !hasUniqueRuntimeFocusBinding(symbol) ||
       !hasReadonlyFocusProviderReferences(symbol, scopes) ||
-      !symbol.references.every((reference) => isOrdinaryFocusProviderRead(reference.identifier)) ||
+      !getRuntimeSymbolReferences(symbol).every((reference) =>
+        isOrdinaryFocusProviderRead(reference.identifier),
+      ) ||
       !hasOrdinaryFocusProviderCapabilities(program, scopes)
     )
       return false;
@@ -284,9 +288,7 @@ export const isSlateCurrentFocusProvider = (
       return false;
     const { resolved, providerProgram, initializer, providerScopes, facadeSymbol, importedSymbol } =
       origin;
-    const importedRuntimeReferences = importedSymbol.references.filter(
-      (reference) => !isTypeScriptTypePosition(reference.identifier),
-    );
+    const importedRuntimeReferences = getRuntimeSymbolReferences(importedSymbol);
     if (
       !facadeSymbol ||
       !importedSymbol ||
@@ -296,7 +298,7 @@ export const isSlateCurrentFocusProvider = (
       !isNamedRuntimeProviderImport(importedSymbol) ||
       !hasReadonlyFocusProviderReferences(facadeSymbol, providerScopes) ||
       !hasReadonlyFocusProviderReferences(importedSymbol, providerScopes) ||
-      facadeSymbol.references.length !== 0 ||
+      getRuntimeSymbolReferences(facadeSymbol).length !== 0 ||
       importedRuntimeReferences.length !== 1 ||
       importedRuntimeReferences[0]?.identifier !== initializer ||
       !hasOrdinaryFocusProviderCapabilities(providerProgram, providerScopes) ||

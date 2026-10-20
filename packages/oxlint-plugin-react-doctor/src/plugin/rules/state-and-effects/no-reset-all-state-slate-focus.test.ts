@@ -72,6 +72,30 @@ const insertBeforeState = (statement: string): string =>
 
 const cases: FocusReadCase[] = [
   {
+    name: "type-only hook and provider exports",
+    matches: true,
+    code: BASE_CODE + "\nexport type {useState,FocusApi};",
+  },
+  {
+    name: "erased React hook beside the genuine value",
+    matches: true,
+    code: "interface useState {}\n" + BASE_CODE,
+  },
+  {
+    name: "transparent current focus result",
+    matches: true,
+    code: BASE_CODE.replaceAll(
+      "FocusApi.isFocused(entity)",
+      "(FocusApi.isFocused(entity) as boolean)",
+    ),
+  },
+  {
+    name: "inert capability property names",
+    matches: true,
+    code: "const labels={Function:'description',constructor:'description'};\n" + BASE_CODE,
+  },
+
+  {
     name: "immutable-relative-facade",
     matches: true,
   },

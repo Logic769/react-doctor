@@ -1,3 +1,5 @@
+import { getRuntimeSymbolReferences } from "../../../utils/get-runtime-symbol-references.js";
+import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
 import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
@@ -18,10 +20,16 @@ interface SlateCurrentFocusRead {
 const getSlateCurrentFocusRead = (
   node: EsTreeNode | null | undefined,
 ): SlateCurrentFocusRead | null => {
-  if (!isNodeOfType(node, "CallExpression") || node.optional || node.arguments.length !== 1)
+  if (!node) return null;
+  const expression = stripParenExpression(node);
+  if (
+    !isNodeOfType(expression, "CallExpression") ||
+    expression.optional ||
+    expression.arguments.length !== 1
+  )
     return null;
-  const member = node.callee;
-  const key = node.arguments[0];
+  const member = expression.callee;
+  const key = expression.arguments[0];
   if (
     !isNodeOfType(member, "MemberExpression") ||
     member.computed ||
@@ -53,7 +61,7 @@ const isReadonlyNamedReactFocusHook = (
     getValueImportSource(symbol) === "react" &&
     getImportedName(symbol.declarationNode) === importedName &&
     hasCompleteSymbolReferences(symbol, scopes.rootScope.node, scopes) &&
-    symbol.references.every((reference) => {
+    getRuntimeSymbolReferences(symbol).every((reference) => {
       const call = reference.identifier.parent;
       return (
         reference.flag === "read" &&
@@ -68,7 +76,7 @@ const isReadonlyNamedReactFocusHook = (
 
 const hasReadonlyFocusKeyBinding = (symbol: SymbolDescriptor, scopes: ScopeAnalysis): boolean =>
   hasCompleteSymbolReferences(symbol, scopes.rootScope.node, scopes) &&
-  symbol.references.every((reference) => {
+  getRuntimeSymbolReferences(symbol).every((reference) => {
     if (reference.flag !== "read") return false;
     if (!isWithinAssignmentTarget(reference.identifier)) return true;
     const parent = reference.identifier.parent;
@@ -141,7 +149,7 @@ export const isMatchedSlateCurrentFocusRead = (
       !setterSymbol ||
       context.scopes.symbolFor(setterCall.callee) !== setterSymbol ||
       !hasCompleteSymbolReferences(setterSymbol, context.scopes.rootScope.node, context.scopes) ||
-      !setterSymbol.references.every((reference) => {
+      !getRuntimeSymbolReferences(setterSymbol).every((reference) => {
         const call = reference.identifier.parent;
         return (
           reference.flag === "read" &&
