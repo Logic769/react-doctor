@@ -220,6 +220,7 @@ const hasOnlyJsxTagReferences = (symbol: SymbolDescriptor): boolean =>
   });
 
 const hasOnlyNonSizingNestedBorders = (source: string): boolean => {
+  if (source.includes("@")) return false;
   let isSupported = true;
   const remainder = source.replace(/\{([^{}]*)\}/g, (_match, body: string) => {
     const declarations = body.trim().split(";");

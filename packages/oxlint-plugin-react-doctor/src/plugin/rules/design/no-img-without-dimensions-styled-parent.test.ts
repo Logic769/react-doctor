@@ -61,7 +61,24 @@ describe("no-img-without-dimensions styled parent", () => {
       .replace("</PictureFrame>;", "</PictureFrame></Outer>;");
     expect(inspectStyledParent(source)).toEqual({ diagnostics: [], parseErrors: [] });
   });
+  it("accepts unrelated literal non-sizing styled templates", () => {
+    expect(
+      inspectStyledParent(
+        'import styled from "styled-components";const Other=styled.div`display:block;`;const Frame=styled.div`width:88px;height:88px;flex-shrink:0;& img{max-width:100%;max-height:100%;}`;export const View=()=> <section><Other/><Frame><img src="/a.png" alt=""/></Frame></section>;',
+      ),
+    ).toEqual({ diagnostics: [], parseErrors: [] });
+  });
   const controls = [
+    [
+      "global-at-import-unknown-stylesheet",
+      'import styled from "styled-components";const Other=styled.div`@import url("/sizing.css");`;const Frame=styled.div`width:88px;height:88px;flex-shrink:0;& img{max-width:100%;max-height:100%;}`;export const View=()=> <section><Other/><Frame><img src="/a.png" alt=""/></Frame></section>;',
+      mediaSource,
+    ],
+    [
+      "ancestor-global-at-import",
+      'import styled from "styled-components";const Outer=styled.div`@import url("/sizing.css");`;const Frame=styled.div`width:88px;height:88px;flex-shrink:0;& img{max-width:100%;max-height:100%;}`;export const View=()=> <Outer><Frame><img src="/a.png" alt=""/></Frame></Outer>;',
+      mediaSource,
+    ],
     [
       "sibling selector removes parent reservation",
       componentSource
