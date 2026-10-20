@@ -219,4 +219,24 @@ describe("positive find receiver or callback evidence", () => {
     expect(result.parseErrors).toEqual([]);
     expect(result.diagnostics).toEqual(diagnostics);
   });
+
+  it.each([
+    "const accepts = item => item.ready; interface accepts {} const value = records.find(accepts).create();",
+    "const records = [{id:1}]; interface records {} records.find(predicate).id;",
+    "const records = [{id:1}]; const alias = records; type alias = unknown; alias.find(predicate).id;",
+  ])("retains positive evidence through erased type names: %s", (code) => {
+    const result = runRule(noArrayFindResultMemberAccessWithoutGuard, code);
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(1);
+  });
+
+  it.each([
+    "const accepts = item => item.ready; function read(accepts) { interface accepts {} return records.find(accepts).id; }",
+    "const records = [{id:1}]; function read(records) { interface records {} return records.find(predicate).id; }",
+    "const records = [{id:1}]; const alias = records; function read(alias) { type alias = unknown; return alias.find(predicate).id; }",
+  ])("preserves opaque runtime receiver and predicate shadows: %s", (code) => {
+    const result = runRule(noArrayFindResultMemberAccessWithoutGuard, code);
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toEqual([]);
+  });
 });
