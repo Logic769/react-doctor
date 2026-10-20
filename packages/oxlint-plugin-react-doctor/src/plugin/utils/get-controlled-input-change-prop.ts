@@ -16,6 +16,7 @@ import { isTypeScriptTypePosition } from "./is-typescript-type-position.js";
 import { resolveCrossFileValueExportWithFilePath } from "./resolve-cross-file-function-export.js";
 import type { RuleContext } from "./rule-context.js";
 import { someAst } from "./some-ast.js";
+import { stripParenExpression } from "./strip-paren-expression.js";
 
 const isReadOnlyControlImport = (
   symbol: SymbolDescriptor,
@@ -170,7 +171,8 @@ const getForwardedChangeProp = (
       )
   )
     return null;
-  const returned = getSingleReturnExpression(expression);
+  const returnedExpression = getSingleReturnExpression(expression);
+  const returned = returnedExpression ? stripParenExpression(returnedExpression) : null;
   if (!isNodeOfType(returned, "JSXElement")) return null;
   const opening = returned.openingElement;
   const changeProp = getPrimitiveChangeProp(opening.name, program, scopes);

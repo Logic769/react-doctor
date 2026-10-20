@@ -578,6 +578,35 @@ describe("no-derived-useState — keyed editable drafts preserve same-identity e
     );
   });
 
+  it.each([
+    "import * as React from 'react';function FieldInput({className,...props}:React.ComponentProps<'textarea'>){return (<textarea className={className} {...props}/>)}export {FieldInput};",
+    "import * as React from 'react';import {Input as BaseInput} from '@base-ui/react/input';function FieldInput({className,type,...props}:React.ComponentProps<'input'>){return (<BaseInput type={type} className={className} {...props}/>)}export {FieldInput};",
+    "export const FieldInput=({...props})=>{return (<textarea {...props}/>)};",
+  ])("accepts an imported wrapper returning parenthesized JSX: %s", (provider) => {
+    writeFixture("src/field-input.tsx", provider);
+    checkDraft(
+      withControl(
+        "<FieldInput value={draft} onChange={event=>setDraft(event.target.value)}/>",
+        "import {FieldInput} from './field-input';\n",
+      ),
+      0,
+    );
+  });
+
+  it("declines a parenthesized conditional wrapper return", () => {
+    writeFixture(
+      "src/field-input.tsx",
+      "export const FieldInput=({...props})=>{return (condition ? <textarea {...props}/> : <textarea readOnly {...props}/>)};",
+    );
+    checkDraft(
+      withControl(
+        "<FieldInput value={draft} onChange={event=>setDraft(event.target.value)}/>",
+        "import {FieldInput} from './field-input';\n",
+      ),
+      1,
+    );
+  });
+
   it("refreshes an imported record domain after the host reset with equal size and timestamp", () => {
     const provider = writeFixture(
       "src/domain/entity.ts",
