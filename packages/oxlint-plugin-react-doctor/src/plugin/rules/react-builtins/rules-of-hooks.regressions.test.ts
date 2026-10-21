@@ -3,6 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 import { runRule } from "../../../test-utils/run-rule.js";
+import {
+  NON_REACT_UTILITY_WORK_LARGE_CALL_COUNT,
+  NON_REACT_UTILITY_WORK_SMALL_CALL_COUNT,
+} from "../../constants/thresholds.js";
 import { clearRulesOfHooksSuppressionCache } from "./rules-of-hooks-suppression.js";
 import { rulesOfHooks } from "./rules-of-hooks.js";
 
@@ -1527,6 +1531,58 @@ describe("imported static data getters", () => {
 });
 
 describe("non-React Vidstack layout utility", () => {
+  it.each([
+    { callCount: NON_REACT_UTILITY_WORK_SMALL_CALL_COUNT, mutation: "" },
+    { callCount: NON_REACT_UTILITY_WORK_LARGE_CALL_COUNT, mutation: "" },
+    {
+      callCount: NON_REACT_UTILITY_WORK_SMALL_CALL_COUNT,
+      mutation: "usePlyrLayoutClasses = replacement;",
+    },
+    {
+      callCount: NON_REACT_UTILITY_WORK_LARGE_CALL_COUNT,
+      mutation: "usePlyrLayoutClasses = replacement;",
+    },
+  ])("checks each imported reference once: $callCount $mutation", ({ callCount, mutation }) => {
+    let referenceFlagReads = 0;
+    let importedReferenceCount = 0;
+    const profiledRule: typeof rulesOfHooks = {
+      ...rulesOfHooks,
+      create: (context) => {
+        const symbol = context.scopes.rootScope.symbols.find(
+          (candidate) => candidate.name === "usePlyrLayoutClasses",
+        );
+        if (!symbol) throw new Error("Expected layout utility import binding");
+        importedReferenceCount = symbol.references.length;
+        for (const reference of symbol.references) {
+          const originalFlag = reference.flag;
+          Object.defineProperty(reference, "flag", {
+            configurable: true,
+            get: () => {
+              referenceFlagReads += 1;
+              return originalFlag;
+            },
+          });
+        }
+        return rulesOfHooks.create(context);
+      },
+    };
+    const components = Array.from(
+      { length: callCount },
+      (_, componentIndex) =>
+        `export const Panel${componentIndex} = ({ element, context }) => { useEffect(() => { if (!element) return; return usePlyrLayoutClasses(element, context); }, [element, context]); return <section />; };`,
+    ).join("\n");
+    const result = runRule(
+      profiledRule,
+      `import { useEffect } from "react"; import { usePlyrLayoutClasses } from "vidstack"; ${components} ${mutation}`,
+      { filename: "panels.tsx" },
+    );
+
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(mutation ? callCount : 0);
+    expect(referenceFlagReads).toBeGreaterThan(0);
+    expect(referenceFlagReads).toBeLessThanOrEqual(importedReferenceCount);
+  });
+
   it.each([
     ['import { usePlyrLayoutClasses } from "vidstack";', "usePlyrLayoutClasses(element, context)"],
     [

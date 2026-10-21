@@ -169,6 +169,8 @@ const resolveSettings = (
   };
 };
 
+const readonlyVidstackLayoutUtilityImports = new WeakMap<SymbolDescriptor, boolean>();
+
 // Mirrors OXC's `is_react_hook` — matches:
 //   useFoo(...)                 (bare identifier with use prefix)
 //   React.useFoo(...)           (the React namespace)
@@ -205,13 +207,17 @@ const isHookCall = (
         const importedApi = resolveImportedApiReference(callee, scopes);
         if (
           importedApi?.source === "vidstack" &&
-          importedApi.importedName === "usePlyrLayoutClasses" &&
-          symbol.references.every(
-            (reference) =>
-              reference.flag === "read" && !isWithinAssignmentTarget(reference.identifier),
-          )
+          importedApi.importedName === "usePlyrLayoutClasses"
         ) {
-          return null;
+          let isReadOnlyImport = readonlyVidstackLayoutUtilityImports.get(symbol);
+          if (isReadOnlyImport === undefined) {
+            isReadOnlyImport = symbol.references.every(
+              (reference) =>
+                reference.flag === "read" && !isWithinAssignmentTarget(reference.identifier),
+            );
+            readonlyVidstackLayoutUtilityImports.set(symbol, isReadOnlyImport);
+          }
+          if (isReadOnlyImport) return null;
         }
       }
       if (symbol.kind === "parameter" || symbol.kind === "catch-clause-parameter") {
