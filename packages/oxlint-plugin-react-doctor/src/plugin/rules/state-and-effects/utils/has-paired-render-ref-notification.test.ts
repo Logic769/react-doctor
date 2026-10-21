@@ -35,7 +35,192 @@ export const StatusPanel = () => {
 const refWrite = '    phaseRef.current = "busy";';
 const publication = '    setPhase("busy");';
 const display = "{phaseRef.current}";
+const helperPanel = panel.replace(
+  "  return <button onClick={activate}>{phaseRef.current}</button>;",
+  "  const renderAction = () => <button onClick={activate}>Run</button>;\n" +
+    "  return <div>{renderAction()}<span>{phaseRef.current}</span></div>;",
+);
 const cases: NotificationCase[] = [
+  { name: "accepts events in a closed native render helper", source: helperPanel, accepted: true },
+  {
+    name: "accepts an anonymous constant function-expression render helper",
+    source: helperPanel.replace(
+      "() => <button onClick={activate}>Run</button>",
+      "function () { return <button onClick={activate}>Run</button>; }",
+    ),
+    accepted: true,
+  },
+  {
+    name: "declines a named render helper with a separate self binding",
+    source: helperPanel.replace(
+      "() => <button onClick={activate}>Run</button>",
+      "function repeat() { repeat(); return <button onClick={activate}>Run</button>; }",
+    ),
+    accepted: false,
+  },
+  {
+    name: "accepts a closed helper containing both event and distinct display branches",
+    source: helperPanel
+      .replace(
+        "() => <button onClick={activate}>Run</button>",
+        '() => { if (phaseRef.current === "busy") return <span>Working</span>; return <section><button onClick={activate}>Run</button><button onClick={activate}>Start</button></section>; }',
+      )
+      .replace("<span>{phaseRef.current}</span></div>", "</div>"),
+    accepted: true,
+  },
+  {
+    name: "accepts a guarded native event inside a closed render helper",
+    source: helperPanel.replace(
+      "() => <button onClick={activate}>Run</button>",
+      "() => <section>{ready && <button onClick={activate}>Run</button>}</section>",
+    ),
+    accepted: true,
+  },
+  {
+    name: "accepts a closed render helper in a guarded native child",
+    source: helperPanel.replace("{renderAction()}", "{ready && renderAction()}"),
+    accepted: true,
+  },
+  {
+    name: "accepts a closed render helper in a conditional native child",
+    source: helperPanel.replace("{renderAction()}", "{ready ? renderAction() : null}"),
+    accepted: true,
+  },
+  {
+    name: "declines a discarded render helper result",
+    source: helperPanel.replace("  return <div>{renderAction()}", "  renderAction(); return <div>"),
+    accepted: false,
+  },
+  {
+    name: "declines one discarded render helper call beside a returned call",
+    source: helperPanel.replace("  return <div>", "  renderAction(); return <div>"),
+    accepted: false,
+  },
+  {
+    name: "declines an escaped render helper",
+    source: helperPanel.replace("  return <div>", "  consume(renderAction); return <div>"),
+    accepted: false,
+  },
+  {
+    name: "declines a mutable render helper",
+    source: helperPanel.replace("const renderAction", "let renderAction"),
+    accepted: false,
+  },
+  {
+    name: "declines an asynchronous render helper",
+    source: helperPanel.replace("renderAction = ()", "renderAction = async ()"),
+    accepted: false,
+  },
+  {
+    name: "declines a render helper parameter default",
+    source: helperPanel.replace("renderAction = ()", "renderAction = (value = alter())"),
+    accepted: false,
+  },
+  {
+    name: "declines arguments passed into a render helper",
+    source: helperPanel.replace("{renderAction()}", "{renderAction(alter())}"),
+    accepted: false,
+  },
+  {
+    name: "declines an aliased render helper",
+    source: helperPanel.replace(
+      "  return <div>{renderAction()}",
+      "  const draw = renderAction; return <div>{draw()}",
+    ),
+    accepted: false,
+  },
+  {
+    name: "declines a render helper passed through a custom component",
+    source: helperPanel.replace("{renderAction()}", "<Custom>{renderAction()}</Custom>"),
+    accepted: false,
+  },
+  {
+    name: "declines a render helper call in an event callback",
+    source: helperPanel.replace(
+      "{renderAction()}",
+      "<button onClick={() => renderAction()}>Run</button>",
+    ),
+    accepted: false,
+  },
+  {
+    name: "declines a statically inactive guarded render helper call",
+    source: helperPanel.replace("{renderAction()}", "{false && renderAction()}"),
+    accepted: false,
+  },
+  {
+    name: "declines a constant alias guarding an inactive render helper call",
+    source: helperPanel.replace(
+      "  return <div>{renderAction()}",
+      "  const visible = false; return <div>{visible && renderAction()}",
+    ),
+    accepted: false,
+  },
+  {
+    name: "declines a statically inactive conditional render helper call",
+    source: helperPanel.replace("{renderAction()}", "{false ? renderAction() : null}"),
+    accepted: false,
+  },
+  {
+    name: "declines a statically inactive event inside a render helper",
+    source: helperPanel.replace(
+      "() => <button onClick={activate}>Run</button>",
+      "() => <section>{false && <button onClick={activate}>Run</button>}</section>",
+    ),
+    accepted: false,
+  },
+  {
+    name: "declines a render helper called only after a terminal return",
+    source: helperPanel.replace("  return <div>", "  return null; return <div>"),
+    accepted: false,
+  },
+  {
+    name: "declines a constant false helper event return arm",
+    source: helperPanel.replace(
+      "() => <button onClick={activate}>Run</button>",
+      "() => { const visible = false; if (visible) return <button onClick={activate}>Run</button>; return null; }",
+    ),
+    accepted: false,
+  },
+  {
+    name: "declines a constant true alternate helper event return arm",
+    source: helperPanel.replace(
+      "() => <button onClick={activate}>Run</button>",
+      "() => { const inactive = true; if (inactive) return null; else return <button onClick={activate}>Run</button>; }",
+    ),
+    accepted: false,
+  },
+  {
+    name: "declines a constant false component helper-call return arm",
+    source: helperPanel.replace(
+      "  return <div>",
+      "  const visible = false; if (visible) return <div>",
+    ),
+    accepted: false,
+  },
+  {
+    name: "declines loop-controlled helper event returns",
+    source: helperPanel.replace(
+      "() => <button onClick={activate}>Run</button>",
+      "() => { while (ready) return <button onClick={activate}>Run</button>; return null; }",
+    ),
+    accepted: false,
+  },
+  {
+    name: "declines a finally block overriding the helper event return",
+    source: helperPanel.replace(
+      "() => <button onClick={activate}>Run</button>",
+      "() => { try { return <button onClick={activate}>Run</button>; } finally { return null; } }",
+    ),
+    accepted: false,
+  },
+  {
+    name: "declines a loop preceding the helper event return",
+    source: helperPanel.replace(
+      "() => <button onClick={activate}>Run</button>",
+      "() => { while (ready) {} return <button onClick={activate}>Run</button>; }",
+    ),
+    accepted: false,
+  },
   ...["template", "noscript", "textarea", "iframe", "input", "img"].map((tag) => ({
     name: "declines inactive or unsupported display children inside " + tag,
     source: panel.replace(display, "<" + tag + ">{phaseRef.current}</" + tag + ">"),

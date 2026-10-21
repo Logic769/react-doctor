@@ -1,4 +1,5 @@
 import { isRefNotificationNativeElement } from "./is-ref-notification-native-element.js";
+import { isClosedRefNotificationRenderHelper } from "./is-closed-ref-notification-render-helper.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
 import type { RuleContext } from "../../../utils/rule-context.js";
@@ -6,7 +7,6 @@ import { collectRenderReachableExpressions } from "./collect-render-reachable-ex
 import { findEnclosingFunction } from "../../../utils/find-enclosing-function.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
 import { getDirectConstInitializer } from "../../../utils/get-direct-const-initializer.js";
-import { getFunctionBindingIdentifier } from "../../../utils/get-function-binding-name.js";
 import { hasCompleteSymbolReferences } from "../../../utils/has-complete-symbol-references.js";
 import { isDescendantWithoutFunctionBoundary } from "../../../utils/is-descendant-without-function-boundary.js";
 import { isFunctionLike } from "../../../utils/is-function-like.js";
@@ -69,29 +69,18 @@ export const hasRenderedRefPrimitive = ({
   const isRenderOwner = (node: EsTreeNode): boolean => {
     const owner = findEnclosingFunction(node);
     if (owner === componentFunction) return true;
-    if (!isFunctionLike(owner) || owner.async || owner.generator) return false;
-    const identifier = getFunctionBindingIdentifier(owner);
-    const symbol = identifier && context.scopes.symbolFor(identifier);
-    if (
-      !symbol ||
-      getDirectConstInitializer(symbol) !== owner ||
-      symbol.references.length === 0 ||
-      !hasCompleteSymbolReferences(symbol, program, context.scopes)
-    )
-      return false;
-    return symbol.references.every((reference) => {
-      const root = findTransparentExpressionRoot(reference.identifier);
-      const call = root.parent;
-      return (
-        reference.flag === "read" &&
-        isNodeOfType(call, "CallExpression") &&
-        call.callee === root &&
-        !call.optional &&
-        findEnclosingFunction(call) === componentFunction &&
-        expressions.some((expression) => isDescendantWithoutFunctionBoundary(call, expression)) &&
-        isNativeRenderedPosition(call)
-      );
-    });
+    return Boolean(
+      componentFunction &&
+      isClosedRefNotificationRenderHelper({
+        helper: owner,
+        component: componentFunction,
+        program,
+        context,
+        isRenderedCall: (call) =>
+          expressions.some((expression) => isDescendantWithoutFunctionBoundary(call, expression)) &&
+          isNativeRenderedPosition(call),
+      }),
+    );
   };
   const occursInRenderedExpression = (node: EsTreeNode): boolean => {
     const owner = findEnclosingFunction(node);

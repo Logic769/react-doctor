@@ -47,3 +47,14 @@ export const REF_NOTIFICATION_PASSIVE_OBJECT_METHODS: ReadonlySet<string> = new 
 ]);
 export const REF_NOTIFICATION_WORK_COMPONENT_COUNT = 32;
 export const REF_NOTIFICATION_SCOPE_LOOKUPS_PER_COMPONENT_COUNT = 128;
+
+export const REF_NOTIFICATION_UNSUPPORTED_RENDER_CONTROL_TYPES: ReadonlySet<string> = new Set([
+  "ForStatement",
+  "ForInStatement",
+  "ForOfStatement",
+  "WhileStatement",
+  "DoWhileStatement",
+  "SwitchStatement",
+  "TryStatement",
+  "WithStatement",
+]);
