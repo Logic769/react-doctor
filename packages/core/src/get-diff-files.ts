@@ -56,7 +56,7 @@ export const getBaselineDiffPlan = (
   );
 
 /**
- * Programmatic façade over `Git.changedLineRanges` (the `lines` scope). Diffs
+ * Programmatic façade over `Git.changedLineRanges` (the `lines` / `contextual` scopes). Diffs
  * `files` with `--unified=0` against `baseRef` (or the index when `cached`),
  * returning per-file changed line ranges relative to `directory`. Returns
  * `null` when the ranges can't be computed (git unavailable / unsafe ref /
@@ -69,13 +69,12 @@ export const getChangedLineRanges = (input: {
   cached?: boolean;
   files: ReadonlyArray<string>;
   includeUntracked?: boolean;
+  includeDeletions?: boolean;
 }): Promise<ChangedFileLineRanges[] | null> =>
   Effect.runPromise(
     Effect.gen(function* () {
       const git = yield* Git;
       const ranges = yield* git.changedLineRanges(input);
-      return ranges === null
-        ? null
-        : ranges.map((entry) => ({ file: entry.file, ranges: entry.ranges }));
+      return ranges === null ? null : ranges.map((entry) => ({ ...entry }));
     }).pipe(Effect.provide(Git.layerNode)),
   );

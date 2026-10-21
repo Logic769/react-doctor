@@ -62,6 +62,8 @@ export * from "./find-stacked-disable-comments.js";
 export * from "./format-error-chain.js";
 export * from "./get-diagnostic-rule-identity.js";
 export * from "./get-diff-files.js";
+export * from "./utils/create-changed-line-matcher.js";
+export * from "./utils/diagnostic-intersects-line-ranges.js";
 export * from "./highlighter.js";
 export * from "./explicit-lint-include-paths.js";
 export * from "./is-ignored-file.js";

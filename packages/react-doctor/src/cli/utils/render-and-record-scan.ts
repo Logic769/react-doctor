@@ -31,7 +31,7 @@ const silentConsole = makeNoopConsole();
 
 const deriveScope = (options: ResolvedInspectOptions): string => {
   if (options.baseline || options.baselineReport) return "changed";
-  if (options.changedLineRanges !== null) return "lines";
+  if (options.changedLineRanges !== null) return options.contextual ? "contextual" : "lines";
   return options.includePaths.length > 0 ? "files" : "full";
 };
 

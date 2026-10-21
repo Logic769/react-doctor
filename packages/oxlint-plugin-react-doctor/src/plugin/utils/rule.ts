@@ -20,6 +20,7 @@ export type RuleFramework =
   | "preact";
 
 export interface Rule {
+  diffScope?: "line" | "jsx-element" | "function" | "file";
   // Public-facing rule identifier — what users put in their oxlint config
   // (`react-doctor/<id>`) and what shows up in diagnostic output. Owned by
   // the rule itself (not its filename or export-variable name) because
@@ -107,4 +108,12 @@ export interface Rule {
   // the rule catalog).
   recommendationFor?: (hasCapability: CapabilityQuery) => string | undefined;
   create: (context: RuleContext) => RuleVisitors;
+}
+
+export interface RuleRegistryEntry {
+  readonly key: string;
+  readonly id: string;
+  readonly source: "react-doctor";
+  readonly originallyExternal: boolean;
+  readonly rule: Rule & Required<Pick<Rule, "framework" | "category">>;
 }

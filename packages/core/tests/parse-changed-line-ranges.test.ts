@@ -66,4 +66,19 @@ describe("parseChangedLineRanges", () => {
   it("returns an empty array for an empty patch", () => {
     expect(parseChangedLineRanges("")).toEqual([]);
   });
+
+  it("retains deletion gaps only when requested", () => {
+    const patch = "+++ b/app.tsx\n@@ -1,2 +0,0 @@\n-removed\n@@ -8,2 +5,0 @@\n-removed";
+    expect(parseChangedLineRanges(patch, true)).toEqual([
+      { file: "app.tsx", ranges: [], deletionLines: [0, 5] },
+    ]);
+    expect(parseChangedLineRanges(patch)).toEqual([]);
+  });
+
+  it("retains pure renames for contextual file rules", () => {
+    const patch =
+      "diff --git a/old.tsx b/new.tsx\nsimilarity index 100%\nrename from old.tsx\nrename to new.tsx";
+    expect(parseChangedLineRanges(patch, true)).toEqual([{ file: "new.tsx", ranges: [] }]);
+    expect(parseChangedLineRanges(patch)).toEqual([]);
+  });
 });

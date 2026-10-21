@@ -1,3 +1,4 @@
+import { hasClosedLocalCallableListenerRegistration } from "../../utils/has-closed-local-callable-listener-registration.js";
 import { isLayerLifecycleCallback } from "../../utils/is-layer-lifecycle-callback.js";
 import { nodeDominatesNode } from "../../utils/node-dominates-node.js";
 import { isApiPlatformDataProvider } from "../../utils/is-api-platform-data-provider.js";
@@ -1229,7 +1230,8 @@ const isKnownCallableSubscriptionResult = (
   return (
     callee.property.name === "addListener" &&
     usage.node.arguments.length >= 2 &&
-    isKnownReactNavigationReceiver(callee.object, context)
+    (isKnownReactNavigationReceiver(callee.object, context) ||
+      hasClosedLocalCallableListenerRegistration(usage.node, context))
   );
 };
 

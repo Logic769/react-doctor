@@ -457,13 +457,13 @@ const generatedSource = `// GENERATED FILE — do not edit by hand. Run \`pnpm g
 // create the rule file, set its \`id\`, re-run codegen.
 
 import type { Capability } from "./utils/capability.js";
-import type { Rule } from "./utils/rule.js";
+import type { Rule, RuleRegistryEntry } from "./utils/rule.js";
 
 ${importLines}
 
-export const reactDoctorRules = [
+export const reactDoctorRules: ReadonlyArray<RuleRegistryEntry> = [
 ${ruleLines}
-] as const;
+];
 
 export const ruleRegistry: Record<string, Rule> = Object.fromEntries(
   reactDoctorRules.map((rule) => [rule.id, rule.rule]),
@@ -506,6 +506,7 @@ const coreRuleEntries = ruleEntries.map((entry) => {
           ? false
           : undefined,
       matchByOccurrence: sourceRule.matchByOccurrence,
+      diffScope: sourceRule.diffScope,
       isScanRule: typeof sourceRule.scan === "function",
       isProjectRule: sourceRule.execution === "project" ? true : undefined,
     },

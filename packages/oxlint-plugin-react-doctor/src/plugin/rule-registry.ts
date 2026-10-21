@@ -7,7 +7,7 @@
 // create the rule file, set its `id`, re-run codegen.
 
 import type { Capability } from "./utils/capability.js";
-import type { Rule } from "./utils/rule.js";
+import type { Rule, RuleRegistryEntry } from "./utils/rule.js";
 
 import { activeStaticAsset } from "./rules/security-scan/active-static-asset.js";
 import { activityWrapsEffectHeavySubtree } from "./rules/state-and-effects/activity-wraps-effect-heavy-subtree.js";
@@ -916,7 +916,7 @@ import { zustandNoGetDuringInitialization } from "./rules/state-and-effects/zust
 import { zustandNoMutatingState } from "./rules/state-and-effects/zustand-no-mutating-state.js";
 import { zustandNoWholeStoreDestructure } from "./rules/state-and-effects/zustand-no-whole-store-destructure.js";
 
-export const reactDoctorRules = [
+export const reactDoctorRules: ReadonlyArray<RuleRegistryEntry> = [
   {
     key: "react-doctor/active-static-asset",
     id: "active-static-asset",
@@ -12510,7 +12510,7 @@ export const reactDoctorRules = [
       ],
     },
   },
-] as const;
+];
 
 export const ruleRegistry: Record<string, Rule> = Object.fromEntries(
   reactDoctorRules.map((rule) => [rule.id, rule.rule]),

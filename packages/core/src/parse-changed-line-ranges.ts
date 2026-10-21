@@ -1,44 +1,53 @@
 import type { ChangedFileLineRanges } from "./types/index.js";
 
-// New-side hunk header: `@@ -<old> +<newStart>[,<newCount>] @@`. A missing
-// count means one line; a zero count is a pure deletion (no new-side line), so
-// it contributes no changed range. Mirrors the parser that previously lived in
-// `action.yml`'s inline-review step — now the single source of truth.
 const HUNK_HEADER_PATTERN = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
 
-/**
- * Parses a `git diff --unified=0` patch into the inclusive 1-based line ranges
- * each file added or modified on the new side. Files are keyed by the path in
- * the `+++ b/<path>` header (with `--relative`, relative to the diff's cwd).
- * Added/renamed/modified files appear; pure deletions (`+++ /dev/null`) are
- * skipped because they have no new-side line to report on.
- */
-export const parseChangedLineRanges = (patch: string): ChangedFileLineRanges[] => {
-  const rangesByFile = new Map<string, Array<readonly [number, number]>>();
-  let currentRanges: Array<readonly [number, number]> | null = null;
+interface MutableChangedFileLineRanges {
+  file: string;
+  ranges: Array<readonly [number, number]>;
+  deletionLines: number[];
+}
+
+export const parseChangedLineRanges = (
+  patch: string,
+  includeDeletions = false,
+): ChangedFileLineRanges[] => {
+  const changesByFile = new Map<string, MutableChangedFileLineRanges>();
+  let currentChanges: MutableChangedFileLineRanges | null = null;
 
   for (const line of patch.split("\n")) {
+    if (includeDeletions && line.startsWith("rename to ")) {
+      const file = line.slice("rename to ".length);
+      changesByFile.set(file, { file, ranges: [], deletionLines: [] });
+    }
     if (line.startsWith("+++ ")) {
       const target = line.slice(4).trim();
       if (target === "/dev/null") {
-        currentRanges = null;
+        currentChanges = null;
         continue;
       }
       const file = target.startsWith("b/") ? target.slice(2) : target;
-      currentRanges = rangesByFile.get(file) ?? [];
-      rangesByFile.set(file, currentRanges);
+      currentChanges = changesByFile.get(file) ?? { file, ranges: [], deletionLines: [] };
+      changesByFile.set(file, currentChanges);
       continue;
     }
-    if (currentRanges === null) continue;
+    if (currentChanges === null) continue;
     const hunk = HUNK_HEADER_PATTERN.exec(line);
     if (hunk === null) continue;
     const start = Number(hunk[1]);
     const lineCount = hunk[2] === undefined ? 1 : Number(hunk[2]);
-    if (lineCount <= 0) continue;
-    currentRanges.push([start, start + lineCount - 1]);
+    if (lineCount === 0) {
+      if (includeDeletions) currentChanges.deletionLines.push(start);
+    } else {
+      currentChanges.ranges.push([start, start + lineCount - 1]);
+    }
   }
 
-  return [...rangesByFile]
-    .filter(([, ranges]) => ranges.length > 0)
-    .map(([file, ranges]) => ({ file, ranges }));
+  return [...changesByFile.values()]
+    .filter((entry) => entry.ranges.length > 0 || includeDeletions)
+    .map(({ file, ranges, deletionLines }) => ({
+      file,
+      ranges,
+      ...(deletionLines.length > 0 ? { deletionLines } : {}),
+    }));
 };

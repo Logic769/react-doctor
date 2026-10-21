@@ -477,13 +477,14 @@ const runInspectWithRuntime = async (
       baselineDelta = comparison.baselineDelta;
     }
   } else if (options.changedLineRanges !== null && isDiffMode) {
-    // `--scope lines`: keep diagnostics whose source spans touch the change.
+    // Contextual filtering expands selected rules beyond their diagnostic span.
     // Runs at the same post-lint seam as baseline (the score is already
     // computed on the full head set), so the gate, summary, and inline
     // comments all narrow together.
     inspectDiagnostics = filterDiagnosticsByChangedLines({
       directory,
       diagnostics: headDiagnostics,
+      contextual: options.contextual,
       changedLineRanges: options.changedLineRanges,
     });
   }

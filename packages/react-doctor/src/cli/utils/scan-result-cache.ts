@@ -492,6 +492,7 @@ export const buildScanResultCacheKey = async (
       // `null` (not a `lines` scope) and an omitted field hash identically, so a
       // non-lines lookup matches a non-lines store; only real ranges shift the key.
       changedLineRanges: input.options.changedLineRanges ?? undefined,
+      contextual: input.options.contextual ?? false,
       noScore: input.options.noScore,
       isCi: input.options.isCi,
       suppressRendering: input.options.suppressRendering,
