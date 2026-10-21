@@ -1525,3 +1525,110 @@ describe("imported static data getters", () => {
     }
   });
 });
+
+describe("non-React Vidstack layout utility", () => {
+  it.each([
+    ['import { usePlyrLayoutClasses } from "vidstack";', "usePlyrLayoutClasses(element, context)"],
+    [
+      'import { usePlyrLayoutClasses as useLayoutClasses } from "vidstack";',
+      "useLayoutClasses(element, context)",
+    ],
+  ])("accepts the exact imported utility: %s", (declaration, call) => {
+    const result = runTsx(`
+      import { useEffect } from "react";
+      ${declaration}
+      export const Panel = ({ element, context }) => {
+        useEffect(() => {
+          if (!element) return;
+          return ${call};
+        }, [element, context]);
+        return <section />;
+      };
+    `);
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it.each([
+    "export const Panel = ({element, context, enabled}) => { if (enabled) usePlyrLayoutClasses(element, context); return <section />; };",
+    "export const Panel = async ({element, context}) => { usePlyrLayoutClasses(element, context); return <section />; };",
+  ])("does not assign React ordering to the utility: %s", (component) => {
+    const result = runTsx(`import {usePlyrLayoutClasses} from "vidstack"; ${component}`);
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it.each([
+    ['import {usePlyrLayoutClasses} from "./layout";', "usePlyrLayoutClasses(element, context)"],
+    [
+      'import {usePlyrLayoutClasses} from "other-runtime";',
+      "usePlyrLayoutClasses(element, context)",
+    ],
+    [
+      'import {usePlyrLayoutClasses} from "maverick.js/react";',
+      "usePlyrLayoutClasses(element, context)",
+    ],
+    ['import usePlyrLayoutClasses from "vidstack";', "usePlyrLayoutClasses(element, context)"],
+    [
+      'import type {usePlyrLayoutClasses} from "vidstack";',
+      "usePlyrLayoutClasses(element, context)",
+    ],
+    ['import {useUnknown} from "vidstack";', "useUnknown(element, context)"],
+    ['import {useState as useCounter} from "react";', "useCounter(0)"],
+    ['import {useQuery} from "@tanstack/react-query";', "useQuery({})"],
+    [
+      'import {usePlyrLayoutClasses as importedUtility} from "vidstack"; const useLayoutClasses = importedUtility;',
+      "useLayoutClasses(element, context)",
+    ],
+    [
+      "const usePlyrLayoutClasses = () => { const [value] = useState(0); return value; };",
+      "usePlyrLayoutClasses(element, context)",
+    ],
+  ])("keeps unproven nested Hook checks: %s", (declaration, call) => {
+    const result = runTsx(`
+      import { useEffect, useState } from "react";
+      ${declaration}
+      export const Panel = ({ element, context }) => {
+        useEffect(() => {
+          if (!element) return;
+          return ${call};
+        }, [element, context]);
+        return <section />;
+      };
+    `);
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(1);
+  });
+
+  it.each([
+    "usePlyrLayoutClasses = replacement;",
+    "({utility: usePlyrLayoutClasses} = replacement);",
+    "for (usePlyrLayoutClasses of replacements) {}",
+  ])("keeps checks after an imported binding is written: %s", (mutation) => {
+    const result = runTsx(`
+      import { useEffect } from "react";
+      import { usePlyrLayoutClasses } from "vidstack";
+      ${mutation}
+      export const Panel = ({ element, context }) => {
+        useEffect(() => usePlyrLayoutClasses(element, context), [element, context]);
+        return <section />;
+      };
+    `);
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(1);
+  });
+
+  it("does not exempt a genuine Hook that shadows the imported utility", () => {
+    const result = runTsx(`
+      import { useEffect, useState } from "react";
+      import { usePlyrLayoutClasses } from "vidstack";
+      export const Panel = () => {
+        const usePlyrLayoutClasses = () => useState(0);
+        useEffect(() => usePlyrLayoutClasses(), []);
+        return <section />;
+      };
+    `);
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(1);
+  });
+});
