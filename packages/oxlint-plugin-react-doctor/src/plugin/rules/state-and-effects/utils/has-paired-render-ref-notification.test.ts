@@ -36,6 +36,128 @@ const refWrite = '    phaseRef.current = "busy";';
 const publication = '    setPhase("busy");';
 const display = "{phaseRef.current}";
 const cases: NotificationCase[] = [
+  ...["template", "noscript", "textarea", "iframe", "input", "img"].map((tag) => ({
+    name: "declines inactive or unsupported display children inside " + tag,
+    source: panel.replace(display, "<" + tag + ">{phaseRef.current}</" + tag + ">"),
+    accepted: false,
+    ruleReports: 1,
+  })),
+  {
+    name: "declines an ambient function Object provider",
+    source: "declare function Object(): unknown;\nObject.keys({});\n" + panel,
+    accepted: false,
+    ruleReports: 1,
+  },
+  {
+    name: "declines an ambient const Object provider",
+    source:
+      "declare const Object: { keys: (value: unknown) => unknown };\nObject.keys({});\n" + panel,
+    accepted: false,
+    ruleReports: 1,
+  },
+  {
+    name: "keeps an erased interface Object beside a genuine passive call",
+    source: "interface Object {}\nObject.keys({});\n" + panel,
+    accepted: true,
+    ruleReports: 0,
+  },
+  {
+    name: "keeps an erased type Object beside a genuine passive call",
+    source: "type Object = unknown;\nObject.keys({});\n" + panel,
+    accepted: true,
+    ruleReports: 0,
+  },
+  {
+    name: "declines a runtime shadowed passive Object provider",
+    source: "const Object = { keys: (value) => value };\nObject.keys({});\n" + panel,
+    accepted: false,
+    ruleReports: 1,
+  },
+  {
+    name: "keeps an unused ambient Object declaration",
+    source: "declare function Object(): unknown;\n" + panel,
+    accepted: true,
+    ruleReports: 0,
+  },
+  {
+    name: "preserves an actual document title text publication",
+    source: panel.replace(display, "<title>{phaseRef.current}</title>"),
+    accepted: true,
+    ruleReports: 0,
+  },
+  {
+    name: "declines an unknown React event attribute",
+    source: panel.replace("onClick={activate}", "onNotAReactEvent={activate}"),
+    accepted: false,
+    ruleReports: 1,
+  },
+  ...[
+    "<Drop><button onClick={activate}>Run</button></Drop>",
+    "<template><button onClick={activate}>Run</button></template>",
+    "<fieldset disabled><button onClick={activate}>Run</button></fieldset>",
+    "<fieldset {...{disabled:true}}><button onClick={activate}>Run</button></fieldset>",
+  ].map((event) => ({
+    name: "declines an event host without a native rendered event witness " + event,
+    source: panel
+      .replace(
+        "export const StatusPanel",
+        "const Drop = ({children}) => null;\nexport const StatusPanel",
+      )
+      .replace(
+        "return <button onClick={activate}>{phaseRef.current}</button>;",
+        "return <>" + event + "<span>{phaseRef.current}</span></>;",
+      ),
+    accepted: false,
+    ruleReports: 1,
+  })),
+  ...["section", "input", "textarea"].map((tag) => ({
+    name: "preserves a real native click host " + tag,
+    source: panel.replace(
+      "return <button onClick={activate}>{phaseRef.current}</button>;",
+      tag === "section"
+        ? "return <><section><button onClick={activate}>Run</button></section><span>{phaseRef.current}</span></>;"
+        : "return <><" + tag + " onClick={activate}/><span>{phaseRef.current}</span></>;",
+    ),
+    accepted: true,
+    ruleReports: 0,
+  })),
+  {
+    name: "declines an explicit custom JSX factory",
+    source: "/** @jsx customJsx */\nconst customJsx=(tag,props,...children)=>null;\n" + panel,
+    accepted: false,
+    ruleReports: 1,
+  },
+  ...[
+    'const note="@jsx customJsx";',
+    'const notes={Function:"note",Object:"note",module:"note"};',
+    "class Notes { static Function() {} }",
+    "type Notes = ({Function}:{Function:string}) => void;",
+    'Object.keys({note:"passive"});',
+    'Object.freeze({note:"passive"});',
+  ].map((prefix) => ({
+    name: "preserves inert metadata or a genuine passive builtin " + prefix,
+    source: prefix + "\n" + panel,
+    accepted: true,
+    ruleReports: 0,
+  })),
+  ...["interface useCallback {}", "type useCallback = unknown;"].map((prefix) => ({
+    name: "preserves the unique runtime callback import beside " + prefix,
+    source: panel.replace("export const StatusPanel", prefix + "\nexport const StatusPanel"),
+    accepted: true,
+    ruleReports: 0,
+  })),
+  ...[
+    'import ReactProvider from "react"; ReactProvider.useRef=()=>({current:"idle"});',
+    'import {default as ReactProvider} from "react"; ReactProvider.useRef=()=>({current:"idle"});',
+    'const replace = Function("return 1");',
+    'module["require"]("react").useRef=()=>({current:"idle"});',
+  ].map((prefix) => ({
+    name: "declines an alternate mutable runtime provider path " + prefix,
+    source: panel.replace("export const StatusPanel", prefix + "\nexport const StatusPanel"),
+    accepted: false,
+    ruleReports: 1,
+  })),
+
   {
     name: "declines a named writer without any native event use",
     source: panel.replace("onClick={activate}", ""),

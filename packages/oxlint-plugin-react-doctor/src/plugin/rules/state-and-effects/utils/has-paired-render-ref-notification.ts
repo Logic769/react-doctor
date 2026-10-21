@@ -7,14 +7,13 @@ import { findEnclosingFunction } from "../../../utils/find-enclosing-function.js
 import { findProgramRoot } from "../../../utils/find-program-root.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
 import { getFunctionBindingIdentifier } from "../../../utils/get-function-binding-name.js";
-import { isJsxAttributeOnIntrinsicHtmlElement } from "../../../utils/is-on-intrinsic-html-element.js";
-import { getImportDeclarationForSymbol } from "../../../utils/get-import-declaration-for-symbol.js";
+import { isRefNotificationNativeEvent } from "./is-ref-notification-native-event.js";
+import { hasRefNotificationReactCall } from "./has-ref-notification-react-call.js";
 import { getDirectConstInitializer } from "../../../utils/get-direct-const-initializer.js";
 import { hasCompleteSymbolReferences } from "../../../utils/has-complete-symbol-references.js";
 import { isFunctionLike } from "../../../utils/is-function-like.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { isNodeReachableWithinFunction } from "../../../utils/is-node-reachable-within-function.js";
-import { isReactApiCall } from "../../../utils/is-react-api-call.js";
 import { isWithinAssignmentTarget } from "../../../utils/is-within-assignment-target.js";
 import { readConstantBoolean } from "../../../utils/read-constant-boolean.js";
 import { resolveReactRefSymbol } from "../../../utils/react-ref-origin.js";
@@ -56,32 +55,6 @@ const refMember = (node: EsTreeNode, symbol: SymbolDescriptor, context: RuleCont
   );
 };
 
-const isRuntimeReactCall = (call: EsTreeNode, name: string, context: RuleContext): boolean => {
-  if (
-    !isNodeOfType(call, "CallExpression") ||
-    call.optional ||
-    !isReactApiCall(call, name, context.scopes)
-  )
-    return false;
-  const callee = stripParenExpression(call.callee);
-  if (!isNodeOfType(callee, "Identifier")) return false;
-  const symbol = context.scopes.symbolFor(callee);
-  const declaration = symbol && getImportDeclarationForSymbol(symbol);
-  const program = findProgramRoot(call);
-  return Boolean(
-    symbol &&
-    program &&
-    declaration &&
-    declaration.importKind !== "type" &&
-    isNodeOfType(symbol.declarationNode, "ImportSpecifier") &&
-    symbol.declarationNode.importKind !== "type" &&
-    hasCompleteSymbolReferences(symbol, program, context.scopes) &&
-    symbol.references.every(
-      (reference) => reference.flag === "read" && !isWithinAssignmentTarget(reference.identifier),
-    ),
-  );
-};
-
 export const hasPairedRenderRefNotification = (
   binding: UseStateBinding,
   componentBody: EsTreeNode,
@@ -94,7 +67,7 @@ export const hasPairedRenderRefNotification = (
     !isNodeOfType(declarator.init, "CallExpression") ||
     !isNodeOfType(declarator.parent, "VariableDeclaration") ||
     declarator.parent.kind !== "const" ||
-    !isRuntimeReactCall(declarator.init, "useState", context) ||
+    !hasRefNotificationReactCall(declarator.init, "useState", context) ||
     declarator.init.arguments.length !== 1
   )
     return false;
@@ -159,7 +132,7 @@ export const hasPairedRenderRefNotification = (
       !isFunctionLike(owner) ||
       owner === componentFunction ||
       !isNodeOfType(initializer, "CallExpression") ||
-      !isRuntimeReactCall(initializer, "useRef", context) ||
+      !hasRefNotificationReactCall(initializer, "useRef", context) ||
       initializer.arguments.length !== 1 ||
       findEnclosingFunction(symbol.declarationNode) !== componentFunction ||
       !Object.is(primitiveLiteral(initializer.arguments[0])?.value, initial.value)
@@ -196,7 +169,7 @@ export const hasPairedRenderRefNotification = (
     }
     if (
       isNodeOfType(ownerRoot.parent, "CallExpression") &&
-      (!isRuntimeReactCall(ownerRoot.parent, "useCallback", context) ||
+      (!hasRefNotificationReactCall(ownerRoot.parent, "useCallback", context) ||
         ownerRoot.parent.arguments.length !== 2 ||
         ownerRoot.parent.arguments[0] !== ownerRoot)
     )
@@ -220,7 +193,7 @@ export const hasPairedRenderRefNotification = (
           !isNodeOfType(attribute, "JSXAttribute") ||
           !isNodeOfType(attribute.name, "JSXIdentifier") ||
           !/^on[A-Z]/.test(attribute.name.name) ||
-          !isJsxAttributeOnIntrinsicHtmlElement(attribute)
+          !isRefNotificationNativeEvent(attribute, componentFunction, context)
         );
       })
     )
@@ -249,7 +222,7 @@ export const hasPairedRenderRefNotification = (
       !isNodeOfType(hook, "CallExpression") ||
       hook.arguments.length !== 2 ||
       hook.arguments[0] !== owner ||
-      !isRuntimeReactCall(hook, "useLayoutEffect", context)
+      !hasRefNotificationReactCall(hook, "useLayoutEffect", context)
     )
       return false;
     const consequent = isNodeOfType(guard.consequent, "BlockStatement")

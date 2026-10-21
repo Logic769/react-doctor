@@ -1,3 +1,4 @@
+import { isRefNotificationNativeElement } from "./is-ref-notification-native-element.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
 import type { RuleContext } from "../../../utils/rule-context.js";
@@ -23,7 +24,11 @@ interface RenderedRefPrimitiveOptions {
   context: RuleContext;
 }
 
-const readNativeBranchText = (node: EsTreeNode, requireCompleteText: boolean): string | null => {
+const readNativeBranchText = (
+  node: EsTreeNode,
+  requireCompleteText: boolean,
+  context: RuleContext,
+): string | null => {
   const expression = stripParenExpression(node);
   if (isNodeOfType(expression, "JSXText")) return expression.value;
   if (isNodeOfType(expression, "Literal")) {
@@ -34,17 +39,16 @@ const readNativeBranchText = (node: EsTreeNode, requireCompleteText: boolean): s
   if (isNodeOfType(expression, "JSXExpressionContainer")) {
     const child = stripParenExpression(expression.expression);
     if (!requireCompleteText && !isNodeOfType(child, "Literal")) return "";
-    return readNativeBranchText(child, requireCompleteText);
+    return readNativeBranchText(child, requireCompleteText, context);
   }
   if (isNodeOfType(expression, "JSXElement") || isNodeOfType(expression, "JSXFragment")) {
     if (
       isNodeOfType(expression, "JSXElement") &&
-      (!isNodeOfType(expression.openingElement.name, "JSXIdentifier") ||
-        !/^[a-z]/.test(expression.openingElement.name.name))
+      !isRefNotificationNativeElement(expression, context.scopes, true)
     )
       return null;
     const children = expression.children.map((child) =>
-      readNativeBranchText(child, requireCompleteText),
+      readNativeBranchText(child, requireCompleteText, context),
     );
     if (children.some((child) => child === null)) return null;
     if (!requireCompleteText) return children.find((child) => child?.trim()) ?? "";
@@ -106,8 +110,7 @@ export const hasRenderedRefPrimitive = ({
     while (cursor && !isFunctionLike(cursor)) {
       if (
         isNodeOfType(cursor, "JSXElement") &&
-        (!isNodeOfType(cursor.openingElement.name, "JSXIdentifier") ||
-          !/^[a-z]/.test(cursor.openingElement.name.name))
+        !isRefNotificationNativeElement(cursor, context.scopes, true)
       )
         return false;
       const expressionRoot = findTransparentExpressionRoot(cursor);
@@ -234,7 +237,7 @@ export const hasRenderedRefPrimitive = ({
         (isNodeOfType(stripParenExpression(parent.right), "JSXElement") ||
           isNodeOfType(stripParenExpression(parent.right), "JSXFragment"))
       ) {
-        const branchText = readNativeBranchText(parent.right, false)?.replace(/\s+/g, "");
+        const branchText = readNativeBranchText(parent.right, false, context)?.replace(/\s+/g, "");
         return Boolean(branchText && isNativeRenderedPosition(parent));
       }
       return reachesDisplay(parent, true);
@@ -252,8 +255,11 @@ export const hasRenderedRefPrimitive = ({
           isNodeOfType(alternate, "JSXElement") || isNodeOfType(alternate, "JSXFragment");
         const selectedBranch = hasConsequentJsx ? consequent : alternate;
         const otherBranch = hasConsequentJsx ? alternate : consequent;
-        const selectedText = readNativeBranchText(selectedBranch, false)?.replace(/\s+/g, "");
-        const otherText = readNativeBranchText(otherBranch, true)?.replace(/\s+/g, "");
+        const selectedText = readNativeBranchText(selectedBranch, false, context)?.replace(
+          /\s+/g,
+          "",
+        );
+        const otherText = readNativeBranchText(otherBranch, true, context)?.replace(/\s+/g, "");
         return Boolean(
           isPredicate &&
           isNativeRenderedPosition(parent) &&
@@ -301,13 +307,16 @@ export const hasRenderedRefPrimitive = ({
         return roots.some((expression) => {
           if (!isNodeOfType(expression, "JSXElement") && !isNodeOfType(expression, "JSXFragment"))
             return false;
-          const selectedText = readNativeBranchText(expression, false)?.replace(/\s+/g, "");
+          const selectedText = readNativeBranchText(expression, false, context)?.replace(
+            /\s+/g,
+            "",
+          );
           return (
             selectedText &&
             isNativeRenderedPosition(expression, parent) &&
             returnValues.every((other) => {
               if (other === expression) return true;
-              const otherText = readNativeBranchText(other, true)?.replace(/\s+/g, "");
+              const otherText = readNativeBranchText(other, true, context)?.replace(/\s+/g, "");
               return otherText !== undefined && !otherText.includes(selectedText);
             })
           );
