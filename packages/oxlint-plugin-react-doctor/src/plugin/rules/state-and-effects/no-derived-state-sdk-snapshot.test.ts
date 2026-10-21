@@ -13,6 +13,7 @@ import { runRule } from "../../../test-utils/run-rule.js";
 import { resetManifestCaches } from "../../utils/read-nearest-package-manifest.js";
 import { wrapWithSemanticContext } from "../../utils/wrap-with-semantic-context.js";
 import { noDerivedState } from "./no-derived-state.js";
+import { noDerivedStateEffect } from "./no-derived-state-effect.js";
 
 interface SdkSnapshotCase {
   name: string;
@@ -1020,5 +1021,26 @@ describe("SDK snapshot erased bindings and transparent values", () => {
         forceJsx: true,
       }),
     ).toEqual({ diagnostics: [], parseErrors: [] });
+  });
+});
+
+describe.each([
+  { name: "direct", rule: noDerivedStateEffect },
+  { name: "semantic wrapper", rule: wrapWithSemanticContext(noDerivedStateEffect) },
+])("SDK snapshots in the companion effect rule ($name)", ({ rule }) => {
+  it.each([
+    { name: "ordinary-sdk-snapshot-pair", expectedCount: 0 },
+    { name: "cleanup-different-callback", expectedCount: 1 },
+    { name: "unrelated-state-copy-same-effect", expectedCount: 1 },
+    { name: "companion-effect-family-preservation", expectedCount: 1 },
+  ])("$name", ({ name, expectedCount }) => {
+    const fixture = sdkSnapshotCases.find((candidate) => candidate.name === name);
+    if (!fixture) throw Error(`Missing SDK snapshot fixture: ${name}`);
+    const result = runRule(rule, fixture.code, {
+      filename: path.join(fixtureDirectory, "source.tsx"),
+      forceJsx: true,
+    });
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(expectedCount);
   });
 });
