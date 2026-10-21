@@ -1,20 +1,17 @@
 import type { SymbolDescriptor } from "../semantic/scope-analysis.js";
+import type { EsTreeNodeOfType } from "./es-tree-node-of-type.js";
 import { getDestructuredBindingPropertyName } from "./get-destructured-binding-property-name.js";
+import { hasReadonlySymbolReferences } from "./has-readonly-symbol-references.js";
 import { isNodeOfType } from "./is-node-of-type.js";
-import { isWithinAssignmentTarget } from "./is-within-assignment-target.js";
 import { stripParenExpression } from "./strip-paren-expression.js";
 
-export const isNitroRuntimeAppGetter = (symbol: SymbolDescriptor): boolean => {
-  const declaration = symbol.declarationNode;
-  if (
-    symbol.kind !== "const" ||
-    !isNodeOfType(declaration, "VariableDeclarator") ||
-    !isNodeOfType(declaration.id, "ObjectPattern") ||
-    !declaration.init
-  )
-    return false;
+const nitroRuntimeAppGetterProofs = new WeakMap<SymbolDescriptor, boolean>();
+
+const nitroBindingPatternProofs = new WeakMap<EsTreeNodeOfType<"ObjectPattern">, boolean>();
+
+const computeStaticNitroBindingPattern = (pattern: EsTreeNodeOfType<"ObjectPattern">): boolean => {
   const propertyNames = new Set<string>();
-  for (const property of declaration.id.properties) {
+  for (const property of pattern.properties) {
     if (
       !isNodeOfType(property, "Property") ||
       property.kind !== "init" ||
@@ -27,7 +24,28 @@ export const isNitroRuntimeAppGetter = (symbol: SymbolDescriptor): boolean => {
       return false;
     propertyNames.add(property.key.name);
   }
+  return true;
+};
+
+const hasStaticNitroBindingPattern = (pattern: EsTreeNodeOfType<"ObjectPattern">): boolean => {
+  const cached = nitroBindingPatternProofs.get(pattern);
+  if (cached !== undefined) return cached;
+  const isStaticPattern = computeStaticNitroBindingPattern(pattern);
+  nitroBindingPatternProofs.set(pattern, isStaticPattern);
+  return isStaticPattern;
+};
+
+const computeNitroRuntimeAppGetter = (symbol: SymbolDescriptor): boolean => {
+  const declaration = symbol.declarationNode;
+  if (
+    symbol.kind !== "const" ||
+    !isNodeOfType(declaration, "VariableDeclarator") ||
+    !isNodeOfType(declaration.id, "ObjectPattern") ||
+    !declaration.init
+  )
+    return false;
   if (getDestructuredBindingPropertyName(symbol.bindingIdentifier) !== "useNitroApp") return false;
+  if (!hasStaticNitroBindingPattern(declaration.id)) return false;
   const initializer = stripParenExpression(declaration.init);
   if (!isNodeOfType(initializer, "AwaitExpression")) return false;
   const imported = stripParenExpression(initializer.argument);
@@ -38,8 +56,14 @@ export const isNitroRuntimeAppGetter = (symbol: SymbolDescriptor): boolean => {
     (!("phase" in imported) || imported.phase == null) &&
     isNodeOfType(imported.source, "Literal") &&
     imported.source.value === "nitropack/runtime" &&
-    symbol.references.every(
-      (reference) => reference.flag === "read" && !isWithinAssignmentTarget(reference.identifier),
-    )
+    hasReadonlySymbolReferences(symbol)
   );
+};
+
+export const isNitroRuntimeAppGetter = (symbol: SymbolDescriptor): boolean => {
+  const cached = nitroRuntimeAppGetterProofs.get(symbol);
+  if (cached !== undefined) return cached;
+  const isGetter = computeNitroRuntimeAppGetter(symbol);
+  nitroRuntimeAppGetterProofs.set(symbol, isGetter);
+  return isGetter;
 };
