@@ -17,6 +17,7 @@ import * as path from "node:path";
 import { afterAll, describe, expect, it } from "vite-plus/test";
 
 import { clearIgnorePatternsCache, collectIgnorePatterns, runOxlint } from "@react-doctor/core";
+import type { RunOxlintFileCoverage } from "@react-doctor/core";
 import {
   buildIsolatedDerivedStateRuleConfig,
   buildTestProject,
@@ -184,32 +185,42 @@ describe("default behavior: respect additional ignore-file sources", () => {
     expect(filesWithIssues.has("src/normal.tsx")).toBe(true);
   });
 
-  it.each([
-    { useGit: false, absolutePaths: false },
-    { useGit: true, absolutePaths: false },
-    { useGit: false, absolutePaths: true },
-    { useGit: true, absolutePaths: true },
-  ])(
-    "honors ordered Linguist overrides (Git: $useGit, absolute paths: $absolutePaths)",
-    async ({ useGit, absolutePaths }) => {
-      const projectDir = setupCase(`gitattributes-overrides-${useGit}-${absolutePaths}`, {
-        "src/normal.tsx": DERIVED_STATE_SOURCE,
-        "src/unset.tsx": DERIVED_STATE_SOURCE,
-        "src/unspecified.tsx": DERIVED_STATE_SOURCE,
-        "src/generated.tsx": DERIVED_STATE_SOURCE,
-        "src/vendored.tsx": DERIVED_STATE_SOURCE,
-        ".gitattributes": [
-          "src/** linguist-generated linguist-vendored",
-          "src/** linguist-generated=false",
-          "src/normal.tsx linguist-vendored=false",
-          "src/unset.tsx -linguist-vendored",
-          "src/unspecified.tsx !linguist-vendored",
-          "src/generated.tsx linguist-generated=true linguist-vendored=false",
-        ].join("\n"),
-      });
+  it.each(
+    [
+      { useGit: false, absolutePaths: false },
+      { useGit: true, absolutePaths: false },
+      { useGit: false, absolutePaths: true },
+      { useGit: true, absolutePaths: true },
+    ].flatMap((fixture) =>
+      [false, true].map((perFileLintCacheEnabled) => ({ ...fixture, perFileLintCacheEnabled })),
+    ),
+  )(
+    "honors ordered Linguist overrides (Git: $useGit, absolute paths: $absolutePaths, cache: $perFileLintCacheEnabled)",
+    async ({ useGit, absolutePaths, perFileLintCacheEnabled }) => {
+      const projectDir = setupCase(
+        `gitattributes-overrides-${useGit}-${absolutePaths}-${perFileLintCacheEnabled}`,
+        {
+          "src/normal.tsx": DERIVED_STATE_SOURCE,
+          "src/unset.tsx": DERIVED_STATE_SOURCE,
+          "src/unspecified.tsx": DERIVED_STATE_SOURCE,
+          "src/generated.tsx": DERIVED_STATE_SOURCE,
+          "src/vendored.tsx": DERIVED_STATE_SOURCE,
+          ".gitattributes": [
+            "src/** linguist-generated linguist-vendored",
+            "src/** linguist-generated=false",
+            "src/normal.tsx linguist-vendored=false",
+            "src/unset.tsx -linguist-vendored",
+            "src/unspecified.tsx !linguist-vendored",
+            "src/generated.tsx linguist-generated=true linguist-vendored=false",
+          ].join("\n"),
+        },
+      );
       if (useGit) initGitRepo(projectDir);
-
-      const diagnostics = await runOxlint({
+      fs.mkdirSync(path.join(projectDir, "node_modules"), { recursive: true });
+      const coverageSnapshots: RunOxlintFileCoverage[] = [];
+      const cacheHits: number[] = [];
+      const cacheTotals: number[] = [];
+      const scanOptions = {
         rootDirectory: projectDir,
         project: buildTestProject({ rootDirectory: projectDir }),
         includePaths: [
@@ -220,7 +231,19 @@ describe("default behavior: respect additional ignore-file sources", () => {
           "src/vendored.tsx",
         ].map((filePath) => (absolutePaths ? path.join(projectDir, filePath) : filePath)),
         userConfig: { rules: buildIsolatedDerivedStateRuleConfig("no-derived-state-effect") },
-      });
+        perFileLintCacheEnabled,
+        onFileCoverage: (coverage: RunOxlintFileCoverage) => coverageSnapshots.push(coverage),
+        onCacheStats: (hits: number, total: number) => {
+          cacheHits.push(hits);
+          cacheTotals.push(total);
+        },
+      };
+      const diagnostics = await runOxlint(scanOptions);
+      if (perFileLintCacheEnabled) {
+        const warmDiagnostics = await runOxlint(scanOptions);
+        expect(warmDiagnostics).toHaveLength(diagnostics.length);
+        expect(warmDiagnostics).toEqual(expect.arrayContaining(diagnostics));
+      }
 
       const diagnosticPaths = diagnostics.map((diagnostic) =>
         path
@@ -232,6 +255,96 @@ describe("default behavior: respect additional ignore-file sources", () => {
         "src/unset.tsx",
         "src/unspecified.tsx",
       ]);
+      expect(cacheHits).toEqual(perFileLintCacheEnabled ? [0, 3] : []);
+      expect(cacheTotals).toEqual(perFileLintCacheEnabled ? [3, 3] : []);
+      for (const coverage of coverageSnapshots) {
+        expect(coverage.candidateFiles).toHaveLength(3);
+        expect(coverage.analyzedFiles).toHaveLength(3);
+        expect(
+          coverage.analyzedFiles.map((filePath) => path.resolve(projectDir, filePath)).sort(),
+        ).toEqual(
+          coverage.candidateFiles.map((filePath) => path.resolve(projectDir, filePath)).sort(),
+        );
+      }
+    },
+  );
+
+  it.each([false, true])(
+    "refreshes cached Linguist eligibility after attribute edits (Git: %s)",
+    async (useGit) => {
+      const initialAttributes = "src/toggle.tsx linguist-generated\n";
+      const projectDir = setupCase(`gitattributes-cache-edits-${useGit}`, {
+        "src/normal.tsx": DERIVED_STATE_SOURCE,
+        "src/toggle.tsx": DERIVED_STATE_SOURCE,
+        ".gitattributes": initialAttributes,
+      });
+      if (useGit) initGitRepo(projectDir);
+      fs.mkdirSync(path.join(projectDir, "node_modules"), { recursive: true });
+      const cacheHits: number[] = [];
+      const cacheTotals: number[] = [];
+      const scanOptions = {
+        rootDirectory: projectDir,
+        project: buildTestProject({ rootDirectory: projectDir }),
+        includePaths: ["src/normal.tsx", "src/toggle.tsx"],
+        userConfig: { rules: buildIsolatedDerivedStateRuleConfig("no-derived-state-effect") },
+        perFileLintCacheEnabled: true,
+        onCacheStats: (hits: number, total: number) => {
+          cacheHits.push(hits);
+          cacheTotals.push(total);
+        },
+      };
+      const initial = await runOxlint(scanOptions);
+      expect([...new Set(initial.map((diagnostic) => diagnostic.filePath))]).toEqual([
+        "src/normal.tsx",
+      ]);
+      fs.writeFileSync(
+        path.join(projectDir, ".gitattributes"),
+        "src/normal.tsx linguist-generated\n",
+      );
+      const swapped = await runOxlint(scanOptions);
+      expect([...new Set(swapped.map((diagnostic) => diagnostic.filePath))]).toEqual([
+        "src/toggle.tsx",
+      ]);
+      fs.unlinkSync(path.join(projectDir, ".gitattributes"));
+      const withoutAttributes = await runOxlint(scanOptions);
+      expect(
+        [...new Set(withoutAttributes.map((diagnostic) => diagnostic.filePath))].sort(),
+      ).toEqual(["src/normal.tsx", "src/toggle.tsx"]);
+      fs.writeFileSync(path.join(projectDir, ".gitattributes"), initialAttributes);
+      const restored = await runOxlint(scanOptions);
+      expect([...new Set(restored.map((diagnostic) => diagnostic.filePath))]).toEqual([
+        "src/normal.tsx",
+      ]);
+      expect(cacheHits).toEqual([0, 0, 2, 1]);
+      expect(cacheTotals).toEqual([1, 1, 2, 1]);
+    },
+  );
+
+  it.each([false, true])(
+    "does not replay cached diagnostics when every source becomes generated (Git: %s)",
+    async (useGit) => {
+      const projectDir = setupCase(`gitattributes-cache-empty-${useGit}`, {
+        "src/normal.tsx": DERIVED_STATE_SOURCE,
+        "src/toggle.tsx": DERIVED_STATE_SOURCE,
+      });
+      if (useGit) initGitRepo(projectDir);
+      fs.mkdirSync(path.join(projectDir, "node_modules"), { recursive: true });
+      const cacheTotals: number[] = [];
+      const coverageSnapshots: RunOxlintFileCoverage[] = [];
+      const scanOptions = {
+        rootDirectory: projectDir,
+        project: buildTestProject({ rootDirectory: projectDir }),
+        includePaths: ["src/normal.tsx", "src/toggle.tsx"],
+        userConfig: { rules: buildIsolatedDerivedStateRuleConfig("no-derived-state-effect") },
+        perFileLintCacheEnabled: true,
+        onCacheStats: (_hits: number, total: number) => cacheTotals.push(total),
+        onFileCoverage: (coverage: RunOxlintFileCoverage) => coverageSnapshots.push(coverage),
+      };
+      expect(await runOxlint(scanOptions)).not.toEqual([]);
+      fs.writeFileSync(path.join(projectDir, ".gitattributes"), "*.tsx linguist-generated\n");
+      expect(await runOxlint(scanOptions)).toEqual([]);
+      expect(cacheTotals).toEqual([2, 0]);
+      expect(coverageSnapshots.at(-1)).toEqual({ candidateFiles: [], analyzedFiles: [] });
     },
   );
 

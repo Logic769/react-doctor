@@ -460,6 +460,8 @@ export const runOxlint = async (options: RunOxlintOptions): Promise<Diagnostic[]
   const configPath = path.join(configDirectory, "oxlintrc.json");
 
   try {
+    const diagnosticContextDirectory = path.join(configDirectory, "contexts");
+    fs.mkdirSync(diagnosticContextDirectory);
     const oxlintBinary = resolveOxlintBinary();
     // Args shared by every batch regardless of which oxlintrc is active, so
     // the cache path can point separate `-c` configs at the same tsconfig +
@@ -534,28 +536,25 @@ export const runOxlint = async (options: RunOxlintOptions): Promise<Diagnostic[]
     const sizedScanFiles =
       options.precomputedSourceFiles ??
       (includePaths === undefined ? listSourceFilesWithSize(rootDirectory) : null);
-    const candidateFiles =
+    const discoveredFiles =
       sizedScanFiles === null ? (includePaths ?? []) : sizedScanFiles.map((entry) => entry.path);
     const projectIndexModuleSources =
       includePaths === undefined && options.deadlineEpochMs === undefined
-        ? await collectProjectIndexModuleSources(rootDirectory, candidateFiles)
+        ? await collectProjectIndexModuleSources(rootDirectory, discoveredFiles)
         : undefined;
     unpluginAutoImportGlobalScopes = collectUnpluginAutoImportGlobalScopes({
       rootDirectory,
-      candidateFiles,
+      candidateFiles: discoveredFiles,
     });
     const linguistIgnoredPaths = await collectGitLinguistIgnoredPathsCooperative(
       rootDirectory,
-      candidateFiles.map((filePath) => toRelativePath(filePath, rootDirectory)),
+      discoveredFiles.map((filePath) => toRelativePath(filePath, rootDirectory)),
       options.signal,
     );
-    const preparedLintSources = prepareLintSources(
-      rootDirectory,
-      configDirectory,
-      candidateFiles.filter(
-        (filePath) => !linguistIgnoredPaths.has(toRelativePath(filePath, rootDirectory)),
-      ),
+    const candidateFiles = discoveredFiles.filter(
+      (filePath) => !linguistIgnoredPaths.has(toRelativePath(filePath, rootDirectory)),
     );
+    const preparedLintSources = prepareLintSources(rootDirectory, configDirectory, candidateFiles);
     const lintFiles = preparedLintSources.lintFiles;
     const hasPreparedFiles = preparedLintSources.sourcePathByLintPath.size > 0;
     const lintProject =
@@ -570,6 +569,7 @@ export const runOxlint = async (options: RunOxlintOptions): Promise<Diagnostic[]
     }) =>
       createOxlintConfig({
         pluginPath,
+        diagnosticContextDirectory,
         project: lintProject,
         customRulesOnly,
         extendsPaths: overrides.extendsPaths,
@@ -659,6 +659,7 @@ export const runOxlint = async (options: RunOxlintOptions): Promise<Diagnostic[]
           project: lintProject,
           sourcePathByLintPath: preparedLintSources.sourcePathByLintPath,
           sourceMapByLintPath: preparedLintSources.sourceMapByLintPath,
+          diagnosticContextDirectory,
           onPartialFailure: reportPartialFailure,
           onAnalyzedFiles: (filePaths) => {
             analyzedFiles = filePaths;
@@ -1072,6 +1073,7 @@ export const runOxlint = async (options: RunOxlintOptions): Promise<Diagnostic[]
         project: lintProject,
         sourcePathByLintPath: preparedLintSources.sourcePathByLintPath,
         sourceMapByLintPath: preparedLintSources.sourceMapByLintPath,
+        diagnosticContextDirectory,
         onPartialFailure,
         onAnalyzedFiles: (filePaths) => {
           analyzedFiles = filePaths;
