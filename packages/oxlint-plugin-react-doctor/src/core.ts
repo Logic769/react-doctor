@@ -43,6 +43,11 @@ export {
   isReactNativeDependencyName,
 } from "./react-native-dependency-names.js";
 
+export { atomicWriteFile } from "./plugin/utils/atomic-write-file.js";
+export type { DiagnosticContextIdentity } from "./plugin/utils/get-diagnostic-context-path.js";
+export { getDiagnosticContextPath } from "./plugin/utils/get-diagnostic-context-path.js";
+export type { DiagnosticContextRange } from "./plugin/utils/diagnostic-context-range.js";
+
 export { FRAMEWORK_TOKENS } from "./plugin/utils/capability.js";
 export type { Capability, CapabilityQuery, FrameworkToken } from "./plugin/utils/capability.js";
 export type { CoreRuleMetadata } from "./plugin/utils/core-rule-metadata.js";
