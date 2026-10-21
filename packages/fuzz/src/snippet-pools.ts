@@ -314,6 +314,16 @@ export const LIBRARY_SNIPPET_POOL = [
 
 // Module scope — SSR hazards, guard aliases, contexts, caches, styled.
 export const MODULE_SCOPE_SNIPPET_POOL = [
+  `import { useEffect as useCompanionEditableEffect, useRef as useCompanionEditableRef, useState as useCompanionEditableState } from "react";
+export const FuzzCompanionEditablePanel = ({ seed }) => {
+  const [value, setValue] = useCompanionEditableState(seed);
+  const writeValue = (nextValue) => setValue(nextValue);
+  const latest = useCompanionEditableRef({ writeValue });
+  latest.current = { writeValue };
+  const activate = (event) => { event.preventDefault(); writeValue(!value); };
+  useCompanionEditableEffect(() => { setValue(seed); }, [seed]);
+  return <button onClick={activate}>{String(value)}</button>;
+};`,
   `import { useState as useFuzzAncestorState, useEffect as useFuzzAncestorEffect, useRef as useFuzzAncestorRef } from "react"; export const FuzzRendererTextAncestor = ({ seed }) => { const [value, setValue] = useFuzzAncestorState(seed); const writeValue = (nextValue) => setValue(nextValue); const latest = useFuzzAncestorRef({ writeValue }); latest.current = { writeValue }; const activate = () => writeValue(!value); useFuzzAncestorEffect(() => { setValue(seed); }, [seed]); return <noscript><button onClick={activate}>{String(value)}</button></noscript>; };`,
   `const fuzzOrdinaryJsxDescription = "@jsx factory";`,
   `type FuzzErasedCapability = ({ Function: nestedFunction }: { Function: string }) => void; const fuzzInertCapabilityLabels = { Function: "description", constructor: "description", React: "description" };`,

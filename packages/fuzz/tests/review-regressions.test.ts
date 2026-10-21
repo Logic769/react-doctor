@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vite-plus/test";
 import { noDerivedState } from "../../oxlint-plugin-react-doctor/src/plugin/rules/state-and-effects/no-derived-state.js";
+import { noDerivedStateEffect } from "../../oxlint-plugin-react-doctor/src/plugin/rules/state-and-effects/no-derived-state-effect.js";
 import { fuzzRuleWithStats } from "../src/fuzz-rule.js";
 
 const regressionFiles = [
@@ -21,7 +22,15 @@ const regressionFiles = [
   "no-derived-state--review-ancestor-hoisted-script-react19.tsx",
 ];
 
-it.each(regressionFiles)("replays review regression %s", (fileName) => {
+const regressionCases = [
+  ...regressionFiles.map((fileName) => ({ fileName, rule: noDerivedState })),
+  ...[
+    "no-derived-state-effect--editable-native-writer.tsx",
+    "no-derived-state-effect--inactive-native-writer.tsx",
+  ].map((fileName) => ({ fileName, rule: noDerivedStateEffect })),
+];
+
+it.each(regressionCases)("replays review regression $fileName", ({ fileName, rule }) => {
   const corpusPath = fileURLToPath(new URL(`../corpus/regressions/${fileName}`, import.meta.url));
   const code = fs.readFileSync(corpusPath, "utf8");
   const sourceDirective = /^\/\/ file-path: (.+)$/m.exec(code)?.[1];
@@ -30,14 +39,14 @@ it.each(regressionFiles)("replays review regression %s", (fileName) => {
     : corpusPath;
   const verdict = /^\/\/ verdict: (pass|fail)$/m.exec(code)?.[1];
   if (verdict !== "pass" && verdict !== "fail") throw Error("Regression requires a verdict");
-  const result = fuzzRuleWithStats(noDerivedState.id, noDerivedState, {
+  const result = fuzzRuleWithStats(rule.id, rule, {
     iterations: 0,
     corpus: [
       {
         relativePath: `regressions/${fileName}`,
         sourcePath,
         code,
-        ruleIds: [noDerivedState.id],
+        ruleIds: [rule.id],
         verdict,
       },
     ],

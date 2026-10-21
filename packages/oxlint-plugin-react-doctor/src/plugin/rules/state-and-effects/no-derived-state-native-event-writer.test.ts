@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { runRule } from "../../../test-utils/run-rule.js";
 import { wrapWithSemanticContext } from "../../utils/wrap-with-semantic-context.js";
 import { noDerivedState } from "./no-derived-state.js";
+import { noDerivedStateEffect } from "./no-derived-state-effect.js";
 
 interface NativeEventWriterCase {
   name: string;
@@ -798,5 +799,57 @@ describe("native event writer renderer boundaries", () => {
     expect(result.parseErrors).toEqual([]);
     expect(result.diagnostics).toHaveLength(desired);
     if (desired) expect(result.diagnostics[0].nodeType).toBe("CallExpression");
+  });
+});
+
+describe.each([
+  { name: "direct", rule: noDerivedStateEffect },
+  { name: "semantic wrapper", rule: wrapWithSemanticContext(noDerivedStateEffect) },
+])("companion effect native event witnesses ($name)", ({ rule }) => {
+  it.each(nativeEventWriterCases)("$name", ({ code, reportsPropReseed }) => {
+    const result = runRule(rule, code, { forceJsx: true });
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(reportsPropReseed ? 1 : 0);
+  });
+
+  it.each(rendererFixtures.cases)("preserves renderer boundary $name", ({ code, desired }) => {
+    const result = runRule(rule, code, { forceJsx: true });
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(desired);
+  });
+});
+
+describe.each([false, true])("mixed editable and derived state (copy first: %s)", (copyFirst) => {
+  it.each([
+    { name: "direct primary", rule: noDerivedState },
+    { name: "wrapped primary", rule: wrapWithSemanticContext(noDerivedState) },
+    { name: "direct companion", rule: noDerivedStateEffect },
+    { name: "wrapped companion", rule: wrapWithSemanticContext(noDerivedStateEffect) },
+  ])("retains the independent copy for $name", ({ rule }) => {
+    const editableCopy = "setValue(seed);";
+    const independentCopy = "setCaption(label);";
+    const result = runRule(
+      rule,
+      `import { useEffect, useRef, useState } from "react";
+export const Panel = ({ seed, label }) => {
+  const [value, setValue] = useState(seed);
+  const [caption, setCaption] = useState(label);
+  const writeValue = (nextValue) => setValue(nextValue);
+  const latest = useRef({ writeValue });
+  latest.current = { writeValue };
+  const activate = (event) => { event.preventDefault(); writeValue(!value); };
+  useEffect(() => {
+    ${copyFirst ? independentCopy : editableCopy}
+    ${copyFirst ? editableCopy : independentCopy}
+  }, [seed, label]);
+  return <button onClick={activate}>{String(value)}{caption}</button>;
+};`,
+      { forceJsx: true },
+    );
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(1);
+    if (rule.id === noDerivedState.id) {
+      expect(result.diagnostics[0]?.message).toContain('"caption"');
+    }
   });
 });
