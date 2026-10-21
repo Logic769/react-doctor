@@ -111,7 +111,10 @@ const applyGate = (content: string, gate: CiGate): CiEditResult | null => {
 
   command = upsertFlag(command, "blocking", gate.blocking);
   command = upsertFlag(command, "scope", gate.scope);
-  command = command.replace(/\s*--base[ =]"\$CI_MERGE_REQUEST_(DIFF_BASE_SHA|TARGET_BRANCH_NAME)"/, "");
+  command = command.replace(
+    /\s*--base[ =]"\$CI_MERGE_REQUEST_(DIFF_BASE_SHA|TARGET_BRANCH_NAME)"/,
+    "",
+  );
   if (gate.scope !== "full" && !/--base\b/.test(command)) command = `${command}${BASE_FLAG}`;
 
   lines[index] = `${command}${comment}`;
