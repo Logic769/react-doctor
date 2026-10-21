@@ -206,8 +206,12 @@ const isHookCall = (
       if (symbol.kind === "import") {
         const importedApi = resolveImportedApiReference(callee, scopes);
         if (
-          importedApi?.source === "vidstack" &&
-          importedApi.importedName === "usePlyrLayoutClasses" &&
+          ((importedApi?.source === "vidstack" &&
+            importedApi.importedName === "usePlyrLayoutClasses") ||
+            (importedApi?.importedName === "useDeviceLanguage" &&
+              (importedApi.source === "firebase/auth" ||
+                importedApi.source ===
+                  "@react-native-firebase/app/dist/module/internal/web/firebaseAuth"))) &&
           symbol.references.every(
             (reference) =>
               reference.flag === "read" && !isWithinAssignmentTarget(reference.identifier),
