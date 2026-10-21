@@ -4,6 +4,8 @@ import { defineRule } from "../../utils/define-rule.js";
 import type { EsTreeNode } from "../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../utils/es-tree-node-of-type.js";
 import { isNitroRuntimeAppGetter } from "../../utils/is-nitro-runtime-app-getter.js";
+import { hasReadonlySymbolReferences } from "../../utils/has-readonly-symbol-references.js";
+import { resolveRuntimeValueBinding } from "../../utils/resolve-runtime-value-binding.js";
 import { isNodeOfType } from "../../utils/is-node-of-type.js";
 import { isWithinAssignmentTarget } from "../../utils/is-within-assignment-target.js";
 import { isReactComponentOrHookName } from "../../utils/is-react-component-or-hook-name.js";
@@ -170,6 +172,8 @@ const resolveSettings = (
   };
 };
 
+const readonlyVidstackLayoutUtilityImports = new WeakMap<SymbolDescriptor, boolean>();
+
 // Mirrors OXC's `is_react_hook` — matches:
 //   useFoo(...)                 (bare identifier with use prefix)
 //   React.useFoo(...)           (the React namespace)
@@ -202,18 +206,34 @@ const isHookCall = (
     //     stance on `useBasename` from `history` etc.
     const symbol = scopes.symbolFor(callee);
     if (symbol) {
-      if (isNitroRuntimeAppGetter(symbol)) return null;
+      if (
+        symbol.kind === "const" ||
+        symbol.kind === "ts-interface" ||
+        symbol.kind === "ts-type-alias"
+      ) {
+        const runtimeBinding = resolveRuntimeValueBinding(scopes.scopeFor(callee), callee.name);
+        if (
+          runtimeBinding &&
+          isNitroRuntimeAppGetter(runtimeBinding) &&
+          hasReadonlySymbolReferences(symbol)
+        )
+          return null;
+      }
       if (symbol.kind === "import") {
         const importedApi = resolveImportedApiReference(callee, scopes);
         if (
           importedApi?.source === "vidstack" &&
-          importedApi.importedName === "usePlyrLayoutClasses" &&
-          symbol.references.every(
-            (reference) =>
-              reference.flag === "read" && !isWithinAssignmentTarget(reference.identifier),
-          )
+          importedApi.importedName === "usePlyrLayoutClasses"
         ) {
-          return null;
+          let isReadOnlyImport = readonlyVidstackLayoutUtilityImports.get(symbol);
+          if (isReadOnlyImport === undefined) {
+            isReadOnlyImport = symbol.references.every(
+              (reference) =>
+                reference.flag === "read" && !isWithinAssignmentTarget(reference.identifier),
+            );
+            readonlyVidstackLayoutUtilityImports.set(symbol, isReadOnlyImport);
+          }
+          if (isReadOnlyImport) return null;
         }
       }
       if (symbol.kind === "parameter" || symbol.kind === "catch-clause-parameter") {
