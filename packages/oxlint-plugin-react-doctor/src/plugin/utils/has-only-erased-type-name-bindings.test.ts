@@ -1,10 +1,45 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
+import { ERROR_PROSE_WORK_LARGE_RECORD_COUNT } from "../constants/thresholds.js";
 import { attachParentReferences } from "../../test-utils/attach-parent-references.js";
 import { parseFixture } from "../../test-utils/parse-fixture.js";
 import { analyzeScopes } from "../semantic/scope-analysis.js";
 import { hasOnlyErasedTypeNameBindings } from "./has-only-erased-type-name-bindings.js";
 
 describe("hasOnlyErasedTypeNameBindings", () => {
+  it.each([true, false])("reuses the pure binding result %s", (expected) => {
+    const content = [
+      "interface candidate {}",
+      ...Array.from(
+        { length: ERROR_PROSE_WORK_LARGE_RECORD_COUNT },
+        (_, recordIndex) => `const unrelated${recordIndex} = 0;`,
+      ),
+      ...(expected ? [] : ["const candidate = 0;"]),
+    ].join("\n");
+    const parsed = parseFixture(content);
+    expect(parsed.errors).toEqual([]);
+    attachParentReferences(parsed.program);
+    const scopes = analyzeScopes(parsed.program);
+    const symbols = scopes.rootScope.symbols;
+    const symbol = symbols.find((candidate) => candidate.name === "candidate");
+    if (!symbol) throw new Error("Missing fixture binding");
+    let symbolVisits = 0;
+    const originalSome = symbols.some.bind(symbols);
+    const symbolLookup = vi.spyOn(symbols, "some").mockImplementation((predicate) =>
+      originalSome((candidate, index, array) => {
+        symbolVisits += 1;
+        return predicate(candidate, index, array);
+      }),
+    );
+    try {
+      for (let queryIndex = 0; queryIndex < ERROR_PROSE_WORK_LARGE_RECORD_COUNT; queryIndex += 1) {
+        expect(hasOnlyErasedTypeNameBindings(symbol)).toBe(expected);
+      }
+      expect(symbolVisits).toBe(symbols.length);
+    } finally {
+      symbolLookup.mockRestore();
+    }
+  });
+
   it.each([
     { code: "interface candidate {}", expected: true, nested: false },
     { code: "type candidate = unknown;", expected: true, nested: false },

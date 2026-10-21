@@ -3,12 +3,14 @@ import { hasOnlyErasedTypeNameBindings } from "./has-only-erased-type-name-bindi
 import { analyzeScopes } from "../semantic/scope-analysis.js";
 import type { ScopeAnalysis, SymbolDescriptor } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
+import type { EsTreeNodeOfType } from "./es-tree-node-of-type.js";
 import { collectBindingAliases } from "./collect-binding-aliases.js";
 import {
   isProvenGlobalNamespaceReference,
   isProvenGlobalObjectReference,
 } from "./is-proven-global-namespace-reference.js";
 import { findEnclosingClass } from "./find-enclosing-class.js";
+import { findContainingSortedLiteral } from "./find-containing-sorted-literal.js";
 import { findEnclosingFunction } from "./find-enclosing-function.js";
 import { findTransparentExpressionRoot } from "./find-transparent-expression-root.js";
 import { getFunctionBindingSymbols } from "./get-function-binding-symbols.js";
@@ -44,7 +46,7 @@ interface RandomErrorProseFilterInput {
 
 interface RandomErrorProseAnalysis {
   callsByStart: Map<number, EsTreeNode>;
-  stringLiterals: EsTreeNode[];
+  stringLiterals: EsTreeNodeOfType<"Literal">[];
   providerCandidates: EsTreeNode[];
   catchClauses: EsTreeNode[];
   providerContradictions: Map<EsTreeNode | null, boolean>;
@@ -455,7 +457,7 @@ export const createRandomErrorProseFilter = ({
         analysis = null;
         if (program) {
           const callsByStart = new Map<number, EsTreeNode>();
-          const stringLiterals: EsTreeNode[] = [];
+          const stringLiterals: EsTreeNodeOfType<"Literal">[] = [];
           const providerCandidates: EsTreeNode[] = [];
           const catchClauses: EsTreeNode[] = [];
           walkAst(program, (node) => {
@@ -479,6 +481,7 @@ export const createRandomErrorProseFilter = ({
             )
               providerCandidates.push(node);
           });
+          stringLiterals.sort((left, right) => getNodeStartIndex(left) - getNodeStartIndex(right));
           const scopeAnalysis = analyzeScopes(program);
           analysis = {
             callsByStart,
@@ -566,9 +569,7 @@ export const createRandomErrorProseFilter = ({
       for (const match of securityMatches) {
         const matchStart = lineStartIndex + match.index;
         const matchEnd = matchStart + match[0].length;
-        const literal = stringLiterals.find(
-          (node) => getNodeStartIndex(node) <= matchStart && getNodeEndIndex(node) >= matchEnd,
-        );
+        const literal = findContainingSortedLiteral(stringLiterals, matchStart, matchEnd);
         if (!literal || isAstDescendant(literal, statement)) return false;
         const rawLiteral = sourceText.slice(getNodeStartIndex(literal), getNodeEndIndex(literal));
         if (rawLiteral[0] !== '"' && rawLiteral[0] !== "'") return false;

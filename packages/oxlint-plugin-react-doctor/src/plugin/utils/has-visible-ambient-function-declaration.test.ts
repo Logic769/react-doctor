@@ -1,10 +1,47 @@
 import { describe, expect, it } from "vite-plus/test";
+import { ERROR_PROSE_WORK_LARGE_RECORD_COUNT } from "../constants/thresholds.js";
 import { attachParentReferences } from "../../test-utils/attach-parent-references.js";
 import { parseFixture } from "../../test-utils/parse-fixture.js";
 import { analyzeScopes } from "../semantic/scope-analysis.js";
 import { hasVisibleAmbientFunctionDeclaration } from "./has-visible-ambient-function-declaration.js";
 
 describe("hasVisibleAmbientFunctionDeclaration", () => {
+  it.each(["const unrelated = 0; declare function candidate(): void;", "const unrelated = 0;"])(
+    "caches present and absent declarations separately by scope and name: %s",
+    (code) => {
+      const parsed = parseFixture(code);
+      expect(parsed.errors).toEqual([]);
+      attachParentReferences(parsed.program);
+      const scopes = analyzeScopes(parsed.program);
+      const owner = scopes.rootScope.node;
+      if (owner.type !== "Program") throw new Error("Expected program scope");
+      const statements = owner.body;
+      const originalSome = statements.some.bind(statements);
+      let statementVisits = 0;
+      Object.defineProperty(statements, "some", {
+        configurable: true,
+        value: (predicate: Parameters<typeof statements.some>[0]) =>
+          originalSome((statement, index, array) => {
+            statementVisits += 1;
+            return predicate(statement, index, array);
+          }),
+      });
+      const queriedNames = ["candidate", "missing"];
+      for (const name of queriedNames) {
+        for (
+          let queryIndex = 0;
+          queryIndex < ERROR_PROSE_WORK_LARGE_RECORD_COUNT;
+          queryIndex += 1
+        ) {
+          expect(hasVisibleAmbientFunctionDeclaration(scopes.rootScope, name)).toBe(
+            name === "candidate" && code.includes("declare function"),
+          );
+        }
+      }
+      expect(statementVisits).toBe(statements.length * queriedNames.length);
+    },
+  );
+
   it.each([
     { code: "declare function candidate(): void;", expected: true, nested: false },
     { code: "export declare function candidate(): void;", expected: true, nested: false },
