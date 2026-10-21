@@ -1,3 +1,4 @@
+import rendererFixtures from "./no-derived-state-native-renderer-fixtures.json";
 import { describe, expect, it } from "vite-plus/test";
 import { runRule } from "../../../test-utils/run-rule.js";
 import { wrapWithSemanticContext } from "../../utils/wrap-with-semantic-context.js";
@@ -10,6 +11,77 @@ interface NativeEventWriterCase {
 }
 
 const nativeEventWriterCases: NativeEventWriterCase[] = [
+  {
+    name: "reports an inactive disabled ancestor spread",
+    reportsPropReseed: true,
+    code: `import { useEffect, useRef, useState } from "react";
+export const Panel = ({ seed }) => {
+  const [value, setValue] = useState(seed);
+  const writeValue = (nextValue) => setValue(nextValue);
+  const latest = useRef({ writeValue });
+  latest.current = { writeValue };
+  const activate = (event) => { event.preventDefault(); writeValue(!value); };
+  useEffect(() => { setValue(seed); }, [seed]);
+  return <fieldset {...{disabled:true}}><button onClick={activate}>{String(value)}</button></fieldset>;
+};`,
+  },
+  {
+    name: "reports an inactive template ancestor",
+    reportsPropReseed: true,
+    code: `import { useEffect, useRef, useState } from "react";
+export const Panel = ({ seed }) => {
+  const [value, setValue] = useState(seed);
+  const writeValue = (nextValue) => setValue(nextValue);
+  const latest = useRef({ writeValue });
+  latest.current = { writeValue };
+  const activate = (event) => { event.preventDefault(); writeValue(!value); };
+  useEffect(() => { setValue(seed); }, [seed]);
+  return <template><button onClick={activate}>{String(value)}</button></template>;
+};`,
+  },
+  {
+    name: "reports an inactive iframe ancestor",
+    reportsPropReseed: true,
+    code: `import { useEffect, useRef, useState } from "react";
+export const Panel = ({ seed }) => {
+  const [value, setValue] = useState(seed);
+  const writeValue = (nextValue) => setValue(nextValue);
+  const latest = useRef({ writeValue });
+  latest.current = { writeValue };
+  const activate = (event) => { event.preventDefault(); writeValue(!value); };
+  useEffect(() => { setValue(seed); }, [seed]);
+  return <iframe><button onClick={activate}>{String(value)}</button></iframe>;
+};`,
+  },
+  {
+    name: "reports when a custom ancestor drops the native control",
+    reportsPropReseed: true,
+    code: `const Drop=({children})=>null;
+import { useEffect, useRef, useState } from "react";
+export const Panel = ({ seed }) => {
+  const [value, setValue] = useState(seed);
+  const writeValue = (nextValue) => setValue(nextValue);
+  const latest = useRef({ writeValue });
+  latest.current = { writeValue };
+  const activate = (event) => { event.preventDefault(); writeValue(!value); };
+  useEffect(() => { setValue(seed); }, [seed]);
+  return <Drop><button onClick={activate}>{String(value)}</button></Drop>;
+};`,
+  },
+  {
+    name: "retains an intrinsic ancestor around the native control",
+    reportsPropReseed: false,
+    code: `import { useEffect, useRef, useState } from "react";
+export const Panel = ({ seed }) => {
+  const [value, setValue] = useState(seed);
+  const writeValue = (nextValue) => setValue(nextValue);
+  const latest = useRef({ writeValue });
+  latest.current = { writeValue };
+  const activate = (event) => { event.preventDefault(); writeValue(!value); };
+  useEffect(() => { setValue(seed); }, [seed]);
+  return <section><button onClick={activate}>{String(value)}</button></section>;
+};`,
+  },
   {
     name: "retains the runtime TypeScript enum fence",
     reportsPropReseed: true,
@@ -700,5 +772,31 @@ describe("no-derived-state null context host reachability", () => {
         nodeType: "CallExpression",
       },
     ]);
+  });
+});
+
+describe("native event writer erased bindings and inert keys", () => {
+  it.each([
+    ["erased React hook", "interface useState {}\n"],
+    ["inert JSX pragma string", "const description='@jsx factory';\n"],
+    ["type-only hook exports", "export type {useState,useRef};\n"],
+    ["inert object keys", "const notes={Function:'description',constructor:'description'};\n"],
+    ["inert method keys", "class Notes { static Function(){return 'description'} }\n"],
+  ])("preserves the editable state beside %s", (_name, prefix) => {
+    const fixture = nativeEventWriterCases.find(
+      (entry) => entry.name === "retains an odd own-state toggle through a ref-stored writer",
+    );
+    if (!fixture) throw Error("Expected the ordinary native writer fixture");
+    const result = runRule(noDerivedState, prefix + fixture.code, { forceJsx: true });
+    expect(result).toEqual({ diagnostics: [], parseErrors: [] });
+  });
+});
+
+describe("native event writer renderer boundaries", () => {
+  it.each(rendererFixtures.cases)("$name", ({ code, desired }) => {
+    const result = runRule(noDerivedState, code, { forceJsx: true });
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(desired);
+    if (desired) expect(result.diagnostics[0].nodeType).toBe("CallExpression");
   });
 });

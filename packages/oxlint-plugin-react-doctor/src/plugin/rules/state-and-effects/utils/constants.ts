@@ -1,3 +1,5 @@
+import { VOID_DOM_ELEMENTS } from "../../../constants/html-tags.js";
+
 export const MAX_RETURNED_SETTER_EXPRESSIONS = 64;
 
 export const NATIVE_EVENT_WRITER_INACTIVE_ATTRIBUTE_NAMES: ReadonlySet<string> = new Set([
@@ -6,6 +8,18 @@ export const NATIVE_EVENT_WRITER_INACTIVE_ATTRIBUTE_NAMES: ReadonlySet<string> =
   "hidden",
   "aria-disabled",
   "is",
+]);
+export const NATIVE_EVENT_WRITER_INACTIVE_ANCESTOR_TAG_NAMES: ReadonlySet<string> = new Set([
+  "template",
+  "iframe",
+]);
+export const NATIVE_EVENT_WRITER_UNSUPPORTED_ANCESTOR_TAG_NAMES: ReadonlySet<string> = new Set([
+  ...VOID_DOM_ELEMENTS,
+  "noscript",
+  "textarea",
+  "title",
+  "style",
+  "script",
 ]);
 export const NATIVE_EVENT_WRITER_RUNTIME_TYPESCRIPT_NODES: ReadonlySet<string> = new Set([
   "TSImportEqualsDeclaration",

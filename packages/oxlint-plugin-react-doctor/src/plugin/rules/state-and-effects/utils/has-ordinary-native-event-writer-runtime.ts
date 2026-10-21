@@ -1,3 +1,4 @@
+import { getRuntimeSymbolReferences } from "../../../utils/get-runtime-symbol-references.js";
 import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
@@ -5,10 +6,11 @@ import { findProgramRoot } from "../../../utils/find-program-root.js";
 import { getImportedName } from "../../../utils/get-imported-name.js";
 import { getStaticPropertyName } from "../../../utils/get-static-property-name.js";
 import { getValueImportSource } from "../../../utils/get-value-import-declaration.js";
+import { hasJsxRuntimePragma } from "../../../utils/has-jsx-runtime-pragma.js";
 import { hasCompleteSymbolReferences } from "../../../utils/has-complete-symbol-references.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { isReactHookName } from "../../../utils/is-react-hook-name.js";
-import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
+import { isKeyedDraftTypeReference } from "../../../utils/is-keyed-draft-type-reference.js";
 import type { RuleContext } from "../../../utils/rule-context.js";
 import { walkAst } from "../../../utils/walk-ast.js";
 import {
@@ -23,13 +25,17 @@ export const hasOrdinaryNativeEventWriterRuntime = (
   node: EsTreeNode,
   context: RuleContext,
 ): boolean => {
-  const cached = runtimeProofs.get(context.scopes);
-  if (cached !== undefined) return cached;
   const program = findProgramRoot(node);
   const source = context.sourceCode?.getText?.();
-  if (!program || source === undefined || /@jsx(?:\s|Frag|ImportSource|Runtime)/u.test(source)) {
+  if (
+    !program ||
+    source === undefined ||
+    hasJsxRuntimePragma({ program, filename: context.filename ?? "", sourceText: source })
+  ) {
     return false;
   }
+  const cached = runtimeProofs.get(context.scopes);
+  if (cached !== undefined) return cached;
   let supported = true;
   walkAst(program, (current) => {
     if (!supported) return false;
@@ -42,7 +48,22 @@ export const hasOrdinaryNativeEventWriterRuntime = (
       supported = false;
       return false;
     }
-    if (isTypeScriptTypePosition(current)) return false;
+    if (isKeyedDraftTypeReference(current)) return false;
+    const parent = current.parent;
+    if (
+      parent &&
+      "key" in parent &&
+      parent.key === current &&
+      "computed" in parent &&
+      !parent.computed &&
+      (isNodeOfType(parent, "Property")
+        ? !parent.shorthand || parent.value !== current
+        : isNodeOfType(parent, "MethodDefinition") ||
+          isNodeOfType(parent, "PropertyDefinition") ||
+          isNodeOfType(parent, "AccessorProperty"))
+    )
+      return false;
+
     if (
       (isNodeOfType(current, "Identifier") &&
         NATIVE_EVENT_WRITER_UNSUPPORTED_IDENTIFIERS.has(current.name)) ||
@@ -84,9 +105,9 @@ export const hasOrdinaryNativeEventWriterRuntime = (
       }
       const importedName = getImportedName(specifier);
       if (
-        symbol.references.some((reference) => {
+        getRuntimeSymbolReferences(symbol).some((reference) => {
           const identifier = reference.identifier;
-          if (isTypeScriptTypePosition(identifier)) return false;
+          if (isKeyedDraftTypeReference(identifier)) return false;
           const expression = findTransparentExpressionRoot(identifier);
           const parent = expression.parent;
           return !(

@@ -1,3 +1,4 @@
+import { getRuntimeSymbolReferences } from "../../../utils/get-runtime-symbol-references.js";
 import type { SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import { findProgramRoot } from "../../../utils/find-program-root.js";
@@ -22,7 +23,7 @@ export const hasOwnLocalStateBranch = (
   if (!stateSymbol || !program) return false;
   if (
     !hasCompleteSymbolReferences(stateSymbol, program, context.scopes) ||
-    stateSymbol.references.some((reference) => reference.flag !== "read")
+    getRuntimeSymbolReferences(stateSymbol).some((reference) => reference.flag !== "read")
   ) {
     return false;
   }
@@ -35,7 +36,7 @@ export const hasOwnLocalStateBranch = (
       !initializer ||
       visitedSymbols.has(symbol) ||
       !hasCompleteSymbolReferences(symbol, program, context.scopes) ||
-      symbol.references.some((reference) => reference.flag !== "read")
+      getRuntimeSymbolReferences(symbol).some((reference) => reference.flag !== "read")
     ) {
       return false;
     }

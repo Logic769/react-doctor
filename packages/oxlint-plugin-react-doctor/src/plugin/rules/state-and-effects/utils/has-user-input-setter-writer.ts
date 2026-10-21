@@ -1,3 +1,4 @@
+import { getRuntimeSymbolReferences } from "../../../utils/get-runtime-symbol-references.js";
 import type { Reference, Variable } from "eslint-scope";
 import type { SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
@@ -18,6 +19,8 @@ import { hasOrdinaryNativeEventWriterRuntime } from "./has-ordinary-native-event
 import {
   NATIVE_EVENT_WRITER_EVENT_NAMES,
   NATIVE_EVENT_WRITER_INACTIVE_ATTRIBUTE_NAMES,
+  NATIVE_EVENT_WRITER_INACTIVE_ANCESTOR_TAG_NAMES,
+  NATIVE_EVENT_WRITER_UNSUPPORTED_ANCESTOR_TAG_NAMES,
   NATIVE_EVENT_WRITER_UNSUPPORTED_CONTROL_FLOW_NODES,
   NATIVE_EVENT_WRITER_UNSUPPORTED_MEMBERS,
   NATIVE_EVENT_WRITER_UNSUPPORTED_COMPONENT_CONTROL_FLOW_NODES,
@@ -230,7 +233,7 @@ const hasCompleteReadonlyVariable = (
     symbol.kind === "const" &&
     program &&
     hasCompleteSymbolReferences(symbol, program, context.scopes) &&
-    symbol.references.every((reference) => {
+    getRuntimeSymbolReferences(symbol).every((reference) => {
       const identifier = reference.identifier;
       const property = identifier.parent;
       if (
@@ -295,14 +298,14 @@ const isGenuineNativeWriterContextBinding = (
     program &&
     findEnclosingFunction(symbol.declarationNode) === componentFunction &&
     hasCompleteSymbolReferences(symbol, program, context.scopes) &&
-    symbol.references.every((reference) => reference.flag === "read") &&
+    getRuntimeSymbolReferences(symbol).every((reference) => reference.flag === "read") &&
     isNodeOfType(initializer, "CallExpression") &&
     !initializer.optional &&
     initializer.arguments.length === 1 &&
     !isNodeOfType(initializer.arguments[0], "SpreadElement") &&
     hookSymbol &&
     hasCompleteSymbolReferences(hookSymbol, program, context.scopes) &&
-    hookSymbol.references.every((reference) => reference.flag === "read") &&
+    getRuntimeSymbolReferences(hookSymbol).every((reference) => reference.flag === "read") &&
     getValueImportSource(hookSymbol) === "react" &&
     getImportedName(hookSymbol.declarationNode) === "useContext",
   );
@@ -365,7 +368,7 @@ const getControlledNativeWriterInputs = (
       inputSymbol.kind !== "parameter" ||
       inputs.has(inputSymbol) ||
       !hasCompleteSymbolReferences(inputSymbol, program, context.scopes) ||
-      inputSymbol.references.some((reference) => reference.flag !== "read")
+      getRuntimeSymbolReferences(inputSymbol).some((reference) => reference.flag !== "read")
     ) {
       return null;
     }
@@ -435,7 +438,7 @@ const hasGuardedOwnContextReads = (
   componentFunction: EsTreeNode,
   context: RuleContext,
 ): boolean =>
-  symbol.references.every((reference) => {
+  getRuntimeSymbolReferences(symbol).every((reference) => {
     if (findEnclosingFunction(reference.identifier) !== componentFunction) return true;
     const receiver = findTransparentExpressionRoot(reference.identifier);
     const member = receiver.parent;
@@ -531,7 +534,7 @@ const hasCompatibleNativeHostGuards = (
         isAstDescendant(symbol.bindingIdentifier, parameter),
       ) &&
       hasCompleteSymbolReferences(symbol, program, context.scopes) &&
-      symbol.references.every((reference) => reference.flag === "read"),
+      getRuntimeSymbolReferences(symbol).every((reference) => reference.flag === "read"),
     );
   };
   let current = attribute.parent;
@@ -613,13 +616,23 @@ const isNativeEventWitnessAttribute = (
   while (current && current !== componentFunction) {
     if (
       isNodeOfType(current, "JSXElement") &&
-      current.openingElement.attributes.some(
-        (candidate) =>
-          isNodeOfType(candidate, "JSXAttribute") &&
-          NATIVE_EVENT_WRITER_INACTIVE_ATTRIBUTE_NAMES.has(
-            getJsxAttributeName(candidate.name) ?? "",
-          ),
-      )
+      (!isProvenIntrinsicJsxElement(current.openingElement, context.scopes) ||
+        !HTML_TAGS.has(resolveJsxElementType(current.openingElement)) ||
+        NATIVE_EVENT_WRITER_INACTIVE_ANCESTOR_TAG_NAMES.has(
+          resolveJsxElementType(current.openingElement),
+        ) ||
+        (current.openingElement !== openingElement &&
+          NATIVE_EVENT_WRITER_UNSUPPORTED_ANCESTOR_TAG_NAMES.has(
+            resolveJsxElementType(current.openingElement),
+          )) ||
+        current.openingElement.attributes.some(
+          (candidate) =>
+            isNodeOfType(candidate, "JSXSpreadAttribute") ||
+            (isNodeOfType(candidate, "JSXAttribute") &&
+              NATIVE_EVENT_WRITER_INACTIVE_ATTRIBUTE_NAMES.has(
+                getJsxAttributeName(candidate.name) ?? "",
+              )),
+        ))
     ) {
       return false;
     }
@@ -683,7 +696,7 @@ interface NativeEventWriterPayload {
 }
 
 const hasVisibleContextMemberMutation = (symbol: SymbolDescriptor): boolean =>
-  symbol.references.some((reference) => {
+  getRuntimeSymbolReferences(symbol).some((reference) => {
     let member = findTransparentExpressionRoot(reference.identifier);
     while (isNodeOfType(member.parent, "MemberExpression") && member.parent.object === member) {
       member = findTransparentExpressionRoot(member.parent);
@@ -764,7 +777,7 @@ const hasClosedNativeWriterCalls = (
     Boolean(
       symbol &&
       hasCompleteSymbolReferences(symbol, program, context.scopes) &&
-      symbol.references.every((reference) => reference.flag === "read"),
+      getRuntimeSymbolReferences(symbol).every((reference) => reference.flag === "read"),
     );
   const propsPattern = componentFunction.params[0];
   const pendingStatements: EsTreeNode[] = isNodeOfType(writerFunction.body, "BlockStatement")
@@ -884,7 +897,7 @@ const getNativeEventWriterPayload = (
     parameterSymbol.kind !== "parameter" ||
     argumentIndex < 0 ||
     !hasCompleteSymbolReferences(parameterSymbol, program, context.scopes) ||
-    parameterSymbol.references.some((reference) => reference.flag !== "read")
+    getRuntimeSymbolReferences(parameterSymbol).some((reference) => reference.flag !== "read")
   ) {
     return null;
   }
@@ -909,7 +922,7 @@ const getNativeEventWriterPayload = (
         symbol.kind !== "const" ||
         isAstDescendant(symbol.declarationNode, writerFunction) ||
         !hasCompleteSymbolReferences(symbol, program, context.scopes) ||
-        symbol.references.some((reference) => reference.flag !== "read") ||
+        getRuntimeSymbolReferences(symbol).some((reference) => reference.flag !== "read") ||
         (guardValues.has(symbol) && guardValues.get(symbol) !== guardValue)
       ) {
         return null;
@@ -1017,7 +1030,7 @@ const hasDirectNativeWriterHandlerPath = (
       context.scopes.symbolFor(callee.object) !== eventSymbol ||
       !program ||
       !hasCompleteSymbolReferences(eventSymbol, program, context.scopes) ||
-      eventSymbol.references.some((reference) => reference.flag !== "read")
+      getRuntimeSymbolReferences(eventSymbol).some((reference) => reference.flag !== "read")
     ) {
       return false;
     }
