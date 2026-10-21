@@ -2,6 +2,16 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+import { attachParentReferences } from "../../../test-utils/attach-parent-references.js";
+import { parseFixture } from "../../../test-utils/parse-fixture.js";
+import { analyzeScopes } from "../../semantic/scope-analysis.js";
+import { analyzeControlFlow } from "../../semantic/control-flow-graph.js";
+import type { EsTreeNode } from "../../utils/es-tree-node.js";
+import type { RuleContext } from "../../utils/rule-context.js";
+import { captureCrossFileProbes } from "../../utils/cross-file-probe-recorder.js";
+import { isNodeOfType } from "../../utils/is-node-of-type.js";
+import { walkAst } from "../../utils/walk-ast.js";
+import { createImportedNativeMediaGuardPredicate } from "./utils/create-imported-native-media-guard-predicate.js";
 import { runRule } from "../../../test-utils/run-rule.js";
 import type { RunRuleOptions } from "../../../test-utils/run-rule.js";
 import { collectCrossFileDependencyProbes } from "../../cross-file-dependencies.js";
@@ -1354,4 +1364,147 @@ describe("imported native media dependency transitions", () => {
       expect(after.diagnostics).toHaveLength(expectedAdmissionAfter ? 0 : 1);
     },
   );
+});
+
+describe("shared importer media dependency recording", () => {
+  it("revalidates positive and negative providers while retaining one importer analysis", () => {
+    const fixture = cases[0];
+    if (!fixture) throw new Error("Expected the authored native importer");
+    writeFixtureFiles(fixture.files);
+    const filename = path.join(temporaryDirectory, "consumer.tsx");
+    const code = fs.readFileSync(filename, "utf8");
+    const parsed = parseFixture(code);
+    expect(parsed.errors).toEqual([]);
+    attachParentReferences(parsed.program);
+    const scopes = analyzeScopes(parsed.program);
+    let effectFunction: EsTreeNode | null = null;
+    let executionNode: EsTreeNode | null = null;
+    let condition: EsTreeNode | null = null;
+    walkAst(parsed.program, (node) => {
+      if (isNodeOfType(node, "IfStatement")) condition = node.test;
+      if (!isNodeOfType(node, "CallExpression") || !isNodeOfType(node.callee, "Identifier")) return;
+      if (node.callee.name === "setSelected") executionNode = node;
+      const callback = node.arguments[0];
+      if (
+        node.callee.name === "useEffect" &&
+        callback &&
+        isNodeOfType(callback, "ArrowFunctionExpression")
+      )
+        effectFunction = callback;
+    });
+    if (!effectFunction || !executionNode || !condition)
+      throw new Error("Expected the authored conditional state write");
+    const selectedEffect = effectFunction;
+    const selectedExecution = executionNode;
+    const selectedCondition = condition;
+    const context: RuleContext = {
+      scopes,
+      cfg: analyzeControlFlow(parsed.program),
+      filename,
+      settings: fixture.options.settings,
+      sourceCode: { ast: parsed.program, getText: () => code },
+      report: () => {},
+    };
+    const nativeProvider =
+      'export const supportsClip = (mime) => document.createElement("video").canPlayType(mime) !== "";\n';
+    const pureProvider = 'export const supportsClip = (mime) => mime.startsWith("video/");\n';
+    const phases = [
+      {
+        name: "native",
+        file: "capability.ts",
+        content: nativeProvider,
+        remove: null,
+        admitted: true,
+        contentProbe: "capability.ts",
+      },
+      {
+        name: "warm-native",
+        file: null,
+        content: null,
+        remove: null,
+        admitted: true,
+        contentProbe: "capability.ts",
+      },
+      {
+        name: "pure",
+        file: "capability.ts",
+        content: pureProvider,
+        remove: null,
+        admitted: false,
+        contentProbe: "capability.ts",
+      },
+      {
+        name: "restored-native",
+        file: "capability.ts",
+        content: nativeProvider,
+        remove: null,
+        admitted: true,
+        contentProbe: "capability.ts",
+      },
+      {
+        name: "deleted",
+        file: null,
+        content: null,
+        remove: "capability.ts",
+        admitted: false,
+        contentProbe: null,
+      },
+      {
+        name: "js-fallback",
+        file: "capability.js",
+        content: nativeProvider,
+        remove: null,
+        admitted: true,
+        contentProbe: "capability.js",
+      },
+      {
+        name: "ts-shadow",
+        file: "capability.ts",
+        content: pureProvider,
+        remove: null,
+        admitted: false,
+        contentProbe: "capability.ts",
+      },
+      {
+        name: "restored-js-fallback",
+        file: null,
+        content: null,
+        remove: "capability.ts",
+        admitted: true,
+        contentProbe: "capability.js",
+      },
+    ];
+    const collect = () =>
+      captureCrossFileProbes(() =>
+        Boolean(
+          createImportedNativeMediaGuardPredicate({
+            context,
+            effectFunction: selectedEffect,
+            executionNode: selectedExecution,
+          })?.(selectedCondition),
+        ),
+      );
+    for (const phase of phases) {
+      if (phase.file !== null && phase.content !== null)
+        writeFixtureFiles({ [phase.file]: phase.content });
+      if (phase.remove !== null) fs.rmSync(path.join(temporaryDirectory, phase.remove));
+      resetModuleFacts();
+      const first = collect();
+      const repeated = collect();
+      expect(first.value, phase.name).toBe(phase.admitted);
+      expect(repeated.value, phase.name).toBe(phase.admitted);
+      expect(repeated.trace, phase.name).toEqual(first.trace);
+      expect(
+        first.trace.existencePaths.has(path.join(temporaryDirectory, "capability.ts")),
+        phase.name,
+      ).toBe(true);
+      if (phase.contentProbe !== null)
+        expect(
+          first.trace.contentPaths.has(path.join(temporaryDirectory, phase.contentProbe)),
+          phase.name,
+        ).toBe(true);
+      expect(context.scopes).toBe(scopes);
+      expect(fs.readFileSync(filename, "utf8")).toBe(code);
+    }
+  });
 });
