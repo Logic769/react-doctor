@@ -601,3 +601,95 @@ describe("known iframe caller certificate", () => {
     expect(runRule(iframeMissingSandbox, positive.code, { filename }).diagnostics).toEqual([]);
   });
 });
+
+describe("known iframe caller inspection reuse", () => {
+  it("retains per-caller sandbox, allow and spread gates for a shared import", () => {
+    const fixture = {
+      ...positive,
+      code: `import { Frame } from "./frame";
+export const View = ({ attributes }) => <>
+  <Frame sandbox="" html="<p>safe</p>" />
+  <Frame html="<p>unsafe</p>" />
+  <Frame allow="camera" html="<p>allowed</p>" />
+  <Frame {...attributes} html="<p>opaque</p>" />
+  <Frame html="<p>also unsafe</p>" />
+</>;
+`,
+    };
+    const result = runCaller(fixture);
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(2);
+  });
+
+  it("keeps component certificates separate inside one provider program", () => {
+    const fixture = {
+      ...positive,
+      code: `import { Frame, SafeFrame } from "./frame";
+export const View = () => <>
+  <SafeFrame html="<p>safe</p>" />
+  <Frame html="<p>unsafe</p>" />
+  <SafeFrame html="<p>still safe</p>" />
+</>;
+`,
+      files: {
+        "frame.tsx": `${positive.files["frame.tsx"]}
+export const SafeFrame = (props) => {
+  const { html, ...rest } = props;
+  return <iframe {...rest} sandbox="" srcDoc={html} />;
+};
+`,
+      },
+    };
+    const result = runCaller(fixture);
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(1);
+  });
+
+  it("rechecks providers and dependency probes while retaining the importer AST and scopes", () => {
+    const filename = writeFixture(positive);
+    let inspectCaller: (() => boolean) | undefined;
+    const retainedRule = defineRule({
+      ...iframeMissingSandbox,
+      create: (context) => ({
+        JSXOpeningElement(node) {
+          if (node.name.type === "JSXIdentifier" && node.name.name === "Frame")
+            inspectCaller = () => hasKnownUnsandboxedIframeCaller(node, context);
+        },
+      }),
+    });
+    expect(runRule(retainedRule, positive.code, { filename }).parseErrors).toEqual([]);
+    expect(inspectCaller?.()).toBe(true);
+    const provider = path.join(directory, "frame.tsx");
+    const firstCapture = captureCrossFileProbes(() => inspectCaller?.());
+    const repeatedCapture = captureCrossFileProbes(() => inspectCaller?.());
+    expect(firstCapture.value).toBe(true);
+    expect(repeatedCapture.value).toBe(true);
+    expect(repeatedCapture.trace.contentPaths.has(provider)).toBe(true);
+    expect(repeatedCapture.trace.existencePaths.has(path.join(directory, "frame.ts"))).toBe(true);
+    expect(repeatedCapture.trace.contentPaths).toEqual(firstCapture.trace.contentPaths);
+    expect(repeatedCapture.trace.existencePaths).toEqual(firstCapture.trace.existencePaths);
+    fs.writeFileSync(
+      provider,
+      positive.files["frame.tsx"].replace("srcDoc={html}", 'sandbox="" srcDoc={html}'),
+    );
+    resetSourceCaches();
+    expect(inspectCaller?.()).toBe(false);
+    expect(inspectCaller?.()).toBe(false);
+    fs.unlinkSync(provider);
+    resetSourceCaches();
+    const missingCapture = captureCrossFileProbes(() => inspectCaller?.());
+    expect(missingCapture.value).toBe(false);
+    expect(missingCapture.trace.existencePaths.has(provider)).toBe(true);
+    fs.writeFileSync(provider, positive.files["frame.tsx"]);
+    resetSourceCaches();
+    expect(inspectCaller?.()).toBe(true);
+    fs.writeFileSync(path.join(directory, "frame.ts"), "export const Frame = () => null;");
+    resetSourceCaches();
+    expect(inspectCaller?.()).toBe(false);
+    fs.unlinkSync(path.join(directory, "frame.ts"));
+    resetSourceCaches();
+    const restoredCapture = captureCrossFileProbes(() => inspectCaller?.());
+    expect(restoredCapture.value).toBe(true);
+    expect(restoredCapture.trace.contentPaths.has(provider)).toBe(true);
+  });
+});

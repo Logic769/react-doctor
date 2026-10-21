@@ -27,6 +27,22 @@ interface ClosedIframeSymbol {
   readonly reads: ReadonlySet<EsTreeNode>;
 }
 
+interface IframeProgramInspection {
+  readonly hasStableSyntax: boolean;
+  readonly componentTagClosureBySymbol: WeakMap<SymbolDescriptor, boolean>;
+}
+
+interface IframeProviderInspection {
+  scopes?: ScopeAnalysis;
+  readonly certificatesByComponent: WeakMap<EsTreeNode, boolean>;
+}
+
+const programInspectionsByProgram = new WeakMap<
+  EsTreeNode,
+  WeakMap<ScopeAnalysis, IframeProgramInspection>
+>();
+const providerInspectionsByProgram = new WeakMap<EsTreeNode, IframeProviderInspection>();
+
 const isRuntimeReference = (node: EsTreeNode, scopes: ScopeAnalysis): boolean => {
   if (node.type !== "Identifier" && node.type !== "JSXIdentifier") return false;
   if (scopes.referenceFor(node)) return true;
@@ -249,54 +265,31 @@ const hasNativeReturnAncestry = (iframe: EsTreeNode, returned: EsTreeNode): bool
   return true;
 };
 
-export const hasKnownUnsandboxedIframeCaller = (
-  caller: EsTreeNodeOfType<"JSXOpeningElement">,
-  context: RuleContext,
+const getProgramInspection = (
+  program: EsTreeNode,
+  scopes: ScopeAnalysis,
+): IframeProgramInspection => {
+  let inspections = programInspectionsByProgram.get(program);
+  if (!inspections) {
+    inspections = new WeakMap();
+    programInspectionsByProgram.set(program, inspections);
+  }
+  let inspection = inspections.get(scopes);
+  if (!inspection) {
+    inspection = {
+      hasStableSyntax: hasStableComponentSyntax(program, scopes),
+      componentTagClosureBySymbol: new WeakMap(),
+    };
+    inspections.set(scopes, inspection);
+  }
+  return inspection;
+};
+
+const inspectIframeProviderComponent = (
+  component: EsTreeNode,
+  providerProgram: EsTreeNode,
+  inspection: IframeProviderInspection,
 ): boolean => {
-  if (
-    !context.filename ||
-    caller.name.type !== "JSXIdentifier" ||
-    hasJsxSpreadAttribute(caller.attributes) ||
-    hasJsxPropIgnoreCase(caller.attributes, "sandbox") ||
-    hasJsxPropIgnoreCase(caller.attributes, "allow")
-  )
-    return false;
-  const imported = context.scopes.symbolFor(caller.name);
-  if (
-    !imported ||
-    imported.kind !== "import" ||
-    imported.declarationNode.type !== "ImportSpecifier"
-  )
-    return false;
-  const declaration = getImportDeclarationForSymbol(imported);
-  const exportedName = getImportedName(imported.declarationNode);
-  const source = declaration?.source.value;
-  if (
-    !declaration ||
-    declaration.importKind === "type" ||
-    imported.declarationNode.importKind === "type" ||
-    !exportedName ||
-    typeof source !== "string" ||
-    !source.startsWith(".")
-  )
-    return false;
-  const callerProgram = findProgramRoot(caller);
-  if (!callerProgram || !hasStableComponentSyntax(callerProgram, context.scopes)) return false;
-  if (
-    !hasClosedSymbolUses(callerProgram, context.scopes, [
-      { symbol: imported, reads: componentTagReads(imported) },
-    ])
-  )
-    return false;
-  const directPath = resolveRelativeImportPath(context.filename, source);
-  const resolved = resolveCrossFileFunctionExportWithFilePath(
-    context.filename,
-    source,
-    exportedName,
-  );
-  if (!directPath || !resolved || resolved.filePath !== directPath) return false;
-  const component = resolved.functionNode;
-  const providerProgram = resolved.programNode;
   if (
     !isFunctionLike(component) ||
     component.async ||
@@ -326,10 +319,14 @@ export const hasKnownUnsandboxedIframeCaller = (
   )
     binding = componentParent.id;
   if (!binding) return false;
-  const scopes = analyzeScopes(providerProgram);
+  const scopes = (inspection.scopes ??= analyzeScopes(providerProgram));
   const componentSymbol = scopes.symbolFor(binding);
   const propsSymbol = scopes.symbolFor(component.params[0]);
-  if (!componentSymbol || !propsSymbol || !hasStableComponentSyntax(providerProgram, scopes))
+  if (
+    !componentSymbol ||
+    !propsSymbol ||
+    !getProgramInspection(providerProgram, scopes).hasStableSyntax
+  )
     return false;
   if (
     component.body.body.some(
@@ -431,4 +428,72 @@ export const hasKnownUnsandboxedIframeCaller = (
     { symbol: propsSymbol, reads: new Set([destructure.init]) },
     { symbol: restSymbol, reads: new Set([spread.argument]) },
   ]);
+};
+
+export const hasKnownUnsandboxedIframeCaller = (
+  caller: EsTreeNodeOfType<"JSXOpeningElement">,
+  context: RuleContext,
+): boolean => {
+  if (
+    !context.filename ||
+    caller.name.type !== "JSXIdentifier" ||
+    hasJsxSpreadAttribute(caller.attributes) ||
+    hasJsxPropIgnoreCase(caller.attributes, "sandbox") ||
+    hasJsxPropIgnoreCase(caller.attributes, "allow")
+  )
+    return false;
+  const imported = context.scopes.symbolFor(caller.name);
+  if (
+    !imported ||
+    imported.kind !== "import" ||
+    imported.declarationNode.type !== "ImportSpecifier"
+  )
+    return false;
+  const declaration = getImportDeclarationForSymbol(imported);
+  const exportedName = getImportedName(imported.declarationNode);
+  const source = declaration?.source.value;
+  if (
+    !declaration ||
+    declaration.importKind === "type" ||
+    imported.declarationNode.importKind === "type" ||
+    !exportedName ||
+    typeof source !== "string" ||
+    !source.startsWith(".")
+  )
+    return false;
+  const callerProgram = findProgramRoot(caller);
+  if (!callerProgram) return false;
+  const callerInspection = getProgramInspection(callerProgram, context.scopes);
+  if (!callerInspection.hasStableSyntax) return false;
+  let hasClosedImportUses = callerInspection.componentTagClosureBySymbol.get(imported);
+  if (hasClosedImportUses === undefined) {
+    hasClosedImportUses = hasClosedSymbolUses(callerProgram, context.scopes, [
+      { symbol: imported, reads: componentTagReads(imported) },
+    ]);
+    callerInspection.componentTagClosureBySymbol.set(imported, hasClosedImportUses);
+  }
+  if (!hasClosedImportUses) return false;
+  const directPath = resolveRelativeImportPath(context.filename, source);
+  const resolved = resolveCrossFileFunctionExportWithFilePath(
+    context.filename,
+    source,
+    exportedName,
+  );
+  if (!directPath || !resolved || resolved.filePath !== directPath) return false;
+  const component = resolved.functionNode;
+  const providerProgram = resolved.programNode;
+  let providerInspection = providerInspectionsByProgram.get(providerProgram);
+  if (!providerInspection) {
+    providerInspection = { certificatesByComponent: new WeakMap() };
+    providerInspectionsByProgram.set(providerProgram, providerInspection);
+  }
+  const cachedCertificate = providerInspection.certificatesByComponent.get(component);
+  if (cachedCertificate !== undefined) return cachedCertificate;
+  const hasCertifiedComponent = inspectIframeProviderComponent(
+    component,
+    providerProgram,
+    providerInspection,
+  );
+  providerInspection.certificatesByComponent.set(component, hasCertifiedComponent);
+  return hasCertifiedComponent;
 };
