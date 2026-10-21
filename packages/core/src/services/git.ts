@@ -913,7 +913,14 @@ export class Git extends Context.Service<
             if (result.status === 128) return null;
             return { status: result.status, stdout: result.stdout } satisfies GitGrepResult;
           }).pipe(Effect.withSpan("Git.grep")),
-        changedLineRanges: ({ directory, baseRef, cached, files, includeUntracked = false }) =>
+        changedLineRanges: ({
+          directory,
+          baseRef,
+          cached,
+          files,
+          includeUntracked = false,
+          includeDeletions = false,
+        }) =>
           Effect.gen(function* () {
             if (files.length === 0) return [];
             // An unsafe base ref can't reach git (CVE-2018-17456 shape) and a
@@ -932,7 +939,7 @@ export class Git extends Context.Service<
               ...files,
             ]);
             if (result.status !== 0) return null;
-            const changedLineRanges = parseChangedLineRanges(result.stdout);
+            const changedLineRanges = parseChangedLineRanges(result.stdout, includeDeletions);
             if (cached || !includeUntracked) return changedLineRanges;
             // Best-effort, like `mergeUntracked`: a failed untracked listing keeps
             // the tracked ranges rather than nulling the whole lines selection.

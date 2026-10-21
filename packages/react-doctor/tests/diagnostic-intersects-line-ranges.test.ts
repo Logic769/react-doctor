@@ -1,6 +1,6 @@
 import type { Diagnostic } from "@react-doctor/core";
 import { describe, expect, it } from "vite-plus/test";
-import { diagnosticIntersectsLineRanges } from "../src/cli/utils/diagnostic-intersects-line-ranges.js";
+import { diagnosticIntersectsLineRanges } from "@react-doctor/core";
 
 const buildDiagnostic = (overrides: Partial<Diagnostic> = {}): Diagnostic => ({
   filePath: "src/App.tsx",

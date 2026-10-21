@@ -9,6 +9,7 @@ import { resolveProjectSourceFilePaths } from "./resolve-project-source-file-pat
 import type { TuiScanScopePlan } from "./resolve-tui-scan-scope.js";
 
 export interface ProjectTuiScanScopeOptions {
+  readonly contextual?: boolean;
   readonly baseline?: ReactDoctorInspectOptions["baseline"];
   readonly changedLineRanges?: ReadonlyArray<ChangedFileLineRanges>;
   readonly includePaths?: string[];
@@ -74,8 +75,10 @@ export const resolveProjectTuiScanScope = (
             headFiles: baselineHeadFiles,
           }
         : undefined,
+    contextual: input.plan.scope === "contextual",
     changedLineRanges:
-      input.plan.scope === "lines" && input.plan.changedLineRanges !== null
+      (input.plan.scope === "lines" || input.plan.scope === "contextual") &&
+      input.plan.changedLineRanges !== null
         ? resolveProjectChangedLineRanges(
             input.rootDirectory,
             input.projectDirectory,

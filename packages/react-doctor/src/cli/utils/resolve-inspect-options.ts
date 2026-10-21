@@ -53,6 +53,7 @@ export const resolveInspectOptions = (
     maxDurationMs: inputOptions.maxDurationMs ?? null,
     baselineReport: inputOptions.baselineReport ?? null,
     baseline: inputOptions.baseline ?? null,
+    contextual: inputOptions.contextual ?? false,
     changedLineRanges: inputOptions.changedLineRanges ?? null,
     supplyChainManifestChanged: inputOptions.supplyChainManifestChanged ?? false,
     excludedProjectDirectories: inputOptions.excludedProjectDirectories ?? [],

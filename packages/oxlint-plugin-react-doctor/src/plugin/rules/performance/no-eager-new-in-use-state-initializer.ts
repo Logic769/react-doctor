@@ -231,6 +231,7 @@ const getConstructorDescription = (newExpression: EsTreeNodeOfType<"NewExpressio
 };
 
 export const noEagerNewInUseStateInitializer = defineRule({
+  diffScope: "function",
   id: "no-eager-new-in-use-state-initializer",
   title: "Eager constructor in useState initializer",
   tags: ["test-noise"],

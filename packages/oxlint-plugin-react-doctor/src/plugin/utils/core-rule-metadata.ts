@@ -1,7 +1,8 @@
 import type { Capability, CapabilityQuery } from "./capability.js";
-import type { RuleFramework, RuleSeverity } from "./rule.js";
+import type { Rule, RuleFramework, RuleSeverity } from "./rule.js";
 
 export interface CoreRuleMetadata {
+  readonly diffScope?: Rule["diffScope"];
   readonly id: string;
   readonly title?: string;
   readonly severity: RuleSeverity;

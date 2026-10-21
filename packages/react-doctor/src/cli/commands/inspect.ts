@@ -234,8 +234,10 @@ const buildProjectInspectOptions = ({
             headFiles: projectScanPlan.projectBaselineHeadFiles,
           }
         : undefined,
+    contextual: context.scope === "contextual",
     changedLineRanges:
-      context.scope === "lines" && context.changedLineRanges !== null
+      (context.scope === "lines" || context.scope === "contextual") &&
+      context.changedLineRanges !== null
         ? resolveProjectChangedLineRanges(
             context.resolvedDirectory,
             scanDirectory,
@@ -558,7 +560,7 @@ export const inspectAction = async (
     // every finding in the changed files) rather than hiding everything.
     const linesBaseRef = diffInfo?.isCurrentChanges ? "HEAD" : comparisonBaseRef;
     const canComputeLines =
-      scope === "lines" &&
+      (scope === "lines" || scope === "contextual") &&
       diffInfo !== null &&
       (diffInfo.isCurrentChanges || linesBaseRef !== null);
     // `null` here means the ranges couldn't be computed (no base, or the git
@@ -569,13 +571,14 @@ export const inspectAction = async (
         ? await getChangedLineRanges({
             directory: resolvedDirectory,
             baseRef: linesBaseRef ?? undefined,
+            includeDeletions: scope === "contextual",
             files: [...diffInfo.changedFiles],
             includeUntracked,
           })
         : null;
     scanStartupSpinner?.stop();
     scanStartupSpinner = null;
-    if (scope === "lines" && changedLineRanges === null && !isQuiet) {
+    if ((scope === "lines" || scope === "contextual") && changedLineRanges === null && !isQuiet) {
       logger.warn(
         "Could not determine changed lines (no base ref or git diff failed); reporting all issues in changed files.",
       );

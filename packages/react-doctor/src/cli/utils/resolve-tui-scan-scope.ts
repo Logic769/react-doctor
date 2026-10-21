@@ -58,16 +58,19 @@ export const resolveTuiScanScope = async (
     baselineRef === null ? null : await getBaselineDiffPlan(input.directory, baselineRef);
   const linesBaseRef = diffInfo?.isCurrentChanges ? "HEAD" : comparisonBaseRef;
   const canComputeChangedLines =
-    scope === "lines" && diffInfo !== null && (diffInfo.isCurrentChanges || linesBaseRef !== null);
+    (scope === "lines" || scope === "contextual") &&
+    diffInfo !== null &&
+    (diffInfo.isCurrentChanges || linesBaseRef !== null);
   const changedLineRanges = canComputeChangedLines
     ? await getChangedLineRanges({
         directory: input.directory,
         baseRef: linesBaseRef ?? undefined,
         files: [...diffInfo.changedFiles],
         includeUntracked,
+        includeDeletions: scope === "contextual",
       })
     : null;
-  if (scope === "lines" && changedLineRanges === null) {
+  if ((scope === "lines" || scope === "contextual") && changedLineRanges === null) {
     cliLogger.warn(
       "Could not determine changed lines (no base ref or git diff failed); reporting all issues in changed files.",
     );

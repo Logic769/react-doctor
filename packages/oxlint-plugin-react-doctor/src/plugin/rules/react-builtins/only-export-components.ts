@@ -599,6 +599,7 @@ const isUpstreamFileNameAllowed = (filename: string, checkJS: boolean): boolean 
 // use preserves upstream defaults; React Doctor's curated mode retains its
 // framework-aware Fast Refresh behavior.
 export const onlyExportComponents = defineRule({
+  diffScope: "file",
   id: "only-export-components",
   title: "Non-component export in component file",
   severity: "warn",

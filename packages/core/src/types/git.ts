@@ -113,6 +113,7 @@ export interface GitGrepResult {
 }
 
 export interface GitChangedLineRangesInput {
+  readonly includeDeletions?: boolean;
   readonly directory: string;
   /** Ref to diff against; omit for working-tree / index diffs. */
   readonly baseRef?: string;

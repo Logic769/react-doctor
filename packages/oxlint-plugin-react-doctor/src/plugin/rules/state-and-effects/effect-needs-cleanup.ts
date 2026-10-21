@@ -249,15 +249,25 @@ const resolveExpressionKey = (
   context: RuleContext,
   visitedSymbolIds: Set<number> = new Set(),
   parameterSubstitutions: ReadonlyMap<number, EsTreeNode> = new Map(),
+  requireStableLogicalContributors = false,
 ): string | null => {
   if (!expression) return null;
   const unwrappedExpression = stripParenExpression(expression);
   if (isNodeOfType(unwrappedExpression, "Identifier")) {
     const symbol = context.scopes.symbolFor(unwrappedExpression);
     if (!symbol) {
-      return context.scopes.isGlobalReference(unwrappedExpression)
+      return !requireStableLogicalContributors &&
+        context.scopes.isGlobalReference(unwrappedExpression)
         ? `global:${unwrappedExpression.name}`
         : null;
+    }
+    if (
+      requireStableLogicalContributors &&
+      symbol.references.some(
+        (reference) => reference.flag !== "read" || isWithinAssignmentTarget(reference.identifier),
+      )
+    ) {
+      return null;
     }
     if (visitedSymbolIds.has(symbol.id)) return `symbol:${symbol.id}`;
     visitedSymbolIds.add(symbol.id);
@@ -268,6 +278,7 @@ const resolveExpressionKey = (
         context,
         visitedSymbolIds,
         parameterSubstitutions,
+        requireStableLogicalContributors,
       );
     }
     const bindingProperty = symbol.bindingIdentifier.parent;
@@ -287,10 +298,14 @@ const resolveExpressionKey = (
         context,
         visitedSymbolIds,
         parameterSubstitutions,
+        requireStableLogicalContributors,
       );
       return objectKey ? `${objectKey}.${bindingPropertyName}` : `symbol:${symbol.id}`;
     }
-    const initializer = symbol.initializer ? stripParenExpression(symbol.initializer) : null;
+    const stableInitializer = requireStableLogicalContributors
+      ? getDirectUnreassignedInitializer(symbol)
+      : symbol.initializer;
+    const initializer = stableInitializer ? stripParenExpression(stableInitializer) : null;
     if (
       symbol.kind === "const" &&
       initializer &&
@@ -299,8 +314,13 @@ const resolveExpressionKey = (
         isNodeOfType(initializer, "LogicalExpression"))
     ) {
       return (
-        resolveExpressionKey(initializer, context, visitedSymbolIds, parameterSubstitutions) ??
-        `symbol:${symbol.id}`
+        resolveExpressionKey(
+          initializer,
+          context,
+          visitedSymbolIds,
+          parameterSubstitutions,
+          requireStableLogicalContributors,
+        ) ?? `symbol:${symbol.id}`
       );
     }
     return `symbol:${symbol.id}`;
@@ -312,6 +332,7 @@ const resolveExpressionKey = (
       context,
       visitedSymbolIds,
       parameterSubstitutions,
+      requireStableLogicalContributors,
     );
     return objectKey ? `${objectKey}.${unwrappedExpression.property.name}` : null;
   }
@@ -321,18 +342,22 @@ const resolveExpressionKey = (
       context,
       visitedSymbolIds,
       parameterSubstitutions,
+      true,
     );
     const rightKey = resolveExpressionKey(
       unwrappedExpression.right,
       context,
       visitedSymbolIds,
       parameterSubstitutions,
+      true,
     );
     return leftKey && rightKey
       ? `logical:${unwrappedExpression.operator}:${leftKey}:${rightKey}`
       : null;
   }
-  if (isNodeOfType(unwrappedExpression, "ThisExpression")) return "this";
+  if (isNodeOfType(unwrappedExpression, "ThisExpression")) {
+    return requireStableLogicalContributors ? null : "this";
+  }
   if (
     isNodeOfType(unwrappedExpression, "Literal") &&
     (typeof unwrappedExpression.value === "string" ||
@@ -1190,16 +1215,33 @@ const isKnownReactNavigationReceiver = (
   expression: EsTreeNode,
   context: RuleContext,
   visitedSymbolIds: Set<number> = new Set(),
+  requireStableLogicalContributors = false,
+  provenStableReceiverSymbolIds: Set<number> = new Set(),
 ): boolean => {
   const receiver = stripParenExpression(expression);
   if (isNodeOfType(receiver, "Identifier")) {
     const receiverSymbol = context.scopes.symbolFor(receiver);
     if (!receiverSymbol || visitedSymbolIds.has(receiverSymbol.id)) return false;
-    if (receiver.name === "navigation") return true;
+    if (requireStableLogicalContributors && provenStableReceiverSymbolIds.has(receiverSymbol.id)) {
+      return true;
+    }
+    if (
+      requireStableLogicalContributors &&
+      receiverSymbol.references.some(
+        (reference) => reference.flag !== "read" || isWithinAssignmentTarget(reference.identifier),
+      )
+    ) {
+      return false;
+    }
+    if (receiver.name === "navigation") {
+      if (requireStableLogicalContributors) provenStableReceiverSymbolIds.add(receiverSymbol.id);
+      return true;
+    }
     visitedSymbolIds.add(receiverSymbol.id);
-    const receiverInitializer = receiverSymbol.initializer
-      ? stripParenExpression(receiverSymbol.initializer)
-      : null;
+    const stableInitializer = requireStableLogicalContributors
+      ? getDirectUnreassignedInitializer(receiverSymbol)
+      : receiverSymbol.initializer;
+    const receiverInitializer = stableInitializer ? stripParenExpression(stableInitializer) : null;
     const navigationHook = isNodeOfType(receiverInitializer, "CallExpression")
       ? resolveImportedApiReference(receiverInitializer.callee, context.scopes)
       : null;
@@ -1207,17 +1249,41 @@ const isKnownReactNavigationReceiver = (
       navigationHook?.importedName === "useNavigation" &&
       navigationHook.source.startsWith("@react-navigation/")
     ) {
+      if (requireStableLogicalContributors) provenStableReceiverSymbolIds.add(receiverSymbol.id);
       return true;
     }
-    return Boolean(
+    const hasKnownReceiver = Boolean(
       receiverInitializer &&
-      isKnownReactNavigationReceiver(receiverInitializer, context, visitedSymbolIds),
+      isKnownReactNavigationReceiver(
+        receiverInitializer,
+        context,
+        visitedSymbolIds,
+        requireStableLogicalContributors,
+        provenStableReceiverSymbolIds,
+      ),
     );
+    if (requireStableLogicalContributors && hasKnownReceiver) {
+      provenStableReceiverSymbolIds.add(receiverSymbol.id);
+    }
+    return hasKnownReceiver;
   }
   if (isNodeOfType(receiver, "LogicalExpression")) {
     return (
-      isKnownReactNavigationReceiver(receiver.left, context, visitedSymbolIds) ||
-      isKnownReactNavigationReceiver(receiver.right, context, visitedSymbolIds)
+      (receiver.operator === "&&" ||
+        isKnownReactNavigationReceiver(
+          receiver.left,
+          context,
+          new Set(visitedSymbolIds),
+          true,
+          provenStableReceiverSymbolIds,
+        )) &&
+      isKnownReactNavigationReceiver(
+        receiver.right,
+        context,
+        new Set(visitedSymbolIds),
+        true,
+        provenStableReceiverSymbolIds,
+      )
     );
   }
   if (!isNodeOfType(receiver, "CallExpression")) return false;
@@ -1227,7 +1293,13 @@ const isKnownReactNavigationReceiver = (
     !receiverCallee.computed &&
     isNodeOfType(receiverCallee.property, "Identifier") &&
     receiverCallee.property.name === "getParent" &&
-    isKnownReactNavigationReceiver(receiverCallee.object, context, visitedSymbolIds),
+    isKnownReactNavigationReceiver(
+      receiverCallee.object,
+      context,
+      visitedSymbolIds,
+      requireStableLogicalContributors,
+      provenStableReceiverSymbolIds,
+    ),
   );
 };
 

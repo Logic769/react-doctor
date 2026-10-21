@@ -82,6 +82,11 @@ export const BLOCKING_CHOICES: ReadonlyArray<CiGateChoice<BlockingLevel>> = [
 
 export const SCOPE_CHOICES: ReadonlyArray<CiGateChoice<ScopeValue>> = [
   {
+    value: "contextual",
+    title: "Modified contexts",
+    description: "Issues in modified functions, JSX elements, or files, as selected by each rule",
+  },
+  {
     value: "changed",
     title: "New issues",
     description: "Only the issues a change introduces",
@@ -142,6 +147,7 @@ const BLOCKING_SUMMARY: Record<BlockingLevel, string> = {
 };
 
 const SCOPE_SUMMARY: Record<ScopeValue, string> = {
+  contextual: "Report issues in modified rule contexts",
   full: "Scan the whole project on every run",
   files: "Report every issue in changed files",
   lines: "Report issues whose source spans touch changed lines",

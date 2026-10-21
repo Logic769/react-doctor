@@ -445,6 +445,7 @@ describe("GitHub Action contract", () => {
       'if [ -n "$INPUT_PROJECT" ]; then FLAGS+=("--project" "$INPUT_PROJECT"); fi',
     );
     expect(scanStep).toContain('FLAGS+=("--changed-files-from" "$CHANGED_FILES_FROM")');
+    expect(scanStep).toContain('files | lines | contextual | changed) FLAGS+=("--scope" "$SCOPE")');
     expect(scanStep).toContain(
       'npm exec --yes --package "$PACKAGE_SPEC" -- react-doctor "$INPUT_DIRECTORY" "${FLAGS[@]}"',
     );
