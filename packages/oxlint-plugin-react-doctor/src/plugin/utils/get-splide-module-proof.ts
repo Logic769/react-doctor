@@ -37,6 +37,7 @@ const RUNTIME_TYPESCRIPT_CONTAINERS = new Set([
 const DYNAMIC_CAPABILITY_NAMES = new Set([
   "eval",
   "Function",
+  "Reflect",
   "require",
   "module",
   "exports",
@@ -170,6 +171,11 @@ export const getSplideModuleProof = (
     const symbol = scopes.symbolFor(candidate);
     if (symbol?.bindingIdentifier === candidate) return;
     if (DYNAMIC_CAPABILITY_NAMES.has(candidate.name)) valid = false;
+    if (
+      candidate.name === "Object" &&
+      (!isNodeOfType(parent, "MemberExpression") || parent.object !== candidate)
+    )
+      valid = false;
     if (candidate.name === "Array") {
       const prototype = parent;
       const slice = prototype?.parent;

@@ -7,8 +7,12 @@ export const buildOwnedCarouselFuzzScenario = (random: SeededRandom): string => 
     "missing-destroy",
     "extension-escape",
     "erased-intrinsic-capability",
+    "aliased-intrinsic-capability",
   ]);
   return [
+    scenario === "aliased-intrinsic-capability"
+      ? `const fuzzIntrinsicTools = ${random.pick(["Object", "Reflect"])}; fuzzIntrinsicTools.getPrototypeOf([]).forEach = () => {};`
+      : "",
     scenario === "erased-intrinsic-capability"
       ? "interface Object { text?: string; } Object.getPrototypeOf([]).forEach = () => {};"
       : "",

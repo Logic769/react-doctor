@@ -90,6 +90,75 @@ describe.each([
     expect(result.diagnostics).toHaveLength(expected);
   });
 
+  it.each([
+    {
+      name: "destructured Object prototype authority",
+      prefix:
+        'const { getPrototypeOf: get } = Object; get([]).forEach = callback => queueMicrotask(() => callback(["ready", "onReady"]));',
+      expected: 1,
+    },
+    {
+      name: "erased destructured Object prototype authority",
+      prefix:
+        'interface Object { text?: string; } const { getPrototypeOf: get } = Object; get([]).forEach = callback => queueMicrotask(() => callback(["ready", "onReady"]));',
+      expected: 1,
+    },
+    {
+      name: "aliased Object prototype authority",
+      prefix:
+        'const tools = Object; tools.getPrototypeOf([]).forEach = callback => queueMicrotask(() => callback(["ready", "onReady"]));',
+      expected: 1,
+    },
+    {
+      name: "erased aliased Object prototype authority",
+      prefix:
+        'interface Object { text?: string; } const tools = Object; tools.getPrototypeOf([]).forEach = callback => queueMicrotask(() => callback(["ready", "onReady"]));',
+      expected: 1,
+    },
+    {
+      name: "destructured Reflect prototype authority",
+      prefix:
+        'const { getPrototypeOf: get } = Reflect; get([]).forEach = callback => queueMicrotask(() => callback(["ready", "onReady"]));',
+      expected: 1,
+    },
+    {
+      name: "erased destructured Reflect prototype authority",
+      prefix:
+        'interface Reflect { text?: string; } const { getPrototypeOf: get } = Reflect; get([]).forEach = callback => queueMicrotask(() => callback(["ready", "onReady"]));',
+      expected: 1,
+    },
+    {
+      name: "aliased Reflect prototype authority",
+      prefix:
+        'const tools = Reflect; tools.getPrototypeOf([]).forEach = callback => queueMicrotask(() => callback(["ready", "onReady"]));',
+      expected: 1,
+    },
+    {
+      name: "erased aliased Reflect prototype authority",
+      prefix:
+        'interface Reflect { text?: string; } const tools = Reflect; tools.getPrototypeOf([]).forEach = callback => queueMicrotask(() => callback(["ready", "onReady"]));',
+      expected: 1,
+    },
+    {
+      name: "inert intrinsic keys and ordinary Object keys",
+      prefix: "const names = { Object: 1, Reflect: 2 }; const keys = Object.keys(names);",
+      expected: 0,
+    },
+    {
+      name: "unused intrinsic-like value bindings",
+      prefix: "const Object = 1; const Reflect = 2;",
+      expected: 0,
+    },
+  ])("handles $name", ({ prefix, expected }) => {
+    fs.writeFileSync(path.join(temporaryDirectory, "event-list.ts"), PROVIDER);
+    const result = runRule(rule, `${prefix}\n${SOURCE}`, {
+      filename: path.join(temporaryDirectory, "GalleryView.tsx"),
+      forceJsx: true,
+    });
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(expected);
+  });
+
   it("declines a visible owner escape through the otherwise native provider", () => {
     fs.writeFileSync(path.join(temporaryDirectory, "event-list.ts"), PROVIDER);
     const result = runRule(
