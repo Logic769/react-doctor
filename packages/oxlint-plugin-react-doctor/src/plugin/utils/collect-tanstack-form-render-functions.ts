@@ -12,10 +12,18 @@ import { resolveModulePath } from "./resolve-module-path.js";
 import { stripParenExpression } from "./strip-paren-expression.js";
 import { walkAst } from "./walk-ast.js";
 
-const hasReadonlyFormBindingReferences = (symbol: SymbolDescriptor): boolean =>
-  symbol.references.every(
-    (reference) => reference.flag === "read" && !isWithinAssignmentTarget(reference.identifier),
-  );
+const readonlyFormBindingReferences = new WeakMap<SymbolDescriptor, boolean>();
+
+const hasReadonlyFormBindingReferences = (symbol: SymbolDescriptor): boolean => {
+  let hasReadonlyReferences = readonlyFormBindingReferences.get(symbol);
+  if (hasReadonlyReferences === undefined) {
+    hasReadonlyReferences = symbol.references.every(
+      (reference) => reference.flag === "read" && !isWithinAssignmentTarget(reference.identifier),
+    );
+    readonlyFormBindingReferences.set(symbol, hasReadonlyReferences);
+  }
+  return hasReadonlyReferences;
+};
 
 const isReadonlyFormFactory = (symbol: SymbolDescriptor, scopes: ScopeAnalysis): boolean => {
   const declaration = symbol.declarationNode;
@@ -142,6 +150,7 @@ export const collectTanstackFormRenderFunctions = (
   filename?: string,
 ): ReadonlySet<EsTreeNode> => {
   const renderFunctions = new Set<EsTreeNode>();
+  const factoryOrigins = new Map<SymbolDescriptor, boolean>();
   walkAst(program, (node) => {
     if (
       !isNodeOfType(node, "CallExpression") ||
@@ -181,11 +190,14 @@ export const collectTanstackFormRenderFunctions = (
     if (!isNodeOfType(callee, "Identifier")) return;
     const symbol = scopes.symbolFor(callee);
     if (!symbol) return;
-    if (
-      isReadonlyFormFactory(symbol, scopes) ||
-      (filename !== undefined && isImportedFormFactory(symbol, scopes, filename))
-    )
-      renderFunctions.add(renderFunction);
+    let hasFormFactoryOrigin = factoryOrigins.get(symbol);
+    if (hasFormFactoryOrigin === undefined) {
+      hasFormFactoryOrigin =
+        isReadonlyFormFactory(symbol, scopes) ||
+        (filename !== undefined && isImportedFormFactory(symbol, scopes, filename));
+      factoryOrigins.set(symbol, hasFormFactoryOrigin);
+    }
+    if (hasFormFactoryOrigin) renderFunctions.add(renderFunction);
   });
   return renderFunctions;
 };
