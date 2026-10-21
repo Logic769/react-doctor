@@ -80,6 +80,7 @@
       "framework": "global",
       "requires": ["react"],
       "tags": ["react-jsx-only"],
+      "diffScope": "jsx-element",
       "isScanRule": false
     }
   },
@@ -528,6 +529,7 @@
       "framework": "global",
       "requires": ["react"],
       "tags": ["react-jsx-only"],
+      "diffScope": "jsx-element",
       "isScanRule": false
     }
   },
@@ -12220,6 +12222,7 @@
       "framework": "global",
       "requires": ["react"],
       "tags": ["test-noise", "react-jsx-only"],
+      "diffScope": "function",
       "isScanRule": false
     }
   },
