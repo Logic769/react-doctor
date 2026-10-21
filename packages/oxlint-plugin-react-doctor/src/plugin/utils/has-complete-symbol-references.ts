@@ -1,9 +1,18 @@
 import type { ScopeAnalysis, SymbolDescriptor } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
+import type { EsTreeNodeOfType } from "./es-tree-node-of-type.js";
 import { getImportDeclarationForSymbol } from "./get-import-declaration-for-symbol.js";
 import { isNodeOfType } from "./is-node-of-type.js";
-import { isTypeScriptTypePosition } from "./is-typescript-type-position.js";
+import { isKeyedDraftTypeReference } from "./is-keyed-draft-type-reference.js";
 import { walkAst } from "./walk-ast.js";
+
+interface SymbolReferenceIndex {
+  readonly resolvedNodes: Map<SymbolDescriptor, EsTreeNodeOfType<"Identifier" | "JSXIdentifier">[]>;
+  readonly ambiguousNodes: Map<string, EsTreeNodeOfType<"Identifier" | "JSXIdentifier">[]>;
+  readonly completeness: Map<SymbolDescriptor, boolean>;
+}
+
+const indexesByScopes = new WeakMap<ScopeAnalysis, WeakMap<EsTreeNode, SymbolReferenceIndex>>();
 
 const isNonReferenceName = (node: EsTreeNode): boolean => {
   const parent = node.parent;
@@ -69,36 +78,75 @@ const isErasedBinding = (symbol: SymbolDescriptor): boolean => {
   return false;
 };
 
+const getSymbolReferenceIndex = (
+  program: EsTreeNode,
+  scopes: ScopeAnalysis,
+): SymbolReferenceIndex => {
+  let indexesByProgram = indexesByScopes.get(scopes);
+  if (!indexesByProgram) {
+    indexesByProgram = new WeakMap();
+    indexesByScopes.set(scopes, indexesByProgram);
+  }
+  const cached = indexesByProgram.get(program);
+  if (cached) return cached;
+  const index: SymbolReferenceIndex = {
+    resolvedNodes: new Map(),
+    ambiguousNodes: new Map(),
+    completeness: new Map(),
+  };
+  const erasedBindings = new Map<SymbolDescriptor, boolean>();
+  walkAst(program, (node) => {
+    if (isKeyedDraftTypeReference(node)) return false;
+    if (
+      (!isNodeOfType(node, "Identifier") && !isNodeOfType(node, "JSXIdentifier")) ||
+      isNonReferenceName(node)
+    )
+      return;
+    const resolved = scopes.symbolFor(node);
+    let isErased = resolved ? erasedBindings.get(resolved) : undefined;
+    if (resolved && isErased === undefined) {
+      isErased = isErasedBinding(resolved);
+      erasedBindings.set(resolved, isErased);
+    }
+    if (resolved && !isErased) {
+      const nodes = index.resolvedNodes.get(resolved) ?? [];
+      nodes.push(node);
+      index.resolvedNodes.set(resolved, nodes);
+      return;
+    }
+    const nodes = index.ambiguousNodes.get(node.name) ?? [];
+    nodes.push(node);
+    index.ambiguousNodes.set(node.name, nodes);
+  });
+  indexesByProgram.set(program, index);
+  return index;
+};
+
 export const hasCompleteSymbolReferences = (
   symbol: SymbolDescriptor,
   program: EsTreeNode,
   scopes: ScopeAnalysis,
 ): boolean => {
-  let isComplete = true;
-  walkAst(program, (node) => {
-    if (!isComplete) return false;
-    if (
-      (!isNodeOfType(node, "Identifier") && !isNodeOfType(node, "JSXIdentifier")) ||
-      node.name !== symbol.name ||
-      node === symbol.bindingIdentifier ||
-      isNonReferenceName(node)
-    )
-      return;
-    const runtimeTypeScript = hasRuntimeTypeScriptAncestor(node);
-    if (!runtimeTypeScript && isTypeScriptTypePosition(node)) return;
-    const resolved = scopes.symbolFor(node);
-    if (resolved && resolved !== symbol && !isErasedBinding(resolved)) return;
-    const reference = scopes.referenceFor(node);
-    if (
-      runtimeTypeScript ||
-      !reference ||
-      resolved !== symbol ||
-      reference.resolvedSymbol !== symbol ||
-      !symbol.references.includes(reference)
-    ) {
-      isComplete = false;
-      return false;
-    }
-  });
+  const index = getSymbolReferenceIndex(program, scopes);
+  const cached = index.completeness.get(symbol);
+  if (cached !== undefined) return cached;
+  const references = new Set(symbol.references);
+  const isComplete = [
+    index.resolvedNodes.get(symbol) ?? [],
+    index.ambiguousNodes.get(symbol.name) ?? [],
+  ].every((nodes) =>
+    nodes.every((node) => {
+      if (node === symbol.bindingIdentifier || node.name !== symbol.name) return true;
+      const reference = scopes.referenceFor(node);
+      return Boolean(
+        !hasRuntimeTypeScriptAncestor(node) &&
+        reference &&
+        scopes.symbolFor(node) === symbol &&
+        reference.resolvedSymbol === symbol &&
+        references.has(reference),
+      );
+    }),
+  );
+  index.completeness.set(symbol, isComplete);
   return isComplete;
 };

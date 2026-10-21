@@ -1,3 +1,4 @@
+import { getRuntimeSymbolReferences } from "./get-runtime-symbol-references.js";
 import type { SymbolDescriptor } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
 import { collectFunctionReturnStatements } from "./collect-function-return-statements.js";
@@ -12,7 +13,7 @@ import type {
 } from "./get-imported-request-action-evidence.js";
 import { isFunctionLike } from "./is-function-like.js";
 import { isNodeOfType } from "./is-node-of-type.js";
-import { isTypeScriptTypePosition } from "./is-typescript-type-position.js";
+import { isKeyedDraftTypeReference } from "./is-keyed-draft-type-reference.js";
 import { stripParenExpression } from "./strip-paren-expression.js";
 
 interface JotaiVisibilityAction {
@@ -72,9 +73,9 @@ export const isImportedJotaiVisibilityAction = (
     const props = proof.caller.scopes.symbolFor(component.params[0]);
     if (
       !props ||
-      !props.references.every(
+      !getRuntimeSymbolReferences(props).every(
         (reference) =>
-          isTypeScriptTypePosition(reference.identifier) ||
+          isKeyedDraftTypeReference(reference.identifier) ||
           reference.identifier === declaration.init,
       )
     )
@@ -169,7 +170,7 @@ export const isImportedJotaiVisibilityAction = (
       atom.declarationNode.parent.parent !== facts.program
     )
       return null;
-    return atom.references.every((reference) => {
+    return getRuntimeSymbolReferences(atom).every((reference) => {
       const parent = reference.identifier.parent;
       return (
         isNodeOfType(parent, "CallExpression") &&
@@ -255,7 +256,7 @@ export const isImportedJotaiVisibilityAction = (
       return null;
     if (
       findEnclosingFunction(setter.declarationNode) !== hook.node ||
-      !setter.references.every((reference) => {
+      !getRuntimeSymbolReferences(setter).every((reference) => {
         const parent = reference.identifier.parent;
         if (
           isNodeOfType(parent, "CallExpression") &&

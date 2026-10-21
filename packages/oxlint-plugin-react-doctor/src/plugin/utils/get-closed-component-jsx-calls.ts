@@ -3,6 +3,8 @@ import type { EsTreeNodeOfType } from "./es-tree-node-of-type.js";
 import { findEnclosingFunction } from "./find-enclosing-function.js";
 import { getFunctionBindingSymbols } from "./get-function-binding-symbols.js";
 import { hasCompleteSymbolReferences } from "./has-complete-symbol-references.js";
+import { hasVisibleAmbientFunctionDeclaration } from "./has-visible-ambient-function-declaration.js";
+import { isKeyedDraftTypeReference } from "./is-keyed-draft-type-reference.js";
 import { isNodeOfType } from "./is-node-of-type.js";
 import type { RuleContext } from "./rule-context.js";
 
@@ -47,8 +49,13 @@ export const getClosedComponentJsxCalls = (
     !outerSymbol ||
     outerSymbol.scope !== context.scopes.rootScope ||
     outerSymbol.initializer !== component ||
-    context.scopes.rootScope.symbols.filter((symbol) => symbol.name === outerSymbol.name).length !==
-      1
+    context.scopes.rootScope.symbols.filter(
+      (symbol) =>
+        symbol.name === outerSymbol.name &&
+        symbol.kind !== "ts-interface" &&
+        symbol.kind !== "ts-type-alias",
+    ).length !== 1 ||
+    hasVisibleAmbientFunctionDeclaration(outerSymbol.scope, outerSymbol.name)
   )
     return null;
   const selfSymbols =
@@ -66,6 +73,7 @@ export const getClosedComponentJsxCalls = (
   for (const symbol of symbols) {
     for (const reference of symbol.references) {
       const identifier = reference.identifier;
+      if (isKeyedDraftTypeReference(identifier)) continue;
       const parent = identifier.parent;
       if (reference.flag !== "read" || !isNodeOfType(identifier, "JSXIdentifier")) return null;
       if (isNodeOfType(parent, "JSXOpeningElement") && parent.name === identifier) {

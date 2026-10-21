@@ -1,3 +1,4 @@
+import { getRuntimeSymbolReferences } from "./get-runtime-symbol-references.js";
 import type { SymbolDescriptor } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
 import { collectFunctionReturnStatements } from "./collect-function-return-statements.js";
@@ -52,7 +53,7 @@ export const isImportedMutatingRequest = (node: EsTreeNode, proof: RequestAction
     const symbol = facts.scopes.symbolFor(expression);
     return Boolean(
       symbol &&
-      symbol.references.every((reference) => {
+      getRuntimeSymbolReferences(symbol).every((reference) => {
         let selected: EsTreeNode = reference.identifier;
         while (
           isNodeOfType(selected.parent, "MemberExpression") &&
@@ -193,7 +194,7 @@ export const isImportedMutatingRequest = (node: EsTreeNode, proof: RequestAction
     const interceptorCall = interceptorStatement.expression;
     const transformsBinding = transformsDeclaration.declarations[0];
     if (
-      !instance.references.every(
+      !getRuntimeSymbolReferences(instance).every(
         (reference) =>
           reference.identifier === returned ||
           (isNodeOfType(reference.identifier.parent, "MemberExpression") &&
@@ -419,7 +420,7 @@ export const isImportedMutatingRequest = (node: EsTreeNode, proof: RequestAction
     if (
       !receiverBinding ||
       !proof.closed(receiverBinding, facts) ||
-      !receiverBinding.references.every((reference) => {
+      !getRuntimeSymbolReferences(receiverBinding).every((reference) => {
         const member = reference.identifier.parent;
         const call = member?.parent;
         return (

@@ -1,3 +1,5 @@
+import { getRuntimeSymbolReferences } from "./get-runtime-symbol-references.js";
+import { hasJsxRuntimePragma } from "./has-jsx-runtime-pragma.js";
 import { analyzeScopes } from "../semantic/scope-analysis.js";
 import type { ScopeAnalysis, SymbolDescriptor } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
@@ -10,7 +12,7 @@ import { isFunctionLike } from "./is-function-like.js";
 import { isImportedJotaiVisibilityAction } from "./is-imported-jotai-visibility-action.js";
 import { isImportedMutatingRequest } from "./is-imported-mutating-request.js";
 import { isNodeOfType } from "./is-node-of-type.js";
-import { isTypeScriptTypePosition } from "./is-typescript-type-position.js";
+import { isKeyedDraftTypeReference } from "./is-keyed-draft-type-reference.js";
 import { isWithinAssignmentTarget } from "./is-within-assignment-target.js";
 import { resolveCrossFileValueExportWithFilePath } from "./resolve-cross-file-function-export.js";
 import { resolveImportedApiReference } from "./resolve-imported-api-reference.js";
@@ -59,6 +61,16 @@ export const getImportedRequestActionEvidence = (
     return { mutatingAwaits, stateActions };
   }
   try {
+    const sourceText = context.sourceCode?.getText?.();
+    if (
+      sourceText === undefined ||
+      hasJsxRuntimePragma({
+        program: context.scopes.rootScope.node,
+        filename: context.filename,
+        sourceText,
+      })
+    )
+      return { mutatingAwaits, stateActions };
     const awaits: EsTreeNode[] = [];
     const calls: EsTreeNode[] = [];
     walkAst(handler, (node) => {
@@ -95,7 +107,7 @@ export const getImportedRequestActionEvidence = (
       const programScopes = scopes ?? analyzeScopes(program);
       let hasUnsupportedCapability = false;
       walkAst(program, (node) => {
-        if (isTypeScriptTypePosition(node)) return;
+        if (isKeyedDraftTypeReference(node)) return false;
         if (
           (isNodeOfType(node, "MemberExpression") &&
             ["__proto__", "prototype"].includes(getStaticPropertyName(node) ?? "")) ||
@@ -137,8 +149,8 @@ export const getImportedRequestActionEvidence = (
         symbol &&
         ["const", "function", "import", "parameter"].includes(symbol.kind) &&
         hasCompleteSymbolReferences(symbol, facts.program, facts.scopes) &&
-        symbol.references.every((reference) => {
-          if (isTypeScriptTypePosition(reference.identifier)) return true;
+        getRuntimeSymbolReferences(symbol).every((reference) => {
+          if (isKeyedDraftTypeReference(reference.identifier)) return true;
           if (reference.flag !== "read") return false;
           return !isWithinAssignmentTarget(reference.identifier);
         }),

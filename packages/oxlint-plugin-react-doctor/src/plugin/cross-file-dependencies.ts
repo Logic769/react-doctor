@@ -582,6 +582,7 @@ const collectImportedRequestActionDependencies: CrossFileDependencyCollector = (
   const scopes = analyzeScopes(program);
   const context: RuleContext = {
     filename: input.absoluteFilePath,
+    sourceCode: { ast: program, getText: () => input.sourceText },
     scopes,
     get cfg() {
       return analyzeControlFlow(program);

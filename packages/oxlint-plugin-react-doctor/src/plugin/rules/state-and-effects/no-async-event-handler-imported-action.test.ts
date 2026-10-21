@@ -107,6 +107,41 @@ const expectNoFinding = (source: string): void => {
 };
 
 describe("imported request and same-store visibility action", () => {
+  it("declines a visible CommonJS provider replacement", () =>
+    expectNoFinding(
+      writeFixture({ componentPrefix: "module['require']('axios').post=async()=>({data:null});" }),
+    ));
+  it("preserves inert CommonJS names", () =>
+    expectFinding(
+      writeFixture({
+        componentPrefix:
+          "const labels={module:'description',exports:'description',require:'description'}; interface module {} interface exports {}",
+      }),
+    ));
+
+  it("keeps type-only exports outside the runtime closure", () =>
+    expectFinding(writeFixture({ componentPrefix: "export type {Dialog,useCallback};" })));
+
+  it("declines an explicitly custom JSX factory", () =>
+    expectNoFinding(writeFixture({ componentPrefix: "/** @jsx jsx */\nconst jsx=()=>null;" })));
+  it("preserves an incidental JSX pragma string", () =>
+    expectFinding(writeFixture({ componentPrefix: "const description='@jsx jsx';" })));
+
+  it.each([
+    ["erased-hook", { componentPrefix: "interface useCallback {}" }],
+    ["erased-component", { componentPrefix: "interface Dialog {}" }],
+    [
+      "erased-provider-pattern",
+      { providerPrefix: "type Notes=({Function}:{Function:string})=>void;" },
+    ],
+    [
+      "inert-provider-keys",
+      { providerPrefix: "const labels={Function:'description',constructor:'description'};" },
+    ],
+  ])("retains imported evidence beside %s", (_name, options) =>
+    expectFinding(writeFixture(options)),
+  );
+
   it("declines a request default that claims reentry before forwarding", () =>
     expectNoFinding(
       writeFixture({
