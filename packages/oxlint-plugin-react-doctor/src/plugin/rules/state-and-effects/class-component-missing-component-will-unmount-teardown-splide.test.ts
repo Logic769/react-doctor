@@ -59,7 +59,10 @@ const OPTIONS = {
 
 const QUIET_CASES = [
   { name: "owned completed instance with guarded destroy", code: INSTANCE },
-  { name: "ordinary imported synchronous event vector", code: IMPORTED_ITERATION },
+  {
+    name: "erased intrinsic bindings and ordinary Object keys remain inert",
+    code: `interface Object { text?: string; } interface Array { text?: string; } interface Reflect { text?: string; } const keys = Object.keys({value: 1});\n${INSTANCE}`,
+  },
   {
     name: "explicit empty null owner field",
     code: INSTANCE.replace("deck: Deck | undefined;", "deck: Deck | null = null;").replace(
@@ -85,9 +88,63 @@ const QUIET_CASES = [
       "interface DeckView extends Deck {}\nexport class GalleryView",
     ),
   },
+  {
+    name: "type-only provider export",
+    code: `${INSTANCE}
+export type { Deck as DeckHandle };`,
+  },
+  {
+    name: "inert dynamic capability keys",
+    code: `const names = { Function: 1, module: 2, exports: 3 };
+${INSTANCE}`,
+  },
+  {
+    name: "unused capability-like bindings",
+    code: `const Function = 1; const module = 2; const exports = 3;\n${INSTANCE}`,
+  },
+  {
+    name: "inert capability-like export alias",
+    code: `const label = 1; export { label as Function };\n${INSTANCE}`,
+  },
+  {
+    name: "inert capability-like label",
+    code: `Function: { break Function; }\n${INSTANCE}`,
+  },
+  {
+    name: "erased relative type-only import and reexport",
+    code: `import type { Metadata } from "./patch"; export type { Metadata as OtherMetadata } from "./patch";\n${INSTANCE}`,
+  },
+
+  {
+    name: "local native event vector with event-only forwarding",
+    code: IMPORTED_ITERATION.replace(
+      'import { subscriptions } from "./event-list";',
+      'const subscriptions = [["ready", "onReady"]];',
+    ).replace("callback(owner, ...values)", "callback(...values)"),
+  },
+  {
+    name: "ordinary literal and const numeric computed reads",
+    code: `const index = 0; const first = [1][index]; const second = [2][0];\n${INSTANCE}`,
+  },
 ];
 
 const WARNING_CASES = [
+  {
+    name: "erased Object binding does not hide native prototype replacement",
+    code: `interface Object { text?: string; } Object.getPrototypeOf([]).forEach = callback => queueMicrotask(() => callback(["ready", "onReady"]));\n${INSTANCE}`,
+  },
+  {
+    name: "erased Array binding does not hide native prototype replacement",
+    code: `interface Array { text?: string; } Array.prototype.forEach = callback => queueMicrotask(() => callback(["ready", "onReady"]));\n${INSTANCE}`,
+  },
+  {
+    name: "erased Reflect binding does not hide native prototype replacement",
+    code: `interface Reflect { text?: string; } Reflect.getPrototypeOf([]).forEach = callback => queueMicrotask(() => callback(["ready", "onReady"]));\n${INSTANCE}`,
+  },
+  {
+    name: "imported callback receiving owner has unresolved disposal authority",
+    code: IMPORTED_ITERATION,
+  },
   {
     name: "explicit return before native mount",
     code: INSTANCE.replace("    this.deck.mount();", "    return;\n    this.deck.mount();"),
@@ -294,6 +351,78 @@ const WARNING_CASES = [
   {
     name: "wrong carousel provider",
     code: INSTANCE.replace('from "@splidejs/splide"', 'from "other-carousel"'),
+  },
+  {
+    name: "reachable unindexed catch-default Function capability",
+    code: INSTANCE.replace(
+      "export class GalleryView",
+      `try { throw {}; } catch ({ missing = Function("return import('@splidejs/splide')")() }) {}\nexport class GalleryView`,
+    ),
+  },
+  {
+    name: "mount extension receives owner and replaces destroy",
+    code: INSTANCE.replace(
+      "this.deck.mount();",
+      "this.deck.mount({ Patch: instance => { instance.destroy = () => {}; return {}; } });",
+    ),
+  },
+  {
+    name: "mount transition receives owner and replaces destroy",
+    code: INSTANCE.replace(
+      "this.deck.mount();",
+      "this.deck.mount({}, instance => { instance.destroy = () => {}; return {}; });",
+    ),
+  },
+  {
+    name: "sync peer collection receives owner and replaces destroy",
+    code: INSTANCE.replace(
+      "export class GalleryView",
+      "const peer = { splides: { push({ splide }) { splide.destroy = () => {}; } }, Components: { Sync: { remount() {} } } };\nexport class GalleryView",
+    ).replace("  render()", "  componentDidUpdate() { this.deck.sync(peer); }\n  render()"),
+  },
+  {
+    name: "side-effect import has opaque constructor authority",
+    code: `import "./patch";\n${INSTANCE}`,
+  },
+  {
+    name: "named value import has opaque constructor authority",
+    code: `import { value } from "./patch";\n${INSTANCE}`,
+  },
+  {
+    name: "runtime reexport has opaque constructor authority",
+    code: `export { value } from "./patch";\n${INSTANCE}`,
+  },
+  {
+    name: "runtime namespace reexport has opaque constructor authority",
+    code: `export * from "./patch";\n${INSTANCE}`,
+  },
+  {
+    name: "literal Array prototype forEach replacement",
+    code: `[].__proto__.forEach = callback => queueMicrotask(() => callback(["ready", "onReady"]));\n${INSTANCE}`,
+  },
+  {
+    name: "computed literal Array prototype forEach replacement",
+    code: `[]["__proto__"].forEach = callback => queueMicrotask(() => callback(["ready", "onReady"]));\n${INSTANCE}`,
+  },
+  {
+    name: "native prototype through Object.getPrototypeOf",
+    code: `Object.getPrototypeOf([]).forEach = callback => queueMicrotask(() => callback(["ready", "onReady"]));\n${INSTANCE}`,
+  },
+  {
+    name: "const alias prototype property transport",
+    code: `const key = "__proto__"; [][key].forEach = callback => queueMicrotask(() => callback(["ready", "onReady"]));\n${INSTANCE}`,
+  },
+  {
+    name: "destructured prototype property transport",
+    code: `const { __proto__: arrayPrototype } = []; arrayPrototype.forEach = callback => queueMicrotask(() => callback(["ready", "onReady"]));\n${INSTANCE}`,
+  },
+  {
+    name: "computed binary constructor transport",
+    code: `const route = "con" + "structor"; const create = [][route][route]; create("return import('@splidejs/splide')")().then(namespace => { namespace.Splide.prototype.destroy = () => {}; });\n${INSTANCE}`,
+  },
+  {
+    name: "computed pattern constructor transport",
+    code: `const route = "con" + "structor"; const { [route]: { [route]: create } } = []; create("return import('@splidejs/splide')")().then(namespace => { namespace.Splide.prototype.destroy = () => {}; });\n${INSTANCE}`,
   },
 ];
 
