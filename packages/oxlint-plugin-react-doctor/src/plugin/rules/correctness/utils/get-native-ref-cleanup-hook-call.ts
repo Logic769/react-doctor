@@ -8,6 +8,8 @@ import { getValueImportSource } from "../../../utils/get-value-import-declaratio
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
 
+const importedHookReferenceSafetyByAnalysis = new WeakMap<ScopeAnalysis, Map<number, boolean>>();
+
 export const getNativeRefCleanupHookCall = (
   identifier: EsTreeNode,
   apiName: string,
@@ -34,8 +36,16 @@ export const getNativeRefCleanupHookCall = (
   if (
     !imported ||
     getValueImportSource(imported) !== "react" ||
-    getImportedName(imported.declarationNode) !== apiName ||
-    imported.references.some((reference) => {
+    getImportedName(imported.declarationNode) !== apiName
+  ) {
+    return null;
+  }
+  const referenceSafetyBySymbol =
+    importedHookReferenceSafetyByAnalysis.get(scopes) ?? new Map<number, boolean>();
+  importedHookReferenceSafetyByAnalysis.set(scopes, referenceSafetyBySymbol);
+  let hasSafeReferences = referenceSafetyBySymbol.get(imported.id);
+  if (hasSafeReferences === undefined) {
+    hasSafeReferences = !imported.references.some((reference) => {
       const referenceRoot = findTransparentExpressionRoot(reference.identifier);
       const invocation = referenceRoot.parent;
       return (
@@ -44,9 +54,8 @@ export const getNativeRefCleanupHookCall = (
         invocation.callee !== referenceRoot ||
         invocation.optional
       );
-    })
-  ) {
-    return null;
+    });
+    referenceSafetyBySymbol.set(imported.id, hasSafeReferences);
   }
-  return call;
+  return hasSafeReferences ? call : null;
 };

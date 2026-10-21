@@ -15,7 +15,11 @@ import { isTypeOnlyImport } from "../../../utils/is-type-only-import.js";
 import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
 import { walkAst } from "../../../utils/walk-ast.js";
 
+const providerHazardsByAnalysis = new WeakMap<ScopeAnalysis, boolean>();
+
 export const hasRefCleanupProviderHazard = (scopes: ScopeAnalysis): boolean => {
+  const cachedHazard = providerHazardsByAnalysis.get(scopes);
+  if (cachedHazard !== undefined) return cachedHazard;
   let hasHazard = false;
   walkAst(scopes.rootScope.node, (child: EsTreeNode) => {
     if (hasHazard || isTypeScriptTypePosition(child)) return false;
@@ -114,5 +118,6 @@ export const hasRefCleanupProviderHazard = (scopes: ScopeAnalysis): boolean => {
       hasHazard = true;
     }
   });
+  providerHazardsByAnalysis.set(scopes, hasHazard);
   return hasHazard;
 };
