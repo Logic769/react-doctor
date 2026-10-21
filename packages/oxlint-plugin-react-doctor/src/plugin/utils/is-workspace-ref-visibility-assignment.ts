@@ -1,3 +1,5 @@
+import { getRuntimeSymbolReferences } from "./get-runtime-symbol-references.js";
+import { hasJsxRuntimePragma } from "./has-jsx-runtime-pragma.js";
 import type { ScopeAnalysis, SymbolDescriptor } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
 import type { EsTreeNodeOfType } from "./es-tree-node-of-type.js";
@@ -35,7 +37,7 @@ const isClosedHost = (
   if (!symbol || symbol.kind !== "const" || !symbol.initializer) return false;
   if (!hasCompleteSymbolReferences(symbol, program, scopes)) return false;
   if (
-    !symbol.references.every((reference) => {
+    !getRuntimeSymbolReferences(symbol).every((reference) => {
       const parent = reference.identifier.parent;
       return (
         reference.flag === "read" &&
@@ -64,7 +66,7 @@ const hasDirectImportedCalls = (
   scopes: ScopeAnalysis,
 ): boolean =>
   hasCompleteSymbolReferences(symbol, program, scopes) &&
-  symbol.references.every((reference) => {
+  getRuntimeSymbolReferences(symbol).every((reference) => {
     const root = findTransparentExpressionRoot(reference.identifier);
     return (
       reference.flag === "read" &&
@@ -81,6 +83,17 @@ export const isWorkspaceRefVisibilityAssignment = (
   setterIdentifier: EsTreeNode,
 ): boolean => {
   try {
+    const sourceText = context.sourceCode?.getText?.();
+    if (
+      !context.filename ||
+      sourceText === undefined ||
+      hasJsxRuntimePragma({
+        program: context.scopes.rootScope.node,
+        filename: context.filename,
+        sourceText,
+      })
+    )
+      return false;
     if (!isNodeOfType(assignment, "AssignmentExpression") || assignment.operator !== "=")
       return false;
     if (
@@ -114,7 +127,7 @@ export const isWorkspaceRefVisibilityAssignment = (
     if (!state || !setter || scopes.symbolFor(receiver) !== state) return false;
     if (
       !hasCompleteSymbolReferences(state, program, scopes) ||
-      !state.references.every((reference) => reference.flag === "read")
+      !getRuntimeSymbolReferences(state).every((reference) => reference.flag === "read")
     )
       return false;
     const pattern = stateIdentifier.parent;
@@ -146,7 +159,7 @@ export const isWorkspaceRefVisibilityAssignment = (
     if (!isNodeOfType(seed, "Literal") || seed.value !== null || otherSeeds.length > 0)
       return false;
     if (!hasOrdinaryRefRelayRuntime(program, scopes)) return false;
-    const [setterReference, ...otherSetterReferences] = setter.references;
+    const [setterReference, ...otherSetterReferences] = getRuntimeSymbolReferences(setter);
     if (
       !setterReference ||
       otherSetterReferences.length > 0 ||
@@ -188,7 +201,7 @@ export const isWorkspaceRefVisibilityAssignment = (
     if (!component || getOwnFunction(relayCall) !== component) return false;
     const result = scopes.symbolFor(declaration.id);
     if (!result || result.kind !== "const") return false;
-    const [resultReference, ...otherResultReferences] = result.references;
+    const [resultReference, ...otherResultReferences] = getRuntimeSymbolReferences(result);
     if (
       !resultReference ||
       otherResultReferences.length > 0 ||

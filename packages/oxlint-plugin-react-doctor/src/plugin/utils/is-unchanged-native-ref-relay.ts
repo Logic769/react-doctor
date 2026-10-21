@@ -1,3 +1,4 @@
+import { getRuntimeSymbolReferences } from "./get-runtime-symbol-references.js";
 import { analyzeScopes } from "../semantic/scope-analysis.js";
 import type { ScopeAnalysis } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
@@ -46,7 +47,7 @@ const hasClosedFunctionBinding = (
     [...symbols].every(
       (symbol) =>
         hasCompleteSymbolReferences(symbol, program, scopes) &&
-        symbol.references.every(
+        getRuntimeSymbolReferences(symbol).every(
           (reference) =>
             reference.flag === "read" &&
             isNodeOfType(reference.identifier.parent, "ExportSpecifier") &&

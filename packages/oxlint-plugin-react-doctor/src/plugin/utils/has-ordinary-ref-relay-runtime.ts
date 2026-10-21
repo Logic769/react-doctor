@@ -1,3 +1,4 @@
+import { getRuntimeSymbolReferences } from "./get-runtime-symbol-references.js";
 import type { ScopeAnalysis } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
 import { findTransparentExpressionRoot } from "./find-transparent-expression-root.js";
@@ -5,11 +6,12 @@ import { getStaticKeyName } from "./get-static-key-name.js";
 import { getStaticPropertyKeyName } from "./get-static-property-key-name.js";
 import { hasCompleteSymbolReferences } from "./has-complete-symbol-references.js";
 import { isNodeOfType } from "./is-node-of-type.js";
-import { isTypeScriptTypePosition } from "./is-typescript-type-position.js";
+import { isKeyedDraftTypeReference } from "./is-keyed-draft-type-reference.js";
 import { walkAst } from "./walk-ast.js";
 
 const UNSUPPORTED_REF_RELAY_MEMBER_NAMES: ReadonlySet<string> = new Set([
   "constructor",
+  "require",
   "prototype",
   "__proto__",
   "React",
@@ -49,6 +51,11 @@ export const hasOrdinaryRefRelayRuntime = (program: EsTreeNode, scopes: ScopeAna
   let isOrdinary = true;
   walkAst(program, (node) => {
     if (!isOrdinary) return false;
+    if (
+      isNodeOfType(node, "TSTypeAliasDeclaration") ||
+      isNodeOfType(node, "TSInterfaceDeclaration")
+    )
+      return false;
     if (isNodeOfType(node, "TSModuleDeclaration")) {
       if (!isErasedNamespace(node)) isOrdinary = false;
       return false;
@@ -63,7 +70,22 @@ export const hasOrdinaryRefRelayRuntime = (program: EsTreeNode, scopes: ScopeAna
       isOrdinary = false;
       return false;
     }
-    if (isTypeScriptTypePosition(node)) return;
+    if (isKeyedDraftTypeReference(node)) return false;
+    const parent = node.parent;
+    if (
+      parent &&
+      "key" in parent &&
+      parent.key === node &&
+      "computed" in parent &&
+      !parent.computed &&
+      (isNodeOfType(parent, "Property")
+        ? !parent.shorthand || parent.value !== node
+        : isNodeOfType(parent, "MethodDefinition") ||
+          isNodeOfType(parent, "PropertyDefinition") ||
+          isNodeOfType(parent, "AccessorProperty"))
+    )
+      return false;
+
     if (
       isNodeOfType(node, "Property") &&
       node.computed &&
@@ -92,7 +114,7 @@ export const hasOrdinaryRefRelayRuntime = (program: EsTreeNode, scopes: ScopeAna
         return (
           symbol !== null &&
           hasCompleteSymbolReferences(symbol, program, scopes) &&
-          symbol.references.every((reference) => {
+          getRuntimeSymbolReferences(symbol).every((reference) => {
             const root = findTransparentExpressionRoot(reference.identifier);
             return (
               reference.flag === "read" &&
@@ -114,7 +136,9 @@ export const hasOrdinaryRefRelayRuntime = (program: EsTreeNode, scopes: ScopeAna
         node.name === "require" ||
         node.name === "globalThis" ||
         node.name === "global" ||
-        node.name === "self")
+        node.name === "self" ||
+        node.name === "module" ||
+        node.name === "exports")
     ) {
       isOrdinary = false;
       return false;
@@ -161,7 +185,12 @@ export const hasOrdinaryRefRelayRuntime = (program: EsTreeNode, scopes: ScopeAna
     }
     if (isNodeOfType(node, "Property")) {
       const name = getStaticKeyName(node.key);
-      if (name && UNSUPPORTED_REF_RELAY_MEMBER_NAMES.has(name)) isOrdinary = false;
+      if (
+        name &&
+        UNSUPPORTED_REF_RELAY_MEMBER_NAMES.has(name) &&
+        (isNodeOfType(node.parent, "ObjectPattern") || node.computed || node.shorthand)
+      )
+        isOrdinary = false;
     }
   });
   return isOrdinary;

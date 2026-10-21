@@ -536,6 +536,195 @@
       "settingsRoot": "CONSUMER_ROOT",
       "symlinkProvider": false,
       "expectedMutation": null
+    },
+    {
+      "name": "review-nominal",
+      "updates": {
+        "packages/ui/src/panel.tsx": "import {useState,useEffect} from 'react';\nimport {useMergedRefs} from '@sample/ref-kit/internal';\nexport const Panel=({forwarded,modal})=>{\n const [node,setNode]=useState(null);\n const merged=useMergedRefs(forwarded,setNode);\n const Host=(modal?'dialog':'div');\n useEffect(()=>{if(node)node.style.visibility='hidden'},[node]);\n return <Host ref={merged}/>;\n};\n"
+      },
+      "settingsRoot": "CONSUMER_ROOT",
+      "symlinkProvider": false,
+      "expectedMutation": null
+    },
+    {
+      "name": "review-erased-hook",
+      "updates": {
+        "packages/ui/src/panel.tsx": "interface useState {}\nimport {useState,useEffect} from 'react';\nimport {useMergedRefs} from '@sample/ref-kit/internal';\nexport const Panel=({forwarded,modal})=>{\n const [node,setNode]=useState(null);\n const merged=useMergedRefs(forwarded,setNode);\n const Host=(modal?'dialog':'div');\n useEffect(()=>{if(node)node.style.visibility='hidden'},[node]);\n return <Host ref={merged}/>;\n};\n"
+      },
+      "settingsRoot": "CONSUMER_ROOT",
+      "symlinkProvider": false,
+      "expectedMutation": null
+    },
+    {
+      "name": "review-erased-deep-capability",
+      "updates": {
+        "packages/ui/src/panel.tsx": "type Notes=({Function}:{Function:string})=>void;\nimport {useState,useEffect} from 'react';\nimport {useMergedRefs} from '@sample/ref-kit/internal';\nexport const Panel=({forwarded,modal})=>{\n const [node,setNode]=useState(null);\n const merged=useMergedRefs(forwarded,setNode);\n const Host=(modal?'dialog':'div');\n useEffect(()=>{if(node)node.style.visibility='hidden'},[node]);\n return <Host ref={merged}/>;\n};\n"
+      },
+      "settingsRoot": "CONSUMER_ROOT",
+      "symlinkProvider": false,
+      "expectedMutation": null
+    },
+    {
+      "name": "review-inert-object-keys",
+      "updates": {
+        "packages/ui/src/panel.tsx": "const notes={Function:'description',React:'description',constructor:'description'};\nimport {useState,useEffect} from 'react';\nimport {useMergedRefs} from '@sample/ref-kit/internal';\nexport const Panel=({forwarded,modal})=>{\n const [node,setNode]=useState(null);\n const merged=useMergedRefs(forwarded,setNode);\n const Host=(modal?'dialog':'div');\n useEffect(()=>{if(node)node.style.visibility='hidden'},[node]);\n return <Host ref={merged}/>;\n};\n"
+      },
+      "settingsRoot": "CONSUMER_ROOT",
+      "symlinkProvider": false,
+      "expectedMutation": null
+    },
+    {
+      "name": "review-inert-method-keys",
+      "updates": {
+        "packages/ui/src/panel.tsx": "class Notes {static Function(){return 'description'} static React(){return 'description'}}\nimport {useState,useEffect} from 'react';\nimport {useMergedRefs} from '@sample/ref-kit/internal';\nexport const Panel=({forwarded,modal})=>{\n const [node,setNode]=useState(null);\n const merged=useMergedRefs(forwarded,setNode);\n const Host=(modal?'dialog':'div');\n useEffect(()=>{if(node)node.style.visibility='hidden'},[node]);\n return <Host ref={merged}/>;\n};\n"
+      },
+      "settingsRoot": "CONSUMER_ROOT",
+      "symlinkProvider": false,
+      "expectedMutation": null
+    },
+    {
+      "name": "review-custom-jsx-factory",
+      "updates": {
+        "packages/ui/src/panel.tsx": "/** @jsx jsx */\nconst jsx=(tag,props)=>{props.ref({style:{visibility:'visible'}});return null};\nimport {useState,useEffect} from 'react';\nimport {useMergedRefs} from '@sample/ref-kit/internal';\nexport const Panel=({forwarded,modal})=>{\n const [node,setNode]=useState(null);\n const merged=useMergedRefs(forwarded,setNode);\n const Host=(modal?'dialog':'div');\n useEffect(()=>{if(node)node.style.visibility='hidden'},[node]);\n return <Host ref={merged}/>;\n};\n"
+      },
+      "settingsRoot": "CONSUMER_ROOT",
+      "symlinkProvider": false,
+      "expectedMutation": "node.style.visibility='hidden'"
+    },
+    {
+      "name": "review-runtime-shorthand-capability",
+      "updates": {
+        "packages/ui/src/panel.tsx": "const notes={Function};\nimport {useState,useEffect} from 'react';\nimport {useMergedRefs} from '@sample/ref-kit/internal';\nexport const Panel=({forwarded,modal})=>{\n const [node,setNode]=useState(null);\n const merged=useMergedRefs(forwarded,setNode);\n const Host=(modal?'dialog':'div');\n useEffect(()=>{if(node)node.style.visibility='hidden'},[node]);\n return <Host ref={merged}/>;\n};\n"
+      },
+      "settingsRoot": "CONSUMER_ROOT",
+      "symlinkProvider": false,
+      "expectedMutation": "node.style.visibility='hidden'"
+    },
+    {
+      "name": "review-runtime-computed-capability",
+      "updates": {
+        "packages/ui/src/panel.tsx": "const notes={[Function]:'description'};\nimport {useState,useEffect} from 'react';\nimport {useMergedRefs} from '@sample/ref-kit/internal';\nexport const Panel=({forwarded,modal})=>{\n const [node,setNode]=useState(null);\n const merged=useMergedRefs(forwarded,setNode);\n const Host=(modal?'dialog':'div');\n useEffect(()=>{if(node)node.style.visibility='hidden'},[node]);\n return <Host ref={merged}/>;\n};\n"
+      },
+      "settingsRoot": "CONSUMER_ROOT",
+      "symlinkProvider": false,
+      "expectedMutation": "node.style.visibility='hidden'"
+    },
+    {
+      "name": "review-runtime-parameter-property-capability",
+      "updates": {
+        "packages/ui/src/panel.tsx": "class Capability {constructor(public value=Function('globalThis.changed=1')()){}}\nimport {useState,useEffect} from 'react';\nimport {useMergedRefs} from '@sample/ref-kit/internal';\nexport const Panel=({forwarded,modal})=>{\n const [node,setNode]=useState(null);\n const merged=useMergedRefs(forwarded,setNode);\n const Host=(modal?'dialog':'div');\n useEffect(()=>{if(node)node.style.visibility='hidden'},[node]);\n return <Host ref={merged}/>;\n};\n"
+      },
+      "settingsRoot": "CONSUMER_ROOT",
+      "symlinkProvider": false,
+      "expectedMutation": "node.style.visibility='hidden'"
+    },
+    {
+      "name": "review-cjs-module-react-write",
+      "updates": {
+        "packages/ui/src/panel.tsx": "module['require']('react').useState=()=>[{},()=>{}];\nimport {useState,useEffect} from 'react';\nimport {useMergedRefs} from '@sample/ref-kit/internal';\nexport const Panel=({forwarded,modal})=>{\n const [node,setNode]=useState(null);\n const merged=useMergedRefs(forwarded,setNode);\n const Host=(modal?'dialog':'div');\n useEffect(()=>{if(node)node.style.visibility='hidden'},[node]);\n return <Host ref={merged}/>;\n};\n"
+      },
+      "settingsRoot": "CONSUMER_ROOT",
+      "symlinkProvider": false,
+      "expectedMutation": "node.style.visibility='hidden'"
+    },
+    {
+      "name": "review-erased-deep-useState",
+      "updates": {
+        "packages/ui/src/panel.tsx": "type Notes=({useState}:{useState:string})=>void;\nimport {useState,useEffect} from 'react';\nimport {useMergedRefs} from '@sample/ref-kit/internal';\nexport const Panel=({forwarded,modal})=>{\n const [node,setNode]=useState(null);\n const merged=useMergedRefs(forwarded,setNode);\n const Host=(modal?'dialog':'div');\n useEffect(()=>{if(node)node.style.visibility='hidden'},[node]);\n return <Host ref={merged}/>;\n};\n"
+      },
+      "settingsRoot": "CONSUMER_ROOT",
+      "symlinkProvider": false,
+      "expectedMutation": null
+    },
+    {
+      "name": "review-erased-deep-useEffect",
+      "updates": {
+        "packages/ui/src/panel.tsx": "type Notes=({useEffect}:{useEffect:string})=>void;\nimport {useState,useEffect} from 'react';\nimport {useMergedRefs} from '@sample/ref-kit/internal';\nexport const Panel=({forwarded,modal})=>{\n const [node,setNode]=useState(null);\n const merged=useMergedRefs(forwarded,setNode);\n const Host=(modal?'dialog':'div');\n useEffect(()=>{if(node)node.style.visibility='hidden'},[node]);\n return <Host ref={merged}/>;\n};\n"
+      },
+      "settingsRoot": "CONSUMER_ROOT",
+      "symlinkProvider": false,
+      "expectedMutation": null
+    },
+    {
+      "name": "review-erased-deep-useMergedRefs",
+      "updates": {
+        "packages/ui/src/panel.tsx": "type Notes=({useMergedRefs}:{useMergedRefs:string})=>void;\nimport {useState,useEffect} from 'react';\nimport {useMergedRefs} from '@sample/ref-kit/internal';\nexport const Panel=({forwarded,modal})=>{\n const [node,setNode]=useState(null);\n const merged=useMergedRefs(forwarded,setNode);\n const Host=(modal?'dialog':'div');\n useEffect(()=>{if(node)node.style.visibility='hidden'},[node]);\n return <Host ref={merged}/>;\n};\n"
+      },
+      "settingsRoot": "CONSUMER_ROOT",
+      "symlinkProvider": false,
+      "expectedMutation": null
+    },
+    {
+      "name": "review-erased-deep-Panel",
+      "updates": {
+        "packages/ui/src/panel.tsx": "type Notes=({Panel}:{Panel:string})=>void;\nimport {useState,useEffect} from 'react';\nimport {useMergedRefs} from '@sample/ref-kit/internal';\nexport const Panel=({forwarded,modal})=>{\n const [node,setNode]=useState(null);\n const merged=useMergedRefs(forwarded,setNode);\n const Host=(modal?'dialog':'div');\n useEffect(()=>{if(node)node.style.visibility='hidden'},[node]);\n return <Host ref={merged}/>;\n};\n"
+      },
+      "settingsRoot": "CONSUMER_ROOT",
+      "symlinkProvider": false,
+      "expectedMutation": null
+    },
+    {
+      "name": "review-erased-deep-node",
+      "updates": {
+        "packages/ui/src/panel.tsx": "type Notes=({node}:{node:string})=>void;\nimport {useState,useEffect} from 'react';\nimport {useMergedRefs} from '@sample/ref-kit/internal';\nexport const Panel=({forwarded,modal})=>{\n const [node,setNode]=useState(null);\n const merged=useMergedRefs(forwarded,setNode);\n const Host=(modal?'dialog':'div');\n useEffect(()=>{if(node)node.style.visibility='hidden'},[node]);\n return <Host ref={merged}/>;\n};\n"
+      },
+      "settingsRoot": "CONSUMER_ROOT",
+      "symlinkProvider": false,
+      "expectedMutation": null
+    },
+    {
+      "name": "review-erased-deep-setNode",
+      "updates": {
+        "packages/ui/src/panel.tsx": "type Notes=({setNode}:{setNode:string})=>void;\nimport {useState,useEffect} from 'react';\nimport {useMergedRefs} from '@sample/ref-kit/internal';\nexport const Panel=({forwarded,modal})=>{\n const [node,setNode]=useState(null);\n const merged=useMergedRefs(forwarded,setNode);\n const Host=(modal?'dialog':'div');\n useEffect(()=>{if(node)node.style.visibility='hidden'},[node]);\n return <Host ref={merged}/>;\n};\n"
+      },
+      "settingsRoot": "CONSUMER_ROOT",
+      "symlinkProvider": false,
+      "expectedMutation": null
+    },
+    {
+      "name": "review-erased-deep-merged",
+      "updates": {
+        "packages/ui/src/panel.tsx": "type Notes=({merged}:{merged:string})=>void;\nimport {useState,useEffect} from 'react';\nimport {useMergedRefs} from '@sample/ref-kit/internal';\nexport const Panel=({forwarded,modal})=>{\n const [node,setNode]=useState(null);\n const merged=useMergedRefs(forwarded,setNode);\n const Host=(modal?'dialog':'div');\n useEffect(()=>{if(node)node.style.visibility='hidden'},[node]);\n return <Host ref={merged}/>;\n};\n"
+      },
+      "settingsRoot": "CONSUMER_ROOT",
+      "symlinkProvider": false,
+      "expectedMutation": null
+    },
+    {
+      "name": "review-erased-export-useState",
+      "updates": {
+        "packages/ui/src/panel.tsx": "import {useState,useEffect} from 'react';\nimport {useMergedRefs} from '@sample/ref-kit/internal';\nexport const Panel=({forwarded,modal})=>{\n const [node,setNode]=useState(null);\n const merged=useMergedRefs(forwarded,setNode);\n const Host=(modal?'dialog':'div');\n useEffect(()=>{if(node)node.style.visibility='hidden'},[node]);\n return <Host ref={merged}/>;\n};\n\nexport type {useState};\n"
+      },
+      "settingsRoot": "CONSUMER_ROOT",
+      "symlinkProvider": false,
+      "expectedMutation": null
+    },
+    {
+      "name": "review-erased-export-useMergedRefs",
+      "updates": {
+        "packages/ui/src/panel.tsx": "import {useState,useEffect} from 'react';\nimport {useMergedRefs} from '@sample/ref-kit/internal';\nexport const Panel=({forwarded,modal})=>{\n const [node,setNode]=useState(null);\n const merged=useMergedRefs(forwarded,setNode);\n const Host=(modal?'dialog':'div');\n useEffect(()=>{if(node)node.style.visibility='hidden'},[node]);\n return <Host ref={merged}/>;\n};\n\nexport type {useMergedRefs};\n"
+      },
+      "settingsRoot": "CONSUMER_ROOT",
+      "symlinkProvider": false,
+      "expectedMutation": null
+    },
+    {
+      "name": "review-runtime-parameter-property",
+      "updates": {
+        "packages/ui/src/panel.tsx": "class Capability {constructor(public value=Function('globalThis.changed=1')()){}}\nimport {useState,useEffect} from 'react';\nimport {useMergedRefs} from '@sample/ref-kit/internal';\nexport const Panel=({forwarded,modal})=>{\n const [node,setNode]=useState(null);\n const merged=useMergedRefs(forwarded,setNode);\n const Host=(modal?'dialog':'div');\n useEffect(()=>{if(node)node.style.visibility='hidden'},[node]);\n return <Host ref={merged}/>;\n};\n"
+      },
+      "settingsRoot": "CONSUMER_ROOT",
+      "symlinkProvider": false,
+      "expectedMutation": "node.style.visibility='hidden'"
+    },
+    {
+      "name": "review-inert-static-method",
+      "updates": {
+        "packages/ui/src/panel.tsx": "class Notes {static Function(){return 'description'} static constructorName(){return 'description'}}\nimport {useState,useEffect} from 'react';\nimport {useMergedRefs} from '@sample/ref-kit/internal';\nexport const Panel=({forwarded,modal})=>{\n const [node,setNode]=useState(null);\n const merged=useMergedRefs(forwarded,setNode);\n const Host=(modal?'dialog':'div');\n useEffect(()=>{if(node)node.style.visibility='hidden'},[node]);\n return <Host ref={merged}/>;\n};\n"
+      },
+      "settingsRoot": "CONSUMER_ROOT",
+      "symlinkProvider": false,
+      "expectedMutation": null
     }
   ]
 }

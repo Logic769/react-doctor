@@ -1,3 +1,4 @@
+import { getRuntimeSymbolReferences } from "./get-runtime-symbol-references.js";
 import type { ScopeAnalysis, SymbolDescriptor } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
 import { hasCompleteSymbolReferences } from "./has-complete-symbol-references.js";
@@ -9,8 +10,8 @@ export const hasExactRefRelayReads = (
   scopes: ScopeAnalysis,
 ): boolean =>
   hasCompleteSymbolReferences(symbol, program, scopes) &&
-  symbol.references.length === identifiers.length &&
+  getRuntimeSymbolReferences(symbol).length === identifiers.length &&
   identifiers.every((identifier) => scopes.symbolFor(identifier) === symbol) &&
-  symbol.references.every(
+  getRuntimeSymbolReferences(symbol).every(
     (reference) => reference.flag === "read" && identifiers.includes(reference.identifier),
   );

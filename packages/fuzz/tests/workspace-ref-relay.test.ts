@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vite-plus/test";
 import { noDirectStateMutation } from "../../oxlint-plugin-react-doctor/src/plugin/rules/state-and-effects/no-direct-state-mutation.js";
 import fixtures from "../../oxlint-plugin-react-doctor/src/plugin/rules/state-and-effects/no-direct-state-mutation.workspace-fixtures.json";
@@ -70,4 +71,51 @@ describe("workspace callback ref deterministic fuzz regressions", () => {
       fs.rmSync(workspace, { recursive: true, force: true });
     }
   });
+
+  it.each(["erased-relay-hook", "inert-relay-provider-key", "erased-export-useState"])(
+    "replays %s with the required workspace settings",
+    (slug) => {
+      const workspace = fs.realpathSync.native(
+        fs.mkdtempSync(path.join(os.tmpdir(), "workspace-relay-types-")),
+      );
+      try {
+        resetFilesystemCaches();
+        for (const [relativePath, contents] of Object.entries(fixtures.baseFiles)) {
+          const filename = path.join(workspace, relativePath);
+          fs.mkdirSync(path.dirname(filename), { recursive: true });
+          fs.writeFileSync(filename, contents);
+        }
+        const consumerRoot = path.join(workspace, "packages/ui");
+        const sourcePath = path.join(consumerRoot, "src/panel.tsx");
+        const corpusPath = fileURLToPath(
+          new URL(
+            `../corpus/regressions/no-direct-state-mutation--review-${slug}.tsx`,
+            import.meta.url,
+          ),
+        );
+        const code = fs.readFileSync(corpusPath, "utf8");
+        fs.writeFileSync(sourcePath, code);
+        const result = fuzzRuleWithStats(noDirectStateMutation.id, noDirectStateMutation, {
+          iterations: 0,
+          settings: { "react-doctor": { rootDirectory: consumerRoot } },
+          corpus: [
+            {
+              relativePath: `regressions/${slug}.tsx`,
+              sourcePath,
+              code,
+              ruleIds: [noDirectStateMutation.id],
+              verdict: "pass",
+            },
+          ],
+        });
+        expect(result.findings).toEqual([]);
+        expect(result.stats.executedProgramCount).toBe(1);
+        expect(result.stats.skippedParseErrorCount).toBe(0);
+        expect(result.stats.firedProgramCount).toBe(0);
+      } finally {
+        resetFilesystemCaches();
+        fs.rmSync(workspace, { recursive: true, force: true });
+      }
+    },
+  );
 });
