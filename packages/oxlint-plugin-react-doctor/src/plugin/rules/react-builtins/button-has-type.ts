@@ -509,6 +509,7 @@ const hasStaticFormAncestor = (node: EsTreeNode): boolean => {
 // Three settings (button/submit/reset, default true) toggle which
 // values are allowed.
 export const buttonHasType = defineRule({
+  diffScope: "jsx-element",
   id: "button-has-type",
   title: "Button missing explicit type",
   severity: "warn",

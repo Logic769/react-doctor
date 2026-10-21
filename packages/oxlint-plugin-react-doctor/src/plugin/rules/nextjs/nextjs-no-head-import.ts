@@ -4,6 +4,7 @@ import type { RuleContext } from "../../utils/rule-context.js";
 import type { EsTreeNodeOfType } from "../../utils/es-tree-node-of-type.js";
 
 export const nextjsNoHeadImport = defineRule({
+  diffScope: "file",
   id: "nextjs-no-head-import",
   title: "next/head in App Router",
   tags: ["test-noise"],

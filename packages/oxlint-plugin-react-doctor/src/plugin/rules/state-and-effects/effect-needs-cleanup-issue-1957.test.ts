@@ -5,8 +5,8 @@ import { effectNeedsCleanup } from "./effect-needs-cleanup.js";
 const runEffectNeedsCleanup = (code: string) => runRule(effectNeedsCleanup, code);
 
 describe("effect-needs-cleanup issue #1957", () => {
-	it("accepts async subscription with nullable cleanup", () => {
-		const result = runEffectNeedsCleanup(`
+  it("accepts async subscription with nullable cleanup", () => {
+    const result = runEffectNeedsCleanup(`
 			import { useEffect } from 'react'
 
 			type Subscription = { remove: () => void }
@@ -48,11 +48,11 @@ describe("effect-needs-cleanup issue #1957", () => {
 			}
 		`);
 
-		expect(result.diagnostics).toEqual([]);
-	});
+    expect(result.diagnostics).toEqual([]);
+  });
 
-	it("accepts async subscription with explicit null check", () => {
-		const result = runEffectNeedsCleanup(`
+  it("accepts async subscription with explicit null check", () => {
+    const result = runEffectNeedsCleanup(`
 			import { useEffect } from 'react'
 
 			type Subscription = { remove: () => void }
@@ -84,11 +84,11 @@ describe("effect-needs-cleanup issue #1957", () => {
 			}
 		`);
 
-		expect(result.diagnostics).toEqual([]);
-	});
+    expect(result.diagnostics).toEqual([]);
+  });
 
-	it("accepts async subscription with logical AND", () => {
-		const result = runEffectNeedsCleanup(`
+  it("accepts async subscription with logical AND", () => {
+    const result = runEffectNeedsCleanup(`
 			import { useEffect } from 'react'
 
 			type Subscription = { remove: () => void }
@@ -118,11 +118,11 @@ describe("effect-needs-cleanup issue #1957", () => {
 			}
 		`);
 
-		expect(result.diagnostics).toEqual([]);
-	});
+    expect(result.diagnostics).toEqual([]);
+  });
 
-	it("accepts async timer (existing behavior)", () => {
-		const result = runEffectNeedsCleanup(`
+  it("accepts async timer (existing behavior)", () => {
+    const result = runEffectNeedsCleanup(`
 			import { useEffect } from 'react'
 
 			export function AsyncTimer() {
@@ -147,11 +147,11 @@ describe("effect-needs-cleanup issue #1957", () => {
 			}
 		`);
 
-		expect(result.diagnostics).toEqual([]);
-	});
+    expect(result.diagnostics).toEqual([]);
+  });
 
-	it("reports async subscription without cleanup", () => {
-		const result = runEffectNeedsCleanup(`
+  it("reports async subscription without cleanup", () => {
+    const result = runEffectNeedsCleanup(`
 			import { useEffect } from 'react'
 
 			type Subscription = { remove: () => void }
@@ -179,7 +179,6 @@ describe("effect-needs-cleanup issue #1957", () => {
 			}
 		`);
 
-		expect(result.diagnostics.length).toBeGreaterThan(0);
-	});
+    expect(result.diagnostics.length).toBeGreaterThan(0);
+  });
 });
-

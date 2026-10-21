@@ -5629,26 +5629,54 @@ const hasGuardedDeferredCleanup = (
         (usage.kind === "subscribe" || context.scopes.isGlobalReference(child.callee)) &&
         doesReleaseCallMatchUsage(child, usage, context)
       ) {
-        const handleGuard = findDirectHandleGuardForRelease(child, cleanupFunction, usage, context);
-        let releaseAnchor: EsTreeNode = handleGuard ?? child;
-        
-        if (!handleGuard && usage.kind === "subscribe") {
-          let currentNode: EsTreeNode = child;
-          let ancestor = child.parent;
-          while (ancestor && ancestor !== cleanupFunction.body) {
-            if (
-              isNodeOfType(ancestor, "LogicalExpression") &&
-              ancestor.operator === "&&" &&
-              (ancestor.right === currentNode || isAstDescendant(child, ancestor.right))
-            ) {
-              releaseAnchor = ancestor;
-              break;
-            }
-            currentNode = ancestor;
-            ancestor = ancestor.parent;
-          }
+        const releaseCallee = stripParenExpression(child.callee);
+        const releasedHandle = stripParenExpression(
+          isNodeOfType(releaseCallee, "MemberExpression") ? releaseCallee.object : releaseCallee,
+        );
+        if (
+          usage.kind === "subscribe" &&
+          (!isNodeOfType(releasedHandle, "Identifier") ||
+            context.scopes.symbolFor(releasedHandle)?.id !== handleSymbol.id)
+        ) {
+          return;
         }
-        
+        const handleGuard = findDirectHandleGuardForRelease(child, cleanupFunction, usage, context);
+        const releaseExpression = findTransparentExpressionRoot(child);
+        const logicalGuard = releaseExpression.parent;
+        const logicalReleaseGuard =
+          isNodeOfType(logicalGuard, "LogicalExpression") &&
+          logicalGuard.operator === "&&" &&
+          logicalGuard.right === releaseExpression
+            ? logicalGuard
+            : null;
+        const guardTest = handleGuard?.test ?? logicalReleaseGuard?.left;
+        if (usage.kind === "subscribe" && guardTest) {
+          const availabilityTest = stripParenExpression(guardTest);
+          const availabilityOperands = isNodeOfType(availabilityTest, "BinaryExpression")
+            ? [availabilityTest.left, availabilityTest.right]
+            : isNodeOfType(availabilityTest, "UnaryExpression")
+              ? [availabilityTest.argument]
+              : [availabilityTest];
+          const hasDirectHandleOperand = availabilityOperands.some((operand) => {
+            const availabilityOperand = stripParenExpression(operand);
+            return (
+              isNodeOfType(availabilityOperand, "Identifier") &&
+              context.scopes.symbolFor(availabilityOperand)?.id === handleSymbol.id
+            );
+          });
+          if (!hasDirectHandleOperand) return;
+        }
+        let releaseAnchor: EsTreeNode = handleGuard ?? child;
+        if (
+          !handleGuard &&
+          usage.kind === "subscribe" &&
+          usage.handleKey !== null &&
+          logicalReleaseGuard &&
+          doesTestRequireLiveExpressionKey(logicalReleaseGuard.left, usage.handleKey, context)
+        ) {
+          releaseAnchor = logicalReleaseGuard;
+        }
+
         globalReleaseProofs.push({
           anchor: releaseAnchor,
           call: child,

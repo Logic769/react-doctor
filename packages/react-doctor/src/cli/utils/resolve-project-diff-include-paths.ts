@@ -26,7 +26,7 @@ export const resolveProjectChangedLineRanges = (
   if (relativeProjectDirectory === null) return [];
 
   if (relativeProjectDirectory.length === 0) {
-    return ranges.map((entry) => ({ file: toForwardSlashes(entry.file), ranges: entry.ranges }));
+    return ranges.map((entry) => ({ ...entry, file: toForwardSlashes(entry.file) }));
   }
 
   const projectPrefix = `${relativeProjectDirectory}/`;
@@ -34,8 +34,6 @@ export const resolveProjectChangedLineRanges = (
     const normalizedFilePath = toForwardSlashes(entry.file);
     if (!normalizedFilePath.startsWith(projectPrefix)) return [];
     const projectRelativePath = normalizedFilePath.slice(projectPrefix.length);
-    return projectRelativePath.length > 0
-      ? [{ file: projectRelativePath, ranges: entry.ranges }]
-      : [];
+    return projectRelativePath.length > 0 ? [{ ...entry, file: projectRelativePath }] : [];
   });
 };

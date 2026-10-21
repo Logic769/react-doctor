@@ -49,6 +49,10 @@ npx react-doctor@latest ci install
 
 Choose rules and scan settings in `doctor.config.ts`.
 
+With `customRulesOnly: true`, explicit `rules` settings of `"warn"` or `"error"`
+enable selected ported rules. Legacy rule names also work. Other ported rules and
+the React Compiler plugin stay off.
+
 [Configuration docs →](https://react.doctor/docs/configuration/config-files)
 
 ## Runtime performance traces

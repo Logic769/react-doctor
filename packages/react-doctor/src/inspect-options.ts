@@ -61,6 +61,7 @@ export interface ResolvedInspectOptions {
     baseFiles?: ReadonlyArray<string>;
     headFiles?: ReadonlyArray<string>;
   } | null;
+  contextual: boolean;
   changedLineRanges: ReadonlyArray<ChangedFileLineRanges> | null;
   supplyChainManifestChanged: boolean;
   excludedProjectDirectories: ReadonlyArray<string>;

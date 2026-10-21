@@ -173,6 +173,8 @@ export interface InspectOptions {
    * narrow. Mutually exclusive with `baseline` in practice (one scope value).
    */
   changedLineRanges?: ReadonlyArray<ChangedFileLineRanges>;
+  /** Expand changed-line filtering using each rule's diffScope. Requires changedLineRanges. */
+  contextual?: boolean;
   /**
    * Number of oxlint subprocesses to run in parallel during the lint
    * pass. Overrides the `OxlintConcurrency` Reference (env-seeded) for
@@ -261,6 +263,8 @@ export interface ChangedFileLineRanges {
   /** Path relative to the scanned directory, forward-slash separated. */
   readonly file: string;
   readonly ranges: ReadonlyArray<readonly [number, number]>;
+  /** New-side gaps after these lines where old lines were deleted. Zero means before line 1. */
+  readonly deletionLines?: ReadonlyArray<number>;
 }
 
 export interface DiffInfo {

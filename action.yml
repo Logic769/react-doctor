@@ -12,7 +12,7 @@ inputs:
     description: 'Workspace project(s) to scan (comma-separated). Use "*" to scan every discovered project.'
     default: "*"
   scope:
-    description: "On pull requests, what to scan/report (same meanings as the CLI --scope): 'changed' (only issues the PR introduced vs base — the default), 'files' (all issues in changed files), 'lines' (only issues on the changed lines), or 'full' (the entire project, every finding). Non-PR events always scan the full project."
+    description: "On pull requests, what to scan/report (same meanings as the CLI --scope): 'changed' (only issues the PR introduced vs base — the default), 'files' (all issues in changed files), 'lines' (only issues on the changed lines), 'contextual' (issues in modified functions, JSX elements, or files as selected by each rule), or 'full' (the entire project, every finding). Non-PR events always scan the full project."
     default: "changed"
   blocking:
     description: "Severity that fails the workflow: none (default; advisory — report findings but always exit 0), warning, or error."
@@ -308,7 +308,7 @@ runs:
           # list plus the matching scope. For `lines` the CLI derives the
           # changed line ranges from the fetched base SHA.
           case "$SCOPE" in
-            files | lines | changed) FLAGS+=("--scope" "$SCOPE") ;;
+            files | lines | contextual | changed) FLAGS+=("--scope" "$SCOPE") ;;
             *) FLAGS+=("--scope" "changed") ;;
           esac
           FLAGS+=("--changed-files-from" "$CHANGED_FILES_FROM")

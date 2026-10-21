@@ -50,6 +50,8 @@ const baseOptions = (overrides: Partial<ResolvedInspectOptions> = {}): ResolvedI
   suppressRendering: false,
   concurrency: undefined,
   baseline: null,
+  changedLineRanges: null,
+  contextual: false,
   supplyChainManifestChanged: false,
   excludedProjectDirectories: [],
   retainExcludedProjectDeadCodeDiagnostics: false,
@@ -148,6 +150,27 @@ afterEach(() => {
 });
 
 describe("scan result cache", () => {
+  it("separates contextual, line, and deletion-only scopes", async () => {
+    const projectDirectory = setupReactProject(tempDirectory, "contextual-cache", {
+      files: { "src/App.tsx": "export const App = () => <div />;\n" },
+    });
+    initGitRepo(projectDirectory, { commit: true });
+    const options = baseOptions({
+      includePaths: ["src/App.tsx"],
+      changedLineRanges: [{ file: "src/App.tsx", ranges: [[1, 1]] }],
+    });
+    const lineKey = await cacheKey(projectDirectory, options);
+    const contextualKey = await cacheKey(projectDirectory, { ...options, contextual: true });
+    const deletionKey = await cacheKey(projectDirectory, {
+      ...options,
+      contextual: true,
+      changedLineRanges: [{ file: "src/App.tsx", ranges: [], deletionLines: [1] }],
+    });
+    expect(lineKey).not.toBeNull();
+    expect(contextualKey).not.toBeNull();
+    expect(deletionKey).not.toBeNull();
+    expect(new Set([lineKey, contextualKey, deletionKey]).size).toBe(3);
+  });
   it("fingerprints the bundled rule implementation", async () => {
     const fingerprint = resolveScanResultToolchainFingerprint(null).find((entry) =>
       entry.startsWith("oxlint-plugin-react-doctor#fingerprint="),

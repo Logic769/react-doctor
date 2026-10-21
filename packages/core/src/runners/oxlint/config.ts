@@ -18,6 +18,7 @@ import type { UnpluginAutoImportGlobalScope } from "./collect-unplugin-auto-impo
 
 export interface OxlintConfigOptions {
   pluginPath: string;
+  diagnosticContextDirectory?: string;
   project: ProjectInfo;
   customRulesOnly?: boolean;
   extendsPaths?: string[];
@@ -125,6 +126,7 @@ const buildUserPluginRules = (
 
 export const createOxlintConfig = ({
   pluginPath,
+  diagnosticContextDirectory,
   project,
   customRulesOnly = false,
   extendsPaths = [],
@@ -200,10 +202,6 @@ export const createOxlintConfig = ({
     if (rule.isScanRule || rule.isProjectRule === true) continue;
     if (registryEntry.id === "no-multi-component-file" && shouldUseExplicitNoMultiCompPolicy)
       continue;
-    // `customRulesOnly` mirrors the historical behavior of the pre-port
-    // builtin-react / builtin-a11y gate — skip everything ported 1:1
-    // from upstream OXC plugins.
-    if (customRulesOnly && registryEntry.originallyExternal) continue;
     if (rule.framework !== "global" && !rule.requires) continue;
     if (
       !shouldEnableRule(
@@ -226,6 +224,12 @@ export const createOxlintConfig = ({
       { ruleKey: registryEntry.key },
       severityControls,
     );
+    if (
+      customRulesOnly &&
+      registryEntry.originallyExternal &&
+      (explicitRuleOverride === undefined || explicitRuleOverride === "off")
+    )
+      continue;
     if (
       !shouldEnableRuleByDefaultStatus({
         defaultEnabled: rule.defaultEnabled,
@@ -288,6 +292,7 @@ export const createOxlintConfig = ({
       ...adoptedSettings,
       "react-doctor": {
         portedRuleMode: "curated",
+        ...(diagnosticContextDirectory ? { diagnosticContextDirectory } : {}),
         framework: project.framework,
         rootDirectory: settingsRootDirectory,
         // The framework-capability vocabulary, available to any rule via
