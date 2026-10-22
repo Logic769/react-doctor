@@ -1,3 +1,5 @@
+import { getTsconfigAliasCacheGeneration } from "./resolve-tsconfig-alias.js";
+import { getModuleResolutionCacheGeneration } from "./resolve-relative-import-path.js";
 import * as path from "node:path";
 import { BUILTIN_GLOBAL_NAMESPACE_NAMES } from "../constants/js.js";
 import {
@@ -54,6 +56,8 @@ interface NodePortProcessEnvironment {
 
 interface NodePortProcessFacts {
   readonly generation: number;
+  readonly aliasGeneration: number;
+  readonly resolutionGeneration: number;
   readonly origins: Map<SymbolDescriptor, CapturedCrossFileProbes<boolean>>;
   readonly providerBodies: Map<string, CapturedCrossFileProbes<boolean>>;
   closedProviders?: CapturedCrossFileProbes<boolean>;
@@ -77,9 +81,22 @@ const getNodePortProcessFacts = (environment: NodePortProcessEnvironment): NodeP
     programs.set(environment.program, filenames);
   }
   const generation = getManifestCacheGeneration();
+  const aliasGeneration = getTsconfigAliasCacheGeneration();
+  const resolutionGeneration = getModuleResolutionCacheGeneration();
   let facts = filenames.get(environment.filename);
-  if (!facts || facts.generation !== generation) {
-    facts = { generation, origins: new Map(), providerBodies: new Map() };
+  if (
+    !facts ||
+    facts.generation !== generation ||
+    facts.aliasGeneration !== aliasGeneration ||
+    facts.resolutionGeneration !== resolutionGeneration
+  ) {
+    facts = {
+      generation,
+      aliasGeneration,
+      resolutionGeneration,
+      origins: new Map(),
+      providerBodies: new Map(),
+    };
     filenames.set(environment.filename, facts);
   }
   return facts;

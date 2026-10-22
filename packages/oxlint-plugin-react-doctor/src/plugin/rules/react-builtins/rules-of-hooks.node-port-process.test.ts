@@ -1,3 +1,5 @@
+import { resetTsconfigAliasCaches } from "../../utils/resolve-tsconfig-alias.js";
+import { resetModuleResolutionCaches } from "../../utils/resolve-relative-import-path.js";
 import * as fs from "node:fs";
 import os from "node:os";
 import * as path from "node:path";
@@ -772,6 +774,57 @@ describe("memoized Node utility proofs", () => {
     expect(result.parseErrors).toEqual([]);
     expect(exercised).toBe(true);
   });
+
+  for (const resetKind of ["alias", "resolution"]) {
+    for (const initiallyMapped of [false, true]) {
+      it(`refreshes ${initiallyMapped ? "refused" : "accepted"} origins after a granular ${resetKind} reset`, () => {
+        const filename = writeFile("src/start.js", consumer);
+        writeFile("src/terminal.js", provider);
+        const mappedFilename = path.join(temporaryDirectory, "src/mapped-files.js");
+        const relocatedFilename = path.join(temporaryDirectory, "src/relocated-files.js");
+        const setMapping = (enabled: boolean): void => {
+          writeFile(
+            "tsconfig.json",
+            JSON.stringify({
+              compilerOptions: {
+                baseUrl: ".",
+                paths: resetKind === "resolution" || enabled ? { fs: ["src/mapped-files.js"] } : {},
+              },
+            }),
+          );
+          if (resetKind === "alias" || enabled) {
+            if (!fs.existsSync(mappedFilename))
+              fs.writeFileSync(mappedFilename, "module.exports = {};\n");
+          } else if (fs.existsSync(mappedFilename)) {
+            fs.renameSync(mappedFilename, relocatedFilename);
+          }
+        };
+        setMapping(initiallyMapped);
+        resetFilesystemCaches();
+        const outcomes: boolean[] = [];
+        const probe: Rule = {
+          ...certificateProbe,
+          create: (context) => ({
+            CallExpression: (node) => {
+              if (node.callee.type !== "Identifier" || node.callee.name !== "useTerminal") return;
+              outcomes.push(isImportedNodePortProcessUtility(node, context));
+              setMapping(!initiallyMapped);
+              if (resetKind === "alias") resetTsconfigAliasCaches();
+              else resetModuleResolutionCaches();
+              outcomes.push(isImportedNodePortProcessUtility(node, context));
+              setMapping(initiallyMapped);
+              if (resetKind === "alias") resetTsconfigAliasCaches();
+              else resetModuleResolutionCaches();
+              outcomes.push(isImportedNodePortProcessUtility(node, context));
+            },
+          }),
+        };
+        const result = runRule(probe, consumer, { filename });
+        expect(result.parseErrors).toEqual([]);
+        expect(outcomes).toEqual([!initiallyMapped, initiallyMapped, !initiallyMapped]);
+      });
+    }
+  }
 
   it("does not resolve unrelated consumer modules after an ineligible manifest", () => {
     const filename = writeFile("src/start.js", consumer);
