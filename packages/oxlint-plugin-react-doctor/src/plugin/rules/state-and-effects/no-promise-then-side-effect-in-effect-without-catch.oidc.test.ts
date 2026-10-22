@@ -1,3 +1,10 @@
+import {
+  PROVIDER_PROOF_SMALL_COMPONENT_COUNT,
+  PROVIDER_PROOF_LARGE_COMPONENT_COUNT,
+  PROVIDER_PROOF_MAX_GROWTH_RATIO,
+} from "../../../test-utils/constants.js";
+import { captureCrossFileProbes } from "../../utils/cross-file-probe-recorder.js";
+import { resetFilesystemCaches } from "../../utils/reset-filesystem-caches.js";
 import * as fs from "node:fs";
 import os from "node:os";
 import * as path from "node:path";
@@ -894,4 +901,84 @@ describe("OIDC erased provider import identity", () => {
       expect(result.diagnostics).toHaveLength(testCase.diagnostics);
     });
   }
+});
+
+describe("program provider proof growth", () => {
+  it("checks stable provider imports once as sibling components grow", () => {
+    const results = [
+      PROVIDER_PROOF_SMALL_COMPONENT_COUNT,
+      PROVIDER_PROOF_LARGE_COMPONENT_COUNT,
+    ].map((size) => {
+      const source =
+        'import {useState,useEffect} from "react"; import {UserManager,WebStorageStateStore} from "oidc-client";const settings={userStore:new WebStorageStateStore({store:window.localStorage})};const manager=new UserManager(settings);' +
+        Array.from(
+          { length: size },
+          (_, index) =>
+            `export const Panel${index}=()=>{const[user,setUser]=useState(null);useEffect(()=>{manager.getUser().then(setUser);},[]);return <output>{user?.name}</output>}`,
+        ).join("\n");
+      let symbolVisits = 0;
+      const measuredRule = {
+        ...noPromiseThenSideEffectInEffectWithoutCatch,
+        create: (
+          context: Parameters<typeof noPromiseThenSideEffectInEffectWithoutCatch.create>[0],
+        ) => {
+          const symbols = new Proxy(context.scopes.rootScope.symbols, {
+            get: (target, property, receiver) => {
+              if (typeof property === "string" && /^\d+$/.test(property)) symbolVisits += 1;
+              return Reflect.get(target, property, receiver);
+            },
+          });
+          const rootScope = new Proxy(context.scopes.rootScope, {
+            get: (target, property, receiver) =>
+              property === "symbols" ? symbols : Reflect.get(target, property, receiver),
+          });
+          const scopes = new Proxy(context.scopes, {
+            get: (target, property, receiver) =>
+              property === "rootScope" ? rootScope : Reflect.get(target, property, receiver),
+          });
+          return noPromiseThenSideEffectInEffectWithoutCatch.create({ ...context, scopes });
+        },
+      };
+      const result = runRule(measuredRule, source);
+      expect(result.parseErrors).toEqual([]);
+      expect(result.diagnostics).toHaveLength(size);
+      return symbolVisits;
+    });
+    expect(results[0]).toBeGreaterThan(0);
+    expect(results[1]).toBeLessThanOrEqual(results[0] * PROVIDER_PROOF_MAX_GROWTH_RATIO);
+  });
+});
+
+describe("memoized OIDC provider dependencies", () => {
+  it("replays warm probes and refreshes the same analysis after a filesystem epoch", () => {
+    const directory = fs.mkdtempSync(path.join(temporaryRoot, "memo-probes-"));
+    const filename = path.join(directory, "AccountPanel.tsx");
+    const provider = path.join(directory, "session.ts");
+    fs.writeFileSync(provider, facadeSource);
+    let exercised = false;
+    const probe: Rule = {
+      id: "oidc-memo-dependency-probe",
+      severity: "warn",
+      create: (context) => ({
+        CallExpression: (node) => {
+          const cold = captureCrossFileProbes(() => isRejectableOidcUserManagerCall(node, context));
+          if (!cold.value) return;
+          exercised = true;
+          const warm = captureCrossFileProbes(() => isRejectableOidcUserManagerCall(node, context));
+          expect(warm.value).toBe(true);
+          expect([...warm.trace.contentPaths].sort()).toEqual([...cold.trace.contentPaths].sort());
+          expect([...warm.trace.existencePaths].sort()).toEqual(
+            [...cold.trace.existencePaths].sort(),
+          );
+          expect(cold.trace.contentPaths.has(provider)).toBe(true);
+          fs.writeFileSync(provider, facadeSource.replace("window.localStorage", "customStorage"));
+          resetFilesystemCaches();
+          expect(isRejectableOidcUserManagerCall(node, context)).toBe(false);
+        },
+      }),
+    };
+    const result = runRule(probe, consumerSource, { filename });
+    expect(result.parseErrors).toEqual([]);
+    expect(exercised).toBe(true);
+  });
 });
