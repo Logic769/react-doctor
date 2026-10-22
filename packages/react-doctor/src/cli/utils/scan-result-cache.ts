@@ -1,3 +1,4 @@
+import { computeSourceProjectFingerprint } from "oxlint-plugin-react-doctor/core";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import { createRequire } from "node:module";
@@ -450,7 +451,12 @@ export const buildScanResultCacheKey = async (
   if (!isTrustworthy || repositoryIdentity === null) return null;
   const userConfigJson = stringifyStableJson(input.userConfig);
   if (userConfigJson === null) return null;
+  const sourceProjectFingerprint = input.options.lint
+    ? computeSourceProjectFingerprint(input.projectDirectory)
+    : undefined;
+  if (input.options.lint && sourceProjectFingerprint === null) return null;
   const cacheKeyJson = stringifyStableJson({
+    sourceProjectFingerprint,
     schemaVersion: SCAN_RESULT_CACHE_SCHEMA_VERSION,
     projectIdentity: resolveProjectIdentity(input.projectDirectory),
     headSha: repositoryIdentity.headSha,
