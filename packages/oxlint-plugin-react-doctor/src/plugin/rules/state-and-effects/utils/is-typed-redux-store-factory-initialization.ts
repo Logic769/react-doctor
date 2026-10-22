@@ -36,7 +36,6 @@ const hasClosedRuntimeReferences = (
   scopes: ScopeAnalysis,
   allowed: ReadonlySet<EsTreeNode>,
 ): boolean =>
-  hasCompleteSymbolReferences(symbol, program, scopes) &&
   symbol.references.every(
     (reference) =>
       isTypeScriptTypePosition(reference.identifier) ||
@@ -44,7 +43,7 @@ const hasClosedRuntimeReferences = (
       (reference.flag === "read" &&
         !isWithinAssignmentTarget(reference.identifier) &&
         allowed.has(reference.identifier)),
-  );
+  ) && hasCompleteSymbolReferences(symbol, program, scopes);
 
 const supportedProgramSyntaxByProgram = new WeakMap<EsTreeNode, boolean>();
 
