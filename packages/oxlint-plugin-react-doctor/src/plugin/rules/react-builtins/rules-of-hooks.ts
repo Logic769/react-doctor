@@ -1002,6 +1002,7 @@ const isUseEffectEventInitializer = (node: EsTreeNodeOfType<"CallExpression">): 
 // test/story.
 export const rulesOfHooks = defineRule({
   id: "rules-of-hooks",
+  diffScope: "function",
   title: "Hook called conditionally",
   severity: "error",
   tags: ["test-noise", "react-jsx-only"],
