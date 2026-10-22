@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { HTML_TAGS, VOID_DOM_ELEMENTS } from "../../../constants/html-tags.js";
 import {
   analyzeScopes,
   type ScopeAnalysis,
@@ -35,6 +36,7 @@ import {
   READINESS_MEMBER_CAPABILITIES,
   READINESS_RUNTIME_TYPESCRIPT,
   READINESS_NATIVE_IFRAME_ATTRIBUTES,
+  READINESS_INACTIVE_IFRAME_CONTAINERS,
   READINESS_PROTOCOL_ARGUMENT_COUNT,
   READINESS_SINGLE_VALUE_COUNT,
   READINESS_SOURCE_GUARD_STATEMENT_COUNT,
@@ -645,7 +647,12 @@ const nativeFrame = (
         )
       )
         return false;
-    }
+    } else if (
+      !HTML_TAGS.has(opening.name.name) ||
+      VOID_DOM_ELEMENTS.has(opening.name.name) ||
+      READINESS_INACTIVE_IFRAME_CONTAINERS.has(opening.name.name)
+    )
+      return false;
     if (
       opening.attributes.some(
         (attribute) =>

@@ -49,3 +49,20 @@ export const READINESS_NATIVE_IFRAME_ATTRIBUTES: ReadonlySet<string> = new Set([
 ]);
 
 export const READINESS_SOURCE_GUARD_STATEMENT_COUNT = 2;
+
+export const READINESS_INACTIVE_IFRAME_CONTAINERS: ReadonlySet<string> = new Set([
+  "noembed",
+  "noframes",
+  "plaintext",
+  "xmp",
+  "iframe",
+  "math",
+  "noscript",
+  "script",
+  "select",
+  "style",
+  "svg",
+  "template",
+  "textarea",
+  "title",
+]);

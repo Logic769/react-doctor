@@ -10,6 +10,7 @@ import { fuzzRuleWithStats } from "../src/fuzz-rule.js";
 
 interface NativeReadinessFuzzPhase {
   readonly hook: string;
+  readonly frame?: string;
   readonly verdict: "pass" | "fail";
 }
 
@@ -28,10 +29,33 @@ it("replays native-frame readiness and preserves the source-identity boundary ac
     "event.source===frame?.contentWindow",
   );
   expect(reversedSourceGuard).not.toBe(hook);
+  const frame = fixture.files["Frame.tsx"];
+  const customElementFrame = frame
+    .replace("<Surface ", "<frame-shell ")
+    .replace("</Surface>", "</frame-shell>");
   const phases: readonly NativeReadinessFuzzPhase[] = [
     { hook, verdict: "pass" },
     { hook: reversedSourceGuard, verdict: "fail" },
     { hook, verdict: "pass" },
+    { hook, frame: customElementFrame, verdict: "fail" },
+    { hook, verdict: "pass" },
+    ...[
+      "svg",
+      "math",
+      "template",
+      "img",
+      "noembed",
+      "noframes",
+      "plaintext",
+      "xmp",
+    ].flatMap<NativeReadinessFuzzPhase>((tagName) => [
+      {
+        hook,
+        frame: frame.replace("<Surface ", `<${tagName} `).replace("</Surface>", `</${tagName}>`),
+        verdict: "fail",
+      },
+      { hook, verdict: "pass" },
+    ]),
   ];
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "native-frame-readiness-fuzz-"));
   try {
@@ -46,6 +70,7 @@ it("replays native-frame readiness and preserves the source-identity boundary ac
     fs.writeFileSync(sourcePath, source);
     for (const phase of phases) {
       fs.writeFileSync(hookPath, phase.hook);
+      fs.writeFileSync(path.join(directory, "Frame.tsx"), phase.frame ?? frame);
       resetFilesystemCaches();
       const result = fuzzRuleWithStats(
         noResetAllStateOnPropChange.id,

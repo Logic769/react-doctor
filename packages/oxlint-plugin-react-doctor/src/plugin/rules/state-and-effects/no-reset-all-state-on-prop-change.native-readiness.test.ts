@@ -429,6 +429,26 @@ const cases: readonly ReadinessCase[] = [
     before: "<Surface style=",
     after: "<Surface as={Intercept} style=",
   },
+  ...["svg", "math", "template", "img", "noembed", "noframes", "plaintext", "xmp"].map(
+    (tagName) => ({
+      name: `unsupported ${tagName} ancestor`,
+      supported: false,
+      file: "Frame.tsx",
+      before: fixture.files["Frame.tsx"],
+      after: fixture.files["Frame.tsx"]
+        .replace("<Surface ", `<${tagName} `)
+        .replace("</Surface>", `</${tagName}>`),
+    }),
+  ),
+  {
+    name: "opaque custom-element ancestor",
+    supported: false,
+    file: "Frame.tsx",
+    before:
+      "<Surface style={hidden?hiddenStyle:visibleStyle}>\n    <iframe ref={forwarded} src={src} style={{border:'none'}}/>\n  </Surface>",
+    after:
+      "<frame-shell style={hidden?hiddenStyle:visibleStyle}>\n    <iframe ref={forwarded} src={src} style={{border:'none'}}/>\n  </frame-shell>",
+  },
   {
     name: "opaque custom ancestor",
     supported: false,
