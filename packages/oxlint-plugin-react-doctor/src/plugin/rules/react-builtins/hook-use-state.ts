@@ -1,3 +1,4 @@
+import { hasRefNotificationReactCall } from "../state-and-effects/utils/has-ref-notification-react-call.js";
 import { VALUE_ONLY_STATE_TUPLE_LENGTH } from "../../constants/react.js";
 import { defineRule } from "../../utils/define-rule.js";
 import type { EsTreeNode } from "../../utils/es-tree-node.js";
@@ -128,7 +129,13 @@ export const hookUseState = defineRule({
             !hasBindingWrite &&
             isNodeOfType(parent.parent, "VariableDeclaration") &&
             parent.parent.kind === "const" &&
-            isUnmodifiedLocalReactStateCall(node, context.scopes)
+            (isUnmodifiedLocalReactStateCall(node, context.scopes) ||
+              (hasRefNotificationReactCall(node, "useState", context, {
+                allowNativeWindowEventListeners: true,
+              }) &&
+                isUnmodifiedLocalReactStateCall(node, context.scopes, {
+                  allowNumericDataAccess: true,
+                })))
           )
             return;
         }

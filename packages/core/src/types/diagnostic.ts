@@ -1,3 +1,5 @@
+import type { DiagnosticContextRange } from "oxlint-plugin-react-doctor/core";
+
 interface OxlintSpan {
   offset: number;
   length: number;
@@ -51,6 +53,7 @@ export interface DiagnosticRelatedLocation {
 export type DiagnosticFileContext = "test" | "story" | "production";
 
 export interface Diagnostic {
+  contextRanges?: ReadonlyArray<DiagnosticContextRange>;
   fingerprint?: string;
   filePath: string;
   plugin: string;
