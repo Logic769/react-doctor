@@ -1371,7 +1371,10 @@ describe("shared importer media dependency recording", () => {
   it("revalidates positive and negative providers while retaining one importer analysis", () => {
     const fixture = cases[0];
     if (!fixture) throw new Error("Expected the authored native importer");
-    writeFixtureFiles(fixture.files);
+    writeFixtureFiles({
+      ...fixture.files,
+      "consumer.tsx": fixture.code + "\nimport { unusedCapability } from './unused-helper';\n",
+    });
     const filename = path.join(temporaryDirectory, "consumer.tsx");
     const code = fs.readFileSync(filename, "utf8");
     const parsed = parseFixture(code);
@@ -1496,6 +1499,10 @@ describe("shared importer media dependency recording", () => {
       expect(repeated.value, phase.name).toBe(phase.admitted);
       expect(repeated.trace, phase.name).toEqual(first.trace);
       expect(
+        first.trace.existencePaths.has(path.join(temporaryDirectory, "unused-helper.ts")),
+        phase.name,
+      ).toBe(true);
+      expect(
         first.trace.existencePaths.has(path.join(temporaryDirectory, "capability.ts")),
         phase.name,
       ).toBe(true);
@@ -1510,7 +1517,7 @@ describe("shared importer media dependency recording", () => {
   });
 });
 
-for (const resetKind of ["resolution", "filesystem"]) {
+for (const resetKind of ["resolution", "filesystem", "export"]) {
   for (const initiallyAccepted of [false, true]) {
     for (const recording of [false, true]) {
       it(`refreshes ${initiallyAccepted ? "accepted" : "refused"} media proofs after ${resetKind} resets with recording ${recording}`, () => {
@@ -1524,7 +1531,7 @@ for (const resetKind of ["resolution", "filesystem"]) {
         const relocatedFilename = path.join(temporaryDirectory, "relocated.ts");
         writeFixtureFiles({ "capability.js": nativeProvider });
         const setProvider = (accepted: boolean): void => {
-          if (resetKind === "filesystem")
+          if (resetKind !== "resolution")
             fs.writeFileSync(providerFilename, accepted ? nativeProvider : pureProvider);
           else if (accepted) {
             if (fs.existsSync(providerFilename)) fs.renameSync(providerFilename, relocatedFilename);
@@ -1576,6 +1583,7 @@ for (const resetKind of ["resolution", "filesystem"]) {
         for (const accepted of [initiallyAccepted, !initiallyAccepted, initiallyAccepted]) {
           setProvider(accepted);
           if (resetKind === "resolution") resetModuleResolutionCaches();
+          else if (resetKind === "export") resetCrossFileExportCaches();
           else resetFilesystemCaches();
           if (recording) {
             const cold = captureCrossFileProbes(evaluate);

@@ -5,7 +5,11 @@ import { analyzeScopes } from "../../../semantic/scope-analysis.js";
 import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { RuleContext } from "../../../utils/rule-context.js";
-import { isProbeRecorderActive } from "../../../utils/cross-file-probe-recorder.js";
+import {
+  captureCrossFileProbes,
+  replayCrossFileProbes,
+  type CapturedCrossFileProbes,
+} from "../../../utils/cross-file-probe-recorder.js";
 import { isReactApiCall } from "../../../utils/is-react-api-call.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
 import { getFunctionBindingSymbols } from "../../../utils/get-function-binding-symbols.js";
@@ -27,7 +31,10 @@ import {
 } from "../../../utils/is-proven-global-namespace-reference.js";
 import { isProvenUnmodifiedReactApiCall } from "../../../utils/is-proven-unmodified-react-api-call.js";
 import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
-import { resolveCrossFileFunctionExportWithFilePath } from "../../../utils/resolve-cross-file-function-export.js";
+import {
+  getCrossFileExportCacheGeneration,
+  resolveCrossFileFunctionExportWithFilePath,
+} from "../../../utils/resolve-cross-file-function-export.js";
 import { resolveModulePath } from "../../../utils/resolve-module-path.js";
 import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
 import { walkAst } from "../../../utils/walk-ast.js";
@@ -53,11 +60,12 @@ interface ImportedMediaProgramFacts {
   readonly generation: number;
   readonly aliasGeneration: number;
   readonly resolutionGeneration: number;
+  readonly exportGeneration: number;
   readonly program: EsTreeNode;
   supported: boolean;
   providersByFilePath: Map<string, SymbolDescriptor[]>;
   providerProofsByFunction: WeakMap<EsTreeNode, boolean>;
-  nativeCallsByEffect: WeakMap<EsTreeNode, ReadonlySet<EsTreeNode>>;
+  nativeCallsByEffect: WeakMap<EsTreeNode, CapturedCrossFileProbes<ReadonlySet<EsTreeNode>>>;
 }
 
 interface ImportedMediaProviderImport {
@@ -78,7 +86,7 @@ const importedMediaBindingUsageProofs = new WeakMap<SymbolDescriptor, boolean>()
 const readonlyImportedMediaBindings = new WeakMap<SymbolDescriptor, boolean>();
 const importedMediaProgramFacts = new WeakMap<
   ScopeAnalysis,
-  Map<string, ImportedMediaProgramFacts>
+  Map<string, CapturedCrossFileProbes<ImportedMediaProgramFacts>>
 >();
 const importedMediaExporterScopes = new WeakMap<EsTreeNode, ScopeAnalysis>();
 const importedMediaFunctionProofs = new WeakMap<EsTreeNode, WeakMap<EsTreeNode, boolean>>();
@@ -174,7 +182,6 @@ export const createImportedNativeMediaGuardPredicate = ({
     });
     return !invalid;
   };
-  const shouldCaptureDependencies = isProbeRecorderActive();
   let programs = importedMediaProgramFacts.get(context.scopes);
   if (!programs) {
     programs = new Map();
@@ -183,130 +190,138 @@ export const createImportedNativeMediaGuardPredicate = ({
   const generation = getManifestCacheGeneration();
   const aliasGeneration = getTsconfigAliasCacheGeneration();
   const resolutionGeneration = getModuleResolutionCacheGeneration();
+  const exportGeneration = getCrossFileExportCacheGeneration();
   const program = context.scopes.rootScope.node;
-  let programFacts = shouldCaptureDependencies ? undefined : programs.get(filename);
+  let capturedProgram = programs.get(filename);
+  let programFacts = capturedProgram?.value;
   if (
     programFacts &&
     (programFacts.generation !== generation ||
       programFacts.aliasGeneration !== aliasGeneration ||
       programFacts.resolutionGeneration !== resolutionGeneration ||
+      programFacts.exportGeneration !== exportGeneration ||
       programFacts.program !== program)
   )
-    programFacts = undefined;
-  if (!programFacts) {
-    programFacts = {
-      generation,
-      aliasGeneration,
-      resolutionGeneration,
-      program,
-      supported: false,
-      providersByFilePath: new Map(),
-      providerProofsByFunction: new WeakMap(),
-      nativeCallsByEffect: new WeakMap(),
-    };
-    if (!shouldCaptureDependencies) programs.set(filename, programFacts);
-    let importerFacts = importedMediaImporterSyntaxFacts.get(context.scopes);
-    if (!importerFacts) {
-      const providerImports: ImportedMediaProviderImport[] = [];
-      for (const provider of context.scopes.rootScope.symbols) {
-        const declaration = getImportDeclarationForSymbol(provider);
-        if (
-          !declaration ||
-          declaration.importKind === "type" ||
-          (isNodeOfType(provider.declarationNode, "ImportSpecifier") &&
-            provider.declarationNode.importKind === "type") ||
-          typeof declaration.source.value !== "string"
-        )
-          continue;
-        providerImports.push({ provider, source: declaration.source.value });
-      }
-      const hasEligibleImport = providerImports.some(
-        ({ provider, source }) =>
-          isNodeOfType(provider.declarationNode, "ImportSpecifier") &&
-          source.startsWith(".") &&
-          getImportedName(provider.declarationNode) !== "default",
-      );
-      let supported = false;
-      if (hasEligibleImport) {
-        const proveImporter = (): boolean => {
-          if (!isSupportedProgram(context.scopes.rootScope.node, context.scopes, new Set()))
-            return false;
-          const providerApiProofs = new WeakMap<SymbolDescriptor, Map<string, boolean>>();
-          const isClosedProviderCall = (
-            call: EsTreeNode,
-            api: string,
-            symbol: SymbolDescriptor,
-          ): boolean => {
-            if (!isReactApiCall(call, api, context.scopes)) return false;
-            let proofs = providerApiProofs.get(symbol);
-            if (!proofs) {
-              proofs = new Map();
-              providerApiProofs.set(symbol, proofs);
-            }
-            const cached = proofs.get(api);
-            if (cached !== undefined) return cached;
-            const closed = isProvenUnmodifiedReactApiCall(call, api, context.scopes);
-            proofs.set(api, closed);
-            return closed;
-          };
-          for (const symbol of context.scopes.rootScope.symbols) {
-            const declaration = getImportDeclarationForSymbol(symbol);
-            if (
-              !declaration ||
-              declaration.importKind === "type" ||
-              (isNodeOfType(symbol.declarationNode, "ImportSpecifier") &&
-                symbol.declarationNode.importKind === "type")
-            )
-              continue;
-            if (isNodeOfType(symbol.declarationNode, "ImportNamespaceSpecifier")) return false;
-            if (declaration.source.value !== "react") continue;
-            if (
-              !isReadonly(symbol) ||
-              !symbol.references.every((reference) => {
-                if (isTypeScriptTypePosition(reference.identifier)) return true;
-                const root = findTransparentExpressionRoot(reference.identifier);
-                const parent = root.parent;
-                const isDefault =
-                  isNodeOfType(symbol.declarationNode, "ImportDefaultSpecifier") ||
-                  getImportedName(symbol.declarationNode) === "default";
-                const api =
-                  isDefault && isNodeOfType(parent, "MemberExpression")
-                    ? getStaticPropertyName(parent)
-                    : getImportedName(symbol.declarationNode);
-                const call =
-                  isDefault && parent ? findTransparentExpressionRoot(parent).parent : parent;
-                return Boolean(
-                  api &&
-                  IMPORTED_MEDIA_REACT_API_NAMES.has(api) &&
-                  isNodeOfType(call, "CallExpression") &&
-                  !call.optional &&
-                  stripParenExpression(call.callee) === (isDefault ? parent : root) &&
-                  isClosedProviderCall(call, api, symbol),
-                );
-              })
-            )
+    capturedProgram = undefined;
+  if (!capturedProgram) {
+    capturedProgram = captureCrossFileProbes(() => {
+      const programFacts: ImportedMediaProgramFacts = {
+        generation,
+        aliasGeneration,
+        resolutionGeneration,
+        exportGeneration,
+        program,
+        supported: false,
+        providersByFilePath: new Map(),
+        providerProofsByFunction: new WeakMap(),
+        nativeCallsByEffect: new WeakMap(),
+      };
+      let importerFacts = importedMediaImporterSyntaxFacts.get(context.scopes);
+      if (!importerFacts) {
+        const providerImports: ImportedMediaProviderImport[] = [];
+        for (const provider of context.scopes.rootScope.symbols) {
+          const declaration = getImportDeclarationForSymbol(provider);
+          if (
+            !declaration ||
+            declaration.importKind === "type" ||
+            (isNodeOfType(provider.declarationNode, "ImportSpecifier") &&
+              provider.declarationNode.importKind === "type") ||
+            typeof declaration.source.value !== "string"
+          )
+            continue;
+          providerImports.push({ provider, source: declaration.source.value });
+        }
+        const hasEligibleImport = providerImports.some(
+          ({ provider, source }) =>
+            isNodeOfType(provider.declarationNode, "ImportSpecifier") &&
+            source.startsWith(".") &&
+            getImportedName(provider.declarationNode) !== "default",
+        );
+        let supported = false;
+        if (hasEligibleImport) {
+          const proveImporter = (): boolean => {
+            if (!isSupportedProgram(context.scopes.rootScope.node, context.scopes, new Set()))
               return false;
-          }
+            const providerApiProofs = new WeakMap<SymbolDescriptor, Map<string, boolean>>();
+            const isClosedProviderCall = (
+              call: EsTreeNode,
+              api: string,
+              symbol: SymbolDescriptor,
+            ): boolean => {
+              if (!isReactApiCall(call, api, context.scopes)) return false;
+              let proofs = providerApiProofs.get(symbol);
+              if (!proofs) {
+                proofs = new Map();
+                providerApiProofs.set(symbol, proofs);
+              }
+              const cached = proofs.get(api);
+              if (cached !== undefined) return cached;
+              const closed = isProvenUnmodifiedReactApiCall(call, api, context.scopes);
+              proofs.set(api, closed);
+              return closed;
+            };
+            for (const symbol of context.scopes.rootScope.symbols) {
+              const declaration = getImportDeclarationForSymbol(symbol);
+              if (
+                !declaration ||
+                declaration.importKind === "type" ||
+                (isNodeOfType(symbol.declarationNode, "ImportSpecifier") &&
+                  symbol.declarationNode.importKind === "type")
+              )
+                continue;
+              if (isNodeOfType(symbol.declarationNode, "ImportNamespaceSpecifier")) return false;
+              if (declaration.source.value !== "react") continue;
+              if (
+                !isReadonly(symbol) ||
+                !symbol.references.every((reference) => {
+                  if (isTypeScriptTypePosition(reference.identifier)) return true;
+                  const root = findTransparentExpressionRoot(reference.identifier);
+                  const parent = root.parent;
+                  const isDefault =
+                    isNodeOfType(symbol.declarationNode, "ImportDefaultSpecifier") ||
+                    getImportedName(symbol.declarationNode) === "default";
+                  const api =
+                    isDefault && isNodeOfType(parent, "MemberExpression")
+                      ? getStaticPropertyName(parent)
+                      : getImportedName(symbol.declarationNode);
+                  const call =
+                    isDefault && parent ? findTransparentExpressionRoot(parent).parent : parent;
+                  return Boolean(
+                    api &&
+                    IMPORTED_MEDIA_REACT_API_NAMES.has(api) &&
+                    isNodeOfType(call, "CallExpression") &&
+                    !call.optional &&
+                    stripParenExpression(call.callee) === (isDefault ? parent : root) &&
+                    isClosedProviderCall(call, api, symbol),
+                  );
+                })
+              )
+                return false;
+            }
 
-          return true;
-        };
-        supported = proveImporter();
+            return true;
+          };
+          supported = proveImporter();
+        }
+        importerFacts = { supported, providerImports };
+        importedMediaImporterSyntaxFacts.set(context.scopes, importerFacts);
       }
-      importerFacts = { supported, providerImports };
-      importedMediaImporterSyntaxFacts.set(context.scopes, importerFacts);
-    }
-    programFacts.supported = importerFacts.supported;
-    if (programFacts.supported) {
-      for (const { provider, source } of importerFacts.providerImports) {
-        const filePath = resolveModulePath(filename, source);
-        if (!filePath) continue;
-        const providers = programFacts.providersByFilePath.get(filePath) ?? [];
-        providers.push(provider);
-        programFacts.providersByFilePath.set(filePath, providers);
+      programFacts.supported = importerFacts.supported;
+      if (programFacts.supported) {
+        for (const { provider, source } of importerFacts.providerImports) {
+          const filePath = resolveModulePath(filename, source);
+          if (!filePath) continue;
+          const providers = programFacts.providersByFilePath.get(filePath) ?? [];
+          providers.push(provider);
+          programFacts.providersByFilePath.set(filePath, providers);
+        }
       }
-    }
+      return programFacts;
+    });
+    programs.set(filename, capturedProgram);
   }
-
+  replayCrossFileProbes(capturedProgram.trace);
+  programFacts = capturedProgram.value;
   if (!programFacts.supported) return null;
   const currentProgramFacts = programFacts;
   const importProofs = new WeakMap<SymbolDescriptor, boolean>();
@@ -620,16 +635,20 @@ export const createImportedNativeMediaGuardPredicate = ({
     return proof;
   };
   const effects = currentProgramFacts.nativeCallsByEffect;
-  let nativeCalls = shouldCaptureDependencies ? undefined : effects.get(effectFunction);
-  if (!nativeCalls) {
-    const calls = new Set<EsTreeNode>();
-    walkAst(effectFunction, (node) => {
-      if (node !== effectFunction && isFunctionLike(node)) return false;
-      if (isNodeOfType(node, "CallExpression") && proveCall(node)) calls.add(node);
+  let capturedCalls = effects.get(effectFunction);
+  if (!capturedCalls) {
+    capturedCalls = captureCrossFileProbes(() => {
+      const calls = new Set<EsTreeNode>();
+      walkAst(effectFunction, (node) => {
+        if (node !== effectFunction && isFunctionLike(node)) return false;
+        if (isNodeOfType(node, "CallExpression") && proveCall(node)) calls.add(node);
+      });
+      return calls;
     });
-    nativeCalls = calls;
-    if (!shouldCaptureDependencies) effects.set(effectFunction, nativeCalls);
+    effects.set(effectFunction, capturedCalls);
   }
+  replayCrossFileProbes(capturedCalls.trace);
+  const nativeCalls = capturedCalls.value;
   if (nativeCalls.size === 0) return null;
   const isReadonlyLocal = (expression: EsTreeNode): boolean => {
     const node = stripParenExpression(expression);

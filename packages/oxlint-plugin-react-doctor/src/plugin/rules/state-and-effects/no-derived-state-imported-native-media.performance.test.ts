@@ -1,7 +1,13 @@
+import * as astWalking from "../../utils/walk-ast.js";
+import {
+  NATIVE_MEDIA_SMALL_COMPONENT_COUNT,
+  NATIVE_MEDIA_LARGE_COMPONENT_COUNT,
+  NATIVE_MEDIA_MAXIMUM_PROVIDER_LOOKUP_GROWTH_MULTIPLIER,
+} from "./utils/effect/constants.js";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { attachParentReferences } from "../../../test-utils/attach-parent-references.js";
 import {
   IMPORTED_MEDIA_PROOF_WRITE_COUNTS,
@@ -383,3 +389,89 @@ describe("native media provider proof work", () => {
     }
   });
 });
+
+for (const distinctProviders of [false, true]) {
+  it(`bounds recorded effect traversals across repeated state writes with distinct providers ${distinctProviders}`, () => {
+    const countVisits = (writeCount: number): number => {
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), "recorded-imported-media-work-"));
+      try {
+        const providerCount = distinctProviders ? writeCount : 1;
+        const imports = Array.from({ length: providerCount }, (_, index) => {
+          fs.writeFileSync(
+            path.join(directory, `capability-${index}.ts`),
+            `export const supportsClip${index}=(mime:string)=>document.createElement('video').canPlayType(mime)!=='';`,
+          );
+          return `import{supportsClip${index}}from'./capability-${index}';`;
+        }).join("");
+        const writes = Array.from(
+          { length: writeCount },
+          (_, index) =>
+            `if(supportsClip${distinctProviders ? index : 0}(mime))setSelected(source);`,
+        ).join("");
+        const code = `import{useEffect,useState}from'react';${imports}export const Example=({mime,source}:{mime:string;source:string})=>{const[selected,setSelected]=useState<string|null>(null);useEffect(()=>{${writes}},[mime,source]);return <video data-selected={selected===source}/>};`;
+        const filename = path.join(directory, "consumer.tsx");
+        fs.writeFileSync(filename, code);
+        const parsed = parseFixture(code);
+        expect(parsed.errors).toEqual([]);
+        attachParentReferences(parsed.program);
+        const scopes = analyzeScopes(parsed.program);
+        let effectFunction: EsTreeNode | null = null;
+        const executions: EsTreeNode[] = [];
+        const conditions: EsTreeNode[] = [];
+        walkAst(parsed.program, (node) => {
+          if (isNodeOfType(node, "IfStatement")) conditions.push(node.test);
+          if (!isNodeOfType(node, "CallExpression") || !isNodeOfType(node.callee, "Identifier"))
+            return;
+          if (node.callee.name === "setSelected") executions.push(node);
+          const callback = node.arguments[0];
+          if (
+            node.callee.name === "useEffect" &&
+            callback &&
+            isNodeOfType(callback, "ArrowFunctionExpression")
+          )
+            effectFunction = callback;
+        });
+        if (!effectFunction) throw new Error("Expected the controlled effect");
+        const selectedEffect = effectFunction;
+        const context: RuleContext = {
+          scopes,
+          cfg: analyzeControlFlow(parsed.program),
+          filename,
+          sourceCode: { ast: parsed.program, getText: () => code },
+          report: () => {},
+        };
+        let visits = 0;
+        const originalWalk = astWalking.walkAst;
+        const traversal = vi.spyOn(astWalking, "walkAst").mockImplementation((node, visitor) =>
+          originalWalk(node, (candidate) => {
+            visits++;
+            return visitor(candidate);
+          }),
+        );
+        try {
+          for (const [index, executionNode] of executions.entries()) {
+            const proof = captureCrossFileProbes(() =>
+              createImportedNativeMediaGuardPredicate({
+                context,
+                effectFunction: selectedEffect,
+                executionNode,
+              }),
+            );
+            const condition = conditions[index];
+            if (!condition) throw new Error("Expected the matching condition");
+            expect(proof.value?.(condition)).toBe(true);
+          }
+        } finally {
+          traversal.mockRestore();
+        }
+        return visits;
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    };
+    const small = countVisits(NATIVE_MEDIA_SMALL_COMPONENT_COUNT);
+    const large = countVisits(NATIVE_MEDIA_LARGE_COMPONENT_COUNT);
+    expect(small).toBeGreaterThan(0);
+    expect(large).toBeLessThan(small * NATIVE_MEDIA_MAXIMUM_PROVIDER_LOOKUP_GROWTH_MULTIPLIER);
+  });
+}

@@ -36,7 +36,12 @@ const crossFileValueExportByImport = new Map<string, CrossFileValueExportLookup>
 let valueExportAliasGeneration: number | undefined;
 let valueExportResolutionGeneration: number | undefined;
 
+let crossFileExportCacheGeneration = 0;
+
+export const getCrossFileExportCacheGeneration = (): number => crossFileExportCacheGeneration;
+
 export const resetCrossFileExportCaches = (): void => {
+  crossFileExportCacheGeneration++;
   crossFileValueExportByImport.clear();
 };
 
