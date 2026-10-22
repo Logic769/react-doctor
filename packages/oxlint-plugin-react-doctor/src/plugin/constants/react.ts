@@ -493,3 +493,7 @@ export const NODE_PORT_PROCESS_CONSUMER_GLOBAL_NAMES: ReadonlySet<string> = new 
   "NaN",
   "Infinity",
 ]);
+
+export const NODE_PORT_PROCESS_SMALL_CALL_COUNT = 16;
+export const NODE_PORT_PROCESS_LARGE_CALL_COUNT = 64;
+export const NODE_PORT_PROCESS_MAXIMUM_LOOKUP_GROWTH_MULTIPLIER = 6;
