@@ -46,7 +46,11 @@ const hasClosedRuntimeReferences = (
         allowed.has(reference.identifier)),
   );
 
+const supportedProgramSyntaxByProgram = new WeakMap<EsTreeNode, boolean>();
+
 const hasSupportedProgramSyntax = (program: EsTreeNode): boolean => {
+  const cached = supportedProgramSyntaxByProgram.get(program);
+  if (cached !== undefined) return cached;
   let supported = true;
   walkAst(program, (node) => {
     if (!supported) return false;
@@ -84,6 +88,7 @@ const hasSupportedProgramSyntax = (program: EsTreeNode): boolean => {
       supported = false;
     if ("typeParameters" in node && node.typeParameters) supported = false;
   });
+  supportedProgramSyntaxByProgram.set(program, supported);
   return supported;
 };
 

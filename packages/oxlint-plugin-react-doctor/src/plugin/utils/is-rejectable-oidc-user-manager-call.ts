@@ -1,3 +1,6 @@
+import { captureCrossFileProbes, replayCrossFileProbes } from "./cross-file-probe-recorder.js";
+import type { CapturedCrossFileProbes } from "./cross-file-probe-recorder.js";
+import { getManifestCacheGeneration } from "./read-nearest-package-manifest.js";
 import { findVisibleSymbol } from "./find-visible-symbol.js";
 import { getImportDeclarationForSymbol } from "./get-import-declaration-for-symbol.js";
 import {
@@ -37,6 +40,8 @@ import { walkAst } from "./walk-ast.js";
 interface OidcProgramFacts {
   readonly readonlyBindings: Map<SymbolDescriptor, boolean>;
   readonly instanceCalls: Map<SymbolDescriptor, boolean>;
+  readonly managerOrigins: Map<SymbolDescriptor, Map<string, CapturedCrossFileProbes<boolean>>>;
+  managerOriginGeneration: number;
   visibleCapabilities?: boolean;
 }
 
@@ -51,7 +56,12 @@ const getProgramFacts = (program: EsTreeNode, scopes: ScopeAnalysis): OidcProgra
   }
   let facts = factsByProgram.get(program);
   if (!facts) {
-    facts = { readonlyBindings: new Map(), instanceCalls: new Map() };
+    facts = {
+      readonlyBindings: new Map(),
+      instanceCalls: new Map(),
+      managerOrigins: new Map(),
+      managerOriginGeneration: getManifestCacheGeneration(),
+    };
     factsByProgram.set(program, facts);
   }
   return facts;
@@ -472,41 +482,30 @@ const hasUniqueImportedManagerValue = (
   return true;
 };
 
-export const isRejectableOidcUserManagerCall = (
-  expression: EsTreeNode,
-  context: Pick<RuleContext, "filename" | "scopes">,
-): boolean => {
-  const call = stripParenExpression(expression);
-  if (
-    !context.filename ||
-    !isNodeOfType(call, "CallExpression") ||
-    call.optional ||
-    call.arguments.length !== OIDC_GET_USER_ARGUMENT_COUNT
-  )
-    return false;
-  const member = stripParenExpression(call.callee);
-  if (
-    !isNodeOfType(member, "MemberExpression") ||
-    member.computed ||
-    member.optional ||
-    getStaticPropertyName(member) !== "getUser"
-  )
-    return false;
-  const receiver = stripParenExpression(member.object);
-  if (!isNodeOfType(receiver, "Identifier")) return false;
-  const consumerProgram = findProgramRoot(call);
-  let symbol = context.scopes.symbolFor(receiver);
+interface OidcManagerOriginInput {
+  readonly receiver: EsTreeNode;
+  readonly consumerProgram: EsTreeNode;
+  readonly consumerScopes: ScopeAnalysis;
+  readonly consumerFilename: string;
+}
+
+const hasRejectableOidcManagerOrigin = ({
+  receiver,
+  consumerProgram,
+  consumerScopes,
+  consumerFilename,
+}: OidcManagerOriginInput): boolean => {
+  let symbol = consumerScopes.symbolFor(receiver);
   if (
     !symbol ||
-    !consumerProgram ||
-    !hasSupportedVisibleCapabilities(consumerProgram, context.scopes) ||
-    !hasInstanceCallReferences(symbol, consumerProgram, context.scopes)
+    !hasSupportedVisibleCapabilities(consumerProgram, consumerScopes) ||
+    !hasInstanceCallReferences(symbol, consumerProgram, consumerScopes)
   )
     return false;
   const consumerSymbol = symbol;
   let program: EsTreeNode = consumerProgram;
-  let scopes = context.scopes;
-  let filename = context.filename;
+  let scopes = consumerScopes;
+  let filename = consumerFilename;
   if (symbol.kind === "import") {
     if (
       !getValueImportDeclaration(symbol) ||
@@ -561,7 +560,7 @@ export const isRejectableOidcUserManagerCall = (
   if (!hasSupportedProviderImports(program, scopes, filename)) return false;
   if (
     program !== consumerProgram &&
-    !hasOnlySelectedSdkImports(consumerProgram, context.scopes, new Set<EsTreeNode>())
+    !hasOnlySelectedSdkImports(consumerProgram, consumerScopes, new Set<EsTreeNode>())
   )
     return false;
   return (
@@ -570,9 +569,63 @@ export const isRejectableOidcUserManagerCall = (
       consumerSymbol,
       construct,
       filename,
-      context.filename,
+      consumerFilename,
       consumerProgram,
-      context.scopes,
+      consumerScopes,
     )
   );
+};
+
+export const isRejectableOidcUserManagerCall = (
+  expression: EsTreeNode,
+  context: Pick<RuleContext, "filename" | "scopes">,
+): boolean => {
+  const call = stripParenExpression(expression);
+  if (
+    !context.filename ||
+    !isNodeOfType(call, "CallExpression") ||
+    call.optional ||
+    call.arguments.length !== OIDC_GET_USER_ARGUMENT_COUNT
+  )
+    return false;
+  const member = stripParenExpression(call.callee);
+  if (
+    !isNodeOfType(member, "MemberExpression") ||
+    member.computed ||
+    member.optional ||
+    getStaticPropertyName(member) !== "getUser"
+  )
+    return false;
+  const receiver = stripParenExpression(member.object);
+  if (!isNodeOfType(receiver, "Identifier")) return false;
+  const consumerProgram = findProgramRoot(call);
+  const symbol = context.scopes.symbolFor(receiver);
+  if (!consumerProgram || !symbol) return false;
+  const facts = getProgramFacts(consumerProgram, context.scopes);
+  const generation = getManifestCacheGeneration();
+  if (facts.managerOriginGeneration !== generation) {
+    facts.managerOrigins.clear();
+    facts.managerOriginGeneration = generation;
+  }
+  let origins = facts.managerOrigins.get(symbol);
+  if (!origins) {
+    origins = new Map();
+    facts.managerOrigins.set(symbol, origins);
+  }
+  const cached = origins.get(context.filename);
+  if (cached !== undefined) {
+    replayCrossFileProbes(cached.trace);
+    return cached.value;
+  }
+  const consumerFilename = context.filename;
+  const supported = captureCrossFileProbes(() =>
+    hasRejectableOidcManagerOrigin({
+      receiver,
+      consumerProgram,
+      consumerScopes: context.scopes,
+      consumerFilename,
+    }),
+  );
+  origins.set(context.filename, supported);
+  return supported.value;
 };
