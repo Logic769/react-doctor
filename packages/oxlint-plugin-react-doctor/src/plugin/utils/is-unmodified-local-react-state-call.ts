@@ -18,6 +18,7 @@ import { hasPossibleStaticPropertyMutationOrEscape } from "./has-static-property
 import { isBindingAssignmentTarget } from "./is-binding-assignment-target.js";
 import { hasRuntimeValueBinding } from "./has-runtime-value-binding.js";
 import { isErasedTypeScriptBinding } from "./is-erased-typescript-binding.js";
+import { isNumericDataMemberAccess } from "./is-numeric-data-member-access.js";
 import { isMemberMutationTarget } from "./is-member-mutation-target.js";
 import { isNodeOfType } from "./is-node-of-type.js";
 import { isNonEscapingReactApiReference } from "./is-non-escaping-react-api-reference.js";
@@ -39,9 +40,14 @@ const PROVIDER_GLOBAL_NAMES = new Set([
   "self",
 ]);
 
+interface LocalReactStateCallOptions {
+  readonly allowNumericDataAccess?: boolean;
+}
+
 export const isUnmodifiedLocalReactStateCall = (
   call: EsTreeNode,
   scopes: ScopeAnalysis,
+  options: LocalReactStateCallOptions = {},
 ): boolean => {
   if (!isNodeOfType(call, "CallExpression")) return false;
   const callee = stripParenExpression(call.callee);
@@ -179,7 +185,8 @@ export const isUnmodifiedLocalReactStateCall = (
         allowConstNumericLiteral: true,
         allowConstTemplateLiteral: true,
         stringifyNonStringLiterals: true,
-      }) === null
+      }) === null &&
+      !(options.allowNumericDataAccess && isNumericDataMemberAccess(child, scopes))
     ) {
       hasProviderHazard = true;
     }

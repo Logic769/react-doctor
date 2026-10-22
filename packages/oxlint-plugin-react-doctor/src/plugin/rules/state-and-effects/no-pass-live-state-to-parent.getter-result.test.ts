@@ -333,6 +333,138 @@ const cases: GetterResultCase[] = [
       "import StateProvider,{useEffect,useState} from 'react';const StateAlias=StateProvider;function Panel({getLabel}){const[selected,setSelected]=useState('start');const[status,setStatus]=StateAlias.useState('');useEffect(()=>{setStatus(`${getLabel(selected)} selected`);},[selected]);return <button onClick={()=>setSelected('next')}>{status}</button>}",
     expected: 1,
   },
+  {
+    name: "default React getter capability replaces state provider",
+    source:
+      'import {useEffect,useState} from "react";import Provider from "react";const fakeState=initial=>[initial,value=>value];function Panel({getLabel}){const[selected,setSelected]=useState("start");Provider.__defineGetter__(\'useState\',()=>fakeState);const[status,setStatus]=Provider.useState("");useEffect(()=>{setStatus(`${getLabel(selected)} selected`);},[selected,getLabel]);return <button onClick={()=>setSelected("next")}>{status}</button>;}',
+    expected: 1,
+  },
+  {
+    name: "namespace React getter capability replaces state provider",
+    source:
+      'import {useEffect,useState} from "react";import * as Provider from "react";const fakeState=initial=>[initial,value=>value];function Panel({getLabel}){const[selected,setSelected]=useState("start");Provider.__defineGetter__(\'useState\',()=>fakeState);const[status,setStatus]=Provider.useState("");useEffect(()=>{setStatus(`${getLabel(selected)} selected`);},[selected,getLabel]);return <button onClick={()=>setSelected("next")}>{status}</button>;}',
+    expected: 1,
+  },
+  {
+    name: "default-as React getter capability replaces state provider",
+    source:
+      'import {useEffect,useState} from "react";import {default as Provider} from "react";const fakeState=initial=>[initial,value=>value];function Panel({getLabel}){const[selected,setSelected]=useState("start");Provider.__defineGetter__(\'useState\',()=>fakeState);const[status,setStatus]=Provider.useState("");useEffect(()=>{setStatus(`${getLabel(selected)} selected`);},[selected,getLabel]);return <button onClick={()=>setSelected("next")}>{status}</button>;}',
+    expected: 1,
+  },
+  {
+    name: "readonly React namespace alias getter capability",
+    source:
+      'import {useEffect,useState} from "react";import Provider from "react";const fakeState=initial=>[initial,value=>value];function Panel({getLabel}){const[selected,setSelected]=useState("start");const Mutable=Provider;Mutable.__defineGetter__(\'useState\',()=>fakeState);const[status,setStatus]=Provider.useState("");useEffect(()=>{setStatus(`${getLabel(selected)} selected`);},[selected,getLabel]);return <button onClick={()=>setSelected("next")}>{status}</button>;}',
+    expected: 1,
+  },
+  {
+    name: "two readonly React namespace aliases getter capability",
+    source:
+      'import {useEffect,useState} from "react";import Provider from "react";const fakeState=initial=>[initial,value=>value];function Panel({getLabel}){const[selected,setSelected]=useState("start");const Mutable=Provider;const Other=Mutable;Other.__defineGetter__(\'useState\',()=>fakeState);const[status,setStatus]=Provider.useState("");useEffect(()=>{setStatus(`${getLabel(selected)} selected`);},[selected,getLabel]);return <button onClick={()=>setSelected("next")}>{status}</button>;}',
+    expected: 1,
+  },
+  {
+    name: "computed literal React getter capability",
+    source:
+      'import {useEffect,useState} from "react";import Provider from "react";const fakeState=initial=>[initial,value=>value];function Panel({getLabel}){const[selected,setSelected]=useState("start");Provider[\'__defineGetter__\'](\'useState\',()=>fakeState);const[status,setStatus]=Provider.useState("");useEffect(()=>{setStatus(`${getLabel(selected)} selected`);},[selected,getLabel]);return <button onClick={()=>setSelected("next")}>{status}</button>;}',
+    expected: 1,
+  },
+  {
+    name: "computed template React getter capability",
+    source:
+      'import {useEffect,useState} from "react";import Provider from "react";const fakeState=initial=>[initial,value=>value];function Panel({getLabel}){const[selected,setSelected]=useState("start");Provider[`__defineGetter__`](\'useState\',()=>fakeState);const[status,setStatus]=Provider.useState("");useEffect(()=>{setStatus(`${getLabel(selected)} selected`);},[selected,getLabel]);return <button onClick={()=>setSelected("next")}>{status}</button>;}',
+    expected: 1,
+  },
+  {
+    name: "default React setter capability",
+    source:
+      'import {useEffect,useState} from "react";import Provider from "react";const fakeState=initial=>[initial,value=>value];function Panel({getLabel}){const[selected,setSelected]=useState("start");Provider.__defineSetter__(\'useState\',value=>value);const[status,setStatus]=Provider.useState("");useEffect(()=>{setStatus(`${getLabel(selected)} selected`);},[selected,getLabel]);return <button onClick={()=>setSelected("next")}>{status}</button>;}',
+    expected: 1,
+  },
+  {
+    name: "computed literal React setter capability",
+    source:
+      'import {useEffect,useState} from "react";import Provider from "react";const fakeState=initial=>[initial,value=>value];function Panel({getLabel}){const[selected,setSelected]=useState("start");Provider[\'__defineSetter__\'](\'useState\',value=>value);const[status,setStatus]=Provider.useState("");useEffect(()=>{setStatus(`${getLabel(selected)} selected`);},[selected,getLabel]);return <button onClick={()=>setSelected("next")}>{status}</button>;}',
+    expected: 1,
+  },
+  {
+    name: "React getter capability member escape",
+    source:
+      'import {useEffect,useState} from "react";import Provider from "react";const fakeState=initial=>[initial,value=>value];function Panel({getLabel}){const[selected,setSelected]=useState("start");const rewrite=Provider.__defineGetter__;consume(rewrite);const[status,setStatus]=Provider.useState("");useEffect(()=>{setStatus(`${getLabel(selected)} selected`);},[selected,getLabel]);return <button onClick={()=>setSelected("next")}>{status}</button>;}',
+    expected: 1,
+  },
+  {
+    name: "React setter capability member escape",
+    source:
+      'import {useEffect,useState} from "react";import Provider from "react";const fakeState=initial=>[initial,value=>value];function Panel({getLabel}){const[selected,setSelected]=useState("start");const rewrite=Provider.__defineSetter__;consume(rewrite);const[status,setStatus]=Provider.useState("");useEffect(()=>{setStatus(`${getLabel(selected)} selected`);},[selected,getLabel]);return <button onClick={()=>setSelected("next")}>{status}</button>;}',
+    expected: 1,
+  },
+  {
+    name: "React inherited prototype member escape",
+    source:
+      'import {useEffect,useState} from "react";import Provider from "react";const fakeState=initial=>[initial,value=>value];function Panel({getLabel}){const[selected,setSelected]=useState("start");const inherited=Provider.__proto__;consume(inherited);const[status,setStatus]=Provider.useState("");useEffect(()=>{setStatus(`${getLabel(selected)} selected`);},[selected,getLabel]);return <button onClick={()=>setSelected("next")}>{status}</button>;}',
+    expected: 1,
+  },
+  {
+    name: "React prototype member escape",
+    source:
+      'import {useEffect,useState} from "react";import Provider from "react";const fakeState=initial=>[initial,value=>value];function Panel({getLabel}){const[selected,setSelected]=useState("start");const inherited=Provider.prototype;consume(inherited);const[status,setStatus]=Provider.useState("");useEffect(()=>{setStatus(`${getLabel(selected)} selected`);},[selected,getLabel]);return <button onClick={()=>setSelected("next")}>{status}</button>;}',
+    expected: 1,
+  },
+  {
+    name: "React computed inherited prototype member escape",
+    source:
+      'import {useEffect,useState} from "react";import Provider from "react";const fakeState=initial=>[initial,value=>value];function Panel({getLabel}){const[selected,setSelected]=useState("start");const inherited=Provider[\'__proto__\'];consume(inherited);const[status,setStatus]=Provider.useState("");useEffect(()=>{setStatus(`${getLabel(selected)} selected`);},[selected,getLabel]);return <button onClick={()=>setSelected("next")}>{status}</button>;}',
+    expected: 1,
+  },
+  {
+    name: "React computed prototype member escape",
+    source:
+      'import {useEffect,useState} from "react";import Provider from "react";const fakeState=initial=>[initial,value=>value];function Panel({getLabel}){const[selected,setSelected]=useState("start");const inherited=Provider[`prototype`];consume(inherited);const[status,setStatus]=Provider.useState("");useEffect(()=>{setStatus(`${getLabel(selected)} selected`);},[selected,getLabel]);return <button onClick={()=>setSelected("next")}>{status}</button>;}',
+    expected: 1,
+  },
+  {
+    name: "ordinary React version read remains supported",
+    source:
+      'import {useEffect,useState} from "react";import Provider from "react";const fakeState=initial=>[initial,value=>value];function Panel({getLabel}){const[selected,setSelected]=useState("start");const version=Provider.version;void version;const[status,setStatus]=Provider.useState("");useEffect(()=>{setStatus(`${getLabel(selected)} selected`);},[selected,getLabel]);return <button onClick={()=>setSelected("next")}>{status}</button>;}',
+    expected: 0,
+  },
+  {
+    name: "ordinary React createElement call remains supported",
+    source:
+      'import {useEffect,useState} from "react";import Provider from "react";const fakeState=initial=>[initial,value=>value];function Panel({getLabel}){const[selected,setSelected]=useState("start");Provider.createElement(\'span\',null,\'label\');const[status,setStatus]=Provider.useState("");useEffect(()=>{setStatus(`${getLabel(selected)} selected`);},[selected,getLabel]);return <button onClick={()=>setSelected("next")}>{status}</button>;}',
+    expected: 0,
+  },
+  {
+    name: "unrelated React metadata write remains supported",
+    source:
+      'import {useEffect,useState} from "react";import Provider from "react";const fakeState=initial=>[initial,value=>value];function Panel({getLabel}){const[selected,setSelected]=useState("start");Provider.description=\'metadata\';const[status,setStatus]=Provider.useState("");useEffect(()=>{setStatus(`${getLabel(selected)} selected`);},[selected,getLabel]);return <button onClick={()=>setSelected("next")}>{status}</button>;}',
+    expected: 0,
+  },
+  {
+    name: "unrelated object capability spelling does not taint React",
+    source:
+      'import {useEffect,useState} from "react";import Provider from "react";const fakeState=initial=>[initial,value=>value];function Panel({getLabel}){const[selected,setSelected]=useState("start");const Other={__defineGetter__:()=>null};Other.__defineGetter__();const[status,setStatus]=Provider.useState("");useEffect(()=>{setStatus(`${getLabel(selected)} selected`);},[selected,getLabel]);return <button onClick={()=>setSelected("next")}>{status}</button>;}',
+    expected: 0,
+  },
+  {
+    name: "local React spelling does not taint genuine imported provider",
+    source:
+      'import {useEffect,useState} from "react";import Provider from "react";const fakeState=initial=>[initial,value=>value];function Panel({getLabel}){const[selected,setSelected]=useState("start");const React={__defineGetter__:()=>null};React.__defineGetter__();const[status,setStatus]=Provider.useState("");useEffect(()=>{setStatus(`${getLabel(selected)} selected`);},[selected,getLabel]);return <button onClick={()=>setSelected("next")}>{status}</button>;}',
+    expected: 0,
+  },
+  {
+    name: "known existing default React callback dispatch boundary remains quiet",
+    source:
+      'import React,{useCallback,useEffect,useState}from"react";function Panel({getLabel,onChange}){const[selected,setSelected]=useState("start");const[status,setStatus]=useState("");React.__defineGetter__(\'useCallback\',()=>callback=>value=>{onChange(value);return callback(value);});const readLabel=React.useCallback(value=>getLabel(value),[getLabel]);useEffect(()=>{setStatus(`${readLabel(selected)} selected`);},[selected,readLabel]);return <button onClick={()=>setSelected("next")}>{status}</button>;}',
+    expected: 0,
+  },
+  {
+    name: "named React callback wrapper getter capability retains notification",
+    source:
+      'import React,{useCallback,useEffect,useState}from"react";function Panel({getLabel,onChange}){const[selected,setSelected]=useState("start");const[status,setStatus]=useState("");React.__defineGetter__(\'useCallback\',()=>callback=>value=>{onChange(value);return callback(value);});const readLabel=useCallback(value=>getLabel(value),[getLabel]);useEffect(()=>{setStatus(`${readLabel(selected)} selected`);},[selected,readLabel]);return <button onClick={()=>setSelected("next")}>{status}</button>;}',
+    expected: 1,
+  },
 ];
 
 describe("local status getter result roles", () => {

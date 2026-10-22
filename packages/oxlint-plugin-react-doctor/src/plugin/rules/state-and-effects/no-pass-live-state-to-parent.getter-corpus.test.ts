@@ -12,6 +12,7 @@ interface GetterCorpusCase {
 const cases: GetterCorpusCase[] = [
   { fixtureName: "consumed-status-getter", expected: 0 },
   { fixtureName: "bare-getter-notification", expected: 1 },
+  { fixtureName: "react-provider-accessor-replacement", expected: 1 },
 ];
 
 describe("status getter corpus roles", () => {
