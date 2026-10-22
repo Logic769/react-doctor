@@ -1,0 +1,7 @@
+---
+"react-doctor": patch
+"eslint-plugin-react-doctor": patch
+"oxlint-plugin-react-doctor": patch
+---
+
+Preserve iframe readiness flags consumed by a synchronous native message request when checking prop-driven state resets. Recognize the bounded same-frame listener and forwarded native iframe path, retain reports for unsupported or mutated protocols, and track immediate module dependencies across scan epochs.

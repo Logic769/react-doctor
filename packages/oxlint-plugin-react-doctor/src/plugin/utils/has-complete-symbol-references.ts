@@ -2,38 +2,9 @@ import type { ScopeAnalysis, SymbolDescriptor } from "../semantic/scope-analysis
 import type { EsTreeNode } from "./es-tree-node.js";
 import { getImportDeclarationForSymbol } from "./get-import-declaration-for-symbol.js";
 import { isNodeOfType } from "./is-node-of-type.js";
+import { isNonReferenceIdentifier } from "./is-non-reference-identifier.js";
 import { isTypeScriptTypePosition } from "./is-typescript-type-position.js";
 import { walkAst } from "./walk-ast.js";
-
-const isNonReferenceName = (node: EsTreeNode): boolean => {
-  const parent = node.parent;
-  if (!parent) return false;
-  if (isNodeOfType(parent, "MemberExpression")) return parent.property === node && !parent.computed;
-  if (isNodeOfType(parent, "Property")) {
-    return parent.key === node && !parent.computed && (!parent.shorthand || parent.value !== node);
-  }
-  if (isNodeOfType(parent, "MethodDefinition") || isNodeOfType(parent, "PropertyDefinition")) {
-    return parent.key === node && !parent.computed;
-  }
-  if (isNodeOfType(parent, "JSXAttribute")) return parent.name === node;
-  if (isNodeOfType(parent, "JSXMemberExpression")) return parent.property === node;
-  if (isNodeOfType(parent, "ImportSpecifier"))
-    return parent.imported === node && parent.local !== node;
-  if (isNodeOfType(parent, "ExportSpecifier"))
-    return parent.exported === node && parent.local !== node;
-  if (
-    isNodeOfType(parent, "LabeledStatement") ||
-    isNodeOfType(parent, "BreakStatement") ||
-    isNodeOfType(parent, "ContinueStatement")
-  )
-    return parent.label === node;
-  return (
-    isNodeOfType(node, "JSXIdentifier") &&
-    /^[a-z]/.test(node.name) &&
-    (isNodeOfType(parent, "JSXOpeningElement") || isNodeOfType(parent, "JSXClosingElement")) &&
-    parent.name === node
-  );
-};
 
 const hasRuntimeTypeScriptAncestor = (node: EsTreeNode): boolean => {
   let ancestor = node.parent;
@@ -83,7 +54,7 @@ export const hasCompleteSymbolReferences = (
       (!isNodeOfType(node, "Identifier") && !isNodeOfType(node, "JSXIdentifier")) ||
       node.name !== symbol.name ||
       node === symbol.bindingIdentifier ||
-      isNonReferenceName(node)
+      isNonReferenceIdentifier(node)
     )
       return;
     const resolved = scopes.symbolFor(node);
