@@ -44,3 +44,7 @@ export const NATIVE_MEDIA_REF_PROTOTYPE_KEYS: ReadonlySet<string> = new Set([
   "__proto__",
   "constructor",
 ]);
+
+export const NATIVE_MEDIA_SMALL_COMPONENT_COUNT = 16;
+export const NATIVE_MEDIA_LARGE_COMPONENT_COUNT = 64;
+export const NATIVE_MEDIA_MAXIMUM_PROVIDER_LOOKUP_GROWTH_MULTIPLIER = 6;
