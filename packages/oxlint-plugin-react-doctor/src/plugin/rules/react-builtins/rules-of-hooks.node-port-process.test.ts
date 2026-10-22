@@ -1,3 +1,4 @@
+import { resetParseSourceFileCache } from "../../utils/parse-source-file.js";
 import { resetTsconfigAliasCaches } from "../../utils/resolve-tsconfig-alias.js";
 import { resetModuleResolutionCaches } from "../../utils/resolve-relative-import-path.js";
 import * as fs from "node:fs";
@@ -774,6 +775,47 @@ describe("memoized Node utility proofs", () => {
     expect(result.parseErrors).toEqual([]);
     expect(exercised).toBe(true);
   });
+
+  for (const initiallyAccepted of [false, true]) {
+    for (const recording of [false, true]) {
+      it(`refreshes ${initiallyAccepted ? "accepted" : "refused"} origins after a parser-only reset with recording ${recording}`, () => {
+        const filename = writeFile("src/start.js", consumer);
+        const refusedProvider = provider.replace(
+          "module.exports = openTerminal;",
+          "module.exports = console.log;",
+        );
+        expect(refusedProvider).not.toBe(provider);
+        const setProvider = (accepted: boolean): void => {
+          writeFile("src/terminal.js", accepted ? provider : refusedProvider);
+        };
+        setProvider(initiallyAccepted);
+        resetFilesystemCaches();
+        const outcomes: boolean[] = [];
+        const probe: Rule = {
+          ...certificateProbe,
+          create: (context) => ({
+            CallExpression: (node) => {
+              if (node.callee.type !== "Identifier" || node.callee.name !== "useTerminal") return;
+              const inspect = (): void => {
+                const evaluate = (): boolean => isImportedNodePortProcessUtility(node, context);
+                outcomes.push(recording ? captureCrossFileProbes(evaluate).value : evaluate());
+              };
+              inspect();
+              setProvider(!initiallyAccepted);
+              resetParseSourceFileCache();
+              inspect();
+              setProvider(initiallyAccepted);
+              resetParseSourceFileCache();
+              inspect();
+            },
+          }),
+        };
+        const result = runRule(probe, consumer, { filename });
+        expect(result.parseErrors).toEqual([]);
+        expect(outcomes).toEqual([initiallyAccepted, !initiallyAccepted, initiallyAccepted]);
+      });
+    }
+  }
 
   for (const resetKind of ["alias", "resolution"]) {
     for (const initiallyMapped of [false, true]) {
