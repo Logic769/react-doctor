@@ -60,7 +60,6 @@ interface ReadinessModule {
 
 interface ReadinessReferenceProofs {
   readonly program: EsTreeNode;
-  readonly complete: WeakMap<SymbolDescriptor, boolean>;
   readonly reactCalls: WeakMap<SymbolDescriptor, boolean>;
 }
 
@@ -70,11 +69,19 @@ const immediateModuleScopes = new WeakMap<EsTreeNode, ScopeAnalysis>();
 const getReferenceProofs = (module: ReadinessModule): ReadinessReferenceProofs => {
   let proofs = referenceProofsByScopes.get(module.scopes);
   if (proofs?.program !== module.program) {
-    proofs = { program: module.program, complete: new WeakMap(), reactCalls: new WeakMap() };
+    proofs = { program: module.program, reactCalls: new WeakMap() };
     referenceProofsByScopes.set(module.scopes, proofs);
   }
   return proofs;
 };
+
+interface ReadinessClosedProgramProof {
+  readonly program: EsTreeNode;
+  readonly closed: boolean;
+  readonly topLevelCalls: readonly EsTreeNode[];
+}
+
+const closedProgramsByScopes = new WeakMap<ScopeAnalysis, ReadinessClosedProgramProof>();
 
 interface ReadinessBridge {
   readonly send: SymbolDescriptor;
@@ -92,14 +99,8 @@ const hasOnlyReferences = (
   module: ReadinessModule,
   accepts: (node: EsTreeNode) => boolean,
 ): boolean => {
-  const proofs = getReferenceProofs(module);
-  let complete = proofs.complete.get(binding);
-  if (complete === undefined) {
-    complete = hasCompleteSymbolReferences(binding, module.program, module.scopes);
-    proofs.complete.set(binding, complete);
-  }
   return (
-    complete &&
+    hasCompleteSymbolReferences(binding, module.program, module.scopes) &&
     binding.references.every(
       (reference) =>
         isNonReferenceIdentifier(reference.identifier) ||
@@ -200,9 +201,11 @@ const isReactCall = (node: EsTreeNode, name: string, module: ReadinessModule): b
   return reactCalls;
 };
 
-const isClosedProgram = (module: ReadinessModule, sourceText: string): boolean => {
-  if (sourceText.includes("@jsx")) return false;
+const getClosedProgramProof = (module: ReadinessModule): ReadinessClosedProgramProof => {
+  const cached = closedProgramsByScopes.get(module.scopes);
+  if (cached?.program === module.program) return cached;
   let closed = true;
+  const topLevelCalls: EsTreeNode[] = [];
   walkAst(module.program, (node) => {
     if (!closed) return false;
     if (
@@ -293,12 +296,8 @@ const isClosedProgram = (module: ReadinessModule, sourceText: string): boolean =
         (getStaticPropertyKeyName(node) === "getFiles" && isFunctionLike(node.value)))
     )
       closed = false;
-    if (
-      isNodeOfType(node, "CallExpression") &&
-      !findEnclosingFunction(node) &&
-      !isReactCall(node, "forwardRef", module)
-    )
-      closed = false;
+    if (isNodeOfType(node, "CallExpression") && !findEnclosingFunction(node))
+      topLevelCalls.push(node);
     if (isNodeOfType(node, "MemberExpression") && node.computed) closed = false;
     if (isNodeOfType(node, "JSXSpreadAttribute")) closed = false;
     if (isNodeOfType(node, "JSXAttribute") && getJsxAttributeName(node.name) === "is")
@@ -352,7 +351,17 @@ const isClosedProgram = (module: ReadinessModule, sourceText: string): boolean =
         closed = false;
     }
   });
-  return closed;
+  const proof = { program: module.program, closed, topLevelCalls };
+  closedProgramsByScopes.set(module.scopes, proof);
+  return proof;
+};
+
+const isClosedProgram = (module: ReadinessModule, sourceText: string): boolean => {
+  if (sourceText.includes("@jsx")) return false;
+  const proof = getClosedProgramProof(module);
+  return (
+    proof.closed && proof.topLevelCalls.every((call) => isReactCall(call, "forwardRef", module))
+  );
 };
 
 const loadImmediateModule = (

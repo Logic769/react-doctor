@@ -1,3 +1,5 @@
+import { parseSourceFile } from "../../utils/parse-source-file.js";
+import { resetTsconfigAliasCaches } from "../../utils/resolve-tsconfig-alias.js";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -8,6 +10,7 @@ import {
   PROVIDER_PROOF_SMALL_COMPONENT_COUNT,
   PROVIDER_PROOF_LARGE_COMPONENT_COUNT,
   PROVIDER_PROOF_MAX_GROWTH_RATIO,
+  PROVIDER_PROOF_MAX_SHARED_MODULE_GROWTH_RATIO,
 } from "../../../test-utils/constants.js";
 import * as astWalking from "../../utils/walk-ast.js";
 import { collectCrossFileDependencyProbes } from "../../cross-file-dependencies.js";
@@ -719,6 +722,103 @@ it("keeps warm reference proofs separate from live resolver and provider checks"
       expect(result.parseErrors).toEqual([]);
       expect(result.diagnostics).toHaveLength(Number(code.includes("observe(useEffect)")));
     }
+  } finally {
+    resetFilesystemCaches();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+it("amortizes closed provider syntax across independent accepted consumers", () => {
+  const countProviderWalks = (componentCount: number): number => {
+    const directory = mkdtempSync(join(tmpdir(), "readiness-shared-provider-growth-"));
+    try {
+      for (const [relative, contents] of Object.entries(fixture.files)) {
+        const filename = join(directory, relative);
+        mkdirSync(dirname(filename), { recursive: true });
+        writeFileSync(filename, contents);
+      }
+      resetFilesystemCaches();
+      const provider = parseSourceFile(join(directory, "Frame.tsx"));
+      if (!provider) throw new Error("Expected parsed frame provider");
+      let walks = 0;
+      const walkAst = astWalking.walkAst;
+      const traversal = vi.spyOn(astWalking, "walkAst").mockImplementation((node, visitor) => {
+        if (node === provider) walks++;
+        return walkAst(node, visitor);
+      });
+      try {
+        for (let index = 0; index < componentCount; index++) {
+          const filename = join(directory, `Panel${index}.tsx`);
+          const code = fixture.files["Panel.tsx"].replace("TransferPanel", `TransferPanel${index}`);
+          writeFileSync(filename, code);
+          const result = runRule(noResetAllStateOnPropChange, code, { filename });
+          expect(result.parseErrors).toEqual([]);
+          expect(result.diagnostics).toEqual([]);
+        }
+      } finally {
+        traversal.mockRestore();
+      }
+      return walks;
+    } finally {
+      resetFilesystemCaches();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  };
+  const small = countProviderWalks(PROVIDER_PROOF_SMALL_COMPONENT_COUNT);
+  const large = countProviderWalks(PROVIDER_PROOF_LARGE_COMPONENT_COUNT);
+  expect(small).toBeGreaterThan(0);
+  expect(large).toBeLessThan(small * PROVIDER_PROOF_MAX_SHARED_MODULE_GROWTH_RATIO);
+});
+
+it("keeps cached closed syntax separate from source pragmas and live provider React resolution", () => {
+  const directory = mkdtempSync(join(tmpdir(), "readiness-closed-provider-replay-"));
+  try {
+    const providerFilename = join(directory, "frame/Frame.tsx");
+    const code = fixture.files["Panel.tsx"].replace("./Frame", "./frame/Frame");
+    expect(code).not.toBe(fixture.files["Panel.tsx"]);
+    for (const [relative, contents] of Object.entries(fixture.files)) {
+      const filename = relative === "Frame.tsx" ? providerFilename : join(directory, relative);
+      mkdirSync(dirname(filename), { recursive: true });
+      writeFileSync(filename, relative === "Panel.tsx" ? code : contents);
+    }
+    resetFilesystemCaches();
+    const provider = parseSourceFile(providerFilename);
+    if (!provider) throw new Error("Expected parsed frame provider");
+    const certificates: boolean[] = [];
+    let didReplay = false;
+    const replay: Rule = {
+      id: "test-closed-readiness-provider-replay",
+      severity: "error",
+      create: (context) => ({
+        CallExpression: (node: EsTreeNodeOfType<"CallExpression">) => {
+          if (didReplay || !hasNativeIframeReadinessConsumption(node, context)) return;
+          didReplay = true;
+          certificates.push(true);
+          certificates.push(
+            hasNativeIframeReadinessConsumption(node, {
+              ...context,
+              sourceText: "/** @jsx custom */\n" + code,
+            }),
+          );
+          certificates.push(hasNativeIframeReadinessConsumption(node, context));
+          writeFileSync(join(directory, "frame/replacement.ts"), "export const forwardRef=custom;");
+          writeFileSync(
+            join(directory, "frame/tsconfig.json"),
+            '{"compilerOptions":{"paths":{"react":["./replacement.ts"]}}}',
+          );
+          resetTsconfigAliasCaches();
+          expect(parseSourceFile(providerFilename)).toBe(provider);
+          certificates.push(hasNativeIframeReadinessConsumption(node, context));
+          writeFileSync(join(directory, "frame/tsconfig.json"), "{}");
+          resetTsconfigAliasCaches();
+          expect(parseSourceFile(providerFilename)).toBe(provider);
+          certificates.push(hasNativeIframeReadinessConsumption(node, context));
+        },
+      }),
+    };
+    const result = runRule(replay, code, { filename: join(directory, "Panel.tsx") });
+    expect(result.parseErrors).toEqual([]);
+    expect(certificates).toEqual([true, false, true, false, true]);
   } finally {
     resetFilesystemCaches();
     rmSync(directory, { recursive: true, force: true });
