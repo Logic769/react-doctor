@@ -1,5 +1,5 @@
 import { CANONICAL_REACT_REQUIRE_ARGUMENT_COUNT } from "../constants/react.js";
-import type { ScopeAnalysis } from "../semantic/scope-analysis.js";
+import type { ScopeAnalysis, SymbolDescriptor } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
 import { findTransparentExpressionRoot } from "./find-transparent-expression-root.js";
 import { getEquivalentSymbols } from "./get-equivalent-symbols.js";
@@ -22,6 +22,7 @@ import { isNumericDataMemberAccess } from "./is-numeric-data-member-access.js";
 import { isMemberMutationTarget } from "./is-member-mutation-target.js";
 import { isNodeOfType } from "./is-node-of-type.js";
 import { isNonEscapingReactApiReference } from "./is-non-escaping-react-api-reference.js";
+import { isReactApiCall } from "./is-react-api-call.js";
 import { isProvenUnmodifiedReactApiCall } from "./is-proven-unmodified-react-api-call.js";
 import { stripParenExpression } from "./strip-paren-expression.js";
 import { walkAst } from "./walk-ast.js";
@@ -45,6 +46,15 @@ interface LocalReactStateCallOptions {
   readonly propTypesObjectValidator?: (node: EsTreeNode) => boolean;
 }
 
+interface LocalReactStateProgramFacts {
+  providerCalls: Map<SymbolDescriptor, boolean>;
+  hasProviderMutation: boolean | null;
+  providerSymbolIds: Set<number> | null;
+  providerHazards: Map<EsTreeNode | null, Map<boolean, boolean>>;
+}
+
+const programFacts = new WeakMap<ScopeAnalysis, WeakMap<EsTreeNode, LocalReactStateProgramFacts>>();
+
 export const isUnmodifiedLocalReactStateCall = (
   call: EsTreeNode,
   scopes: ScopeAnalysis,
@@ -55,6 +65,22 @@ export const isUnmodifiedLocalReactStateCall = (
   const receiver = getRootIdentifier(callee);
   const symbol = receiver ? scopes.symbolFor(receiver) : null;
   if (!receiver || !symbol) return false;
+  let scopeFacts = programFacts.get(scopes);
+  if (!scopeFacts) {
+    scopeFacts = new WeakMap();
+    programFacts.set(scopes, scopeFacts);
+  }
+  const program = scopes.rootScope.node;
+  let facts = scopeFacts.get(program);
+  if (!facts) {
+    facts = {
+      providerCalls: new Map(),
+      hasProviderMutation: null,
+      providerSymbolIds: null,
+      providerHazards: new Map(),
+    };
+    scopeFacts.set(program, facts);
+  }
   const importDeclaration = getImportDeclarationForSymbol(symbol);
   let allowedRequire: EsTreeNode | null = null;
   if (importDeclaration) {
@@ -62,10 +88,16 @@ export const isUnmodifiedLocalReactStateCall = (
       importDeclaration.importKind === "type" ||
       (isNodeOfType(symbol.declarationNode, "ImportSpecifier") &&
         symbol.declarationNode.importKind === "type") ||
-      !isProvenUnmodifiedReactApiCall(call, "useState", scopes)
+      !isReactApiCall(call, "useState", scopes)
     ) {
       return false;
     }
+    let validProvider = facts.providerCalls.get(symbol);
+    if (validProvider === undefined) {
+      validProvider = isProvenUnmodifiedReactApiCall(call, "useState", scopes);
+      facts.providerCalls.set(symbol, validProvider);
+    }
+    if (!validProvider) return false;
   } else {
     const declaration = symbol.declarationNode;
     const initializer = symbol.initializer ? stripParenExpression(symbol.initializer) : null;
@@ -80,38 +112,58 @@ export const isUnmodifiedLocalReactStateCall = (
       initializer.arguments.length !== CANONICAL_REACT_REQUIRE_ARGUMENT_COUNT ||
       initializer.optional ||
       initializer.range[1] > call.range[0] ||
-      getGlobalRequireModuleSource(initializer, scopes) !== "react" ||
-      symbol.references.some((reference) => {
-        if (reference.flag !== "read" || isBindingAssignmentTarget(reference.identifier)) {
-          return true;
-        }
-        const referenceRoot = findTransparentExpressionRoot(reference.identifier);
-        const member = referenceRoot.parent;
-        if (!isNodeOfType(member, "MemberExpression") || member.object !== referenceRoot) {
-          return true;
-        }
-        const propertyName = getStaticPropertyName(member);
-        return (
-          propertyName === null ||
-          propertyName === "default" ||
-          (propertyName === "useState" && !isNonEscapingReactApiReference(member))
-        );
-      }) ||
-      hasPossibleStaticPropertyMutationOrEscape(receiver, "useState", scopes)
+      getGlobalRequireModuleSource(initializer, scopes) !== "react"
     ) {
       return false;
     }
+    let validProvider = facts.providerCalls.get(symbol);
+    if (validProvider === undefined) {
+      validProvider = !(
+        symbol.references.some((reference) => {
+          if (reference.flag !== "read" || isBindingAssignmentTarget(reference.identifier)) {
+            return true;
+          }
+          const referenceRoot = findTransparentExpressionRoot(reference.identifier);
+          const member = referenceRoot.parent;
+          if (!isNodeOfType(member, "MemberExpression") || member.object !== referenceRoot) {
+            return true;
+          }
+          const propertyName = getStaticPropertyName(member);
+          return (
+            propertyName === null ||
+            propertyName === "default" ||
+            (propertyName === "useState" && !isNonEscapingReactApiReference(member))
+          );
+        }) || hasPossibleStaticPropertyMutationOrEscape(receiver, "useState", scopes)
+      );
+      facts.providerCalls.set(symbol, validProvider);
+    }
+    if (!validProvider) return false;
     allowedRequire = initializer;
   }
-  if (hasReactDefaultProviderMutation("useState", scopes)) return false;
-  const providerSymbolIds = new Set<number>();
-  for (const provider of scopes.rootScope.symbols) {
-    const declaration = getImportDeclarationForSymbol(provider);
-    if (declaration?.source.value !== "react") continue;
-    for (const equivalent of getEquivalentSymbols(provider.bindingIdentifier, scopes)) {
-      providerSymbolIds.add(equivalent.id);
+  if (facts.hasProviderMutation === null) {
+    facts.hasProviderMutation = hasReactDefaultProviderMutation("useState", scopes);
+  }
+  if (facts.hasProviderMutation) return false;
+  if (!facts.providerSymbolIds) {
+    facts.providerSymbolIds = new Set();
+    for (const provider of scopes.rootScope.symbols) {
+      const declaration = getImportDeclarationForSymbol(provider);
+      if (declaration?.source.value !== "react") continue;
+      for (const equivalent of getEquivalentSymbols(provider.bindingIdentifier, scopes)) {
+        facts.providerSymbolIds.add(equivalent.id);
+      }
     }
   }
+  let providerHazards = facts.providerHazards.get(allowedRequire);
+  if (!providerHazards) {
+    providerHazards = new Map();
+    facts.providerHazards.set(allowedRequire, providerHazards);
+  }
+  const allowNumericDataAccess = Boolean(options.allowNumericDataAccess);
+  const cachedHazard = providerHazards.get(allowNumericDataAccess);
+  if (cachedHazard !== undefined) return !cachedHazard;
+  const providerSymbolIds = new Set(facts.providerSymbolIds);
   if (allowedRequire) providerSymbolIds.add(symbol.id);
   let hasProviderHazard = false;
   walkAst(scopes.rootScope.node, (child) => {
@@ -250,5 +302,6 @@ export const isUnmodifiedLocalReactStateCall = (
       hasProviderHazard = true;
     }
   });
+  providerHazards.set(allowNumericDataAccess, hasProviderHazard);
   return !hasProviderHazard;
 };
