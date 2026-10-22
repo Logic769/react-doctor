@@ -45,3 +45,7 @@ export const IMPORTED_MEDIA_REACT_API_NAMES: ReadonlySet<string> = new Set([
   "useEffect",
   "useState",
 ]);
+
+export const NATIVE_MEDIA_SMALL_COMPONENT_COUNT = 16;
+export const NATIVE_MEDIA_LARGE_COMPONENT_COUNT = 64;
+export const NATIVE_MEDIA_MAXIMUM_PROVIDER_LOOKUP_GROWTH_MULTIPLIER = 6;

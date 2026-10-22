@@ -11,7 +11,6 @@ import { getResolvedStaticPropertyName } from "../../../utils/get-resolved-stati
 import { getStaticPropertyName } from "../../../utils/get-static-property-name.js";
 import { getUninterruptedConstInitializer } from "../../../utils/get-uninterrupted-const-initializer.js";
 import { hasReactDefaultProviderMutation } from "../../../utils/has-react-default-provider-mutation.js";
-import { isReactApiCall } from "../../../utils/is-react-api-call.js";
 import { isBindingAssignmentTarget } from "../../../utils/is-binding-assignment-target.js";
 import { isFunctionLike } from "../../../utils/is-function-like.js";
 import { isMemberMutationTarget } from "../../../utils/is-member-mutation-target.js";
@@ -20,6 +19,7 @@ import {
   isProvenGlobalNamespaceReference,
   isProvenGlobalObjectReference,
 } from "../../../utils/is-proven-global-namespace-reference.js";
+import { isReactApiCall } from "../../../utils/is-react-api-call.js";
 import { isProvenUnmodifiedReactApiCall } from "../../../utils/is-proven-unmodified-react-api-call.js";
 import { isTypeScriptTypePosition } from "../../../utils/is-typescript-type-position.js";
 import { isUnmodifiedLocalReactStateCall } from "../../../utils/is-unmodified-local-react-state-call.js";
@@ -43,28 +43,80 @@ interface NativeMediaCapabilityPredicateInput {
   executionNode?: EsTreeNode;
 }
 
-interface NativeMediaProgramProofs {
-  stateProviderProofs: WeakMap<SymbolDescriptor, boolean>;
-  effectProviderProofs: WeakMap<SymbolDescriptor, boolean>;
+interface NativeMediaCapabilityFacts {
+  readonly reactEffectProviders: Map<SymbolDescriptor, boolean>;
+  readonly readonlyBindings: Map<SymbolDescriptor, boolean>;
+  readonly mediaCallbacks: WeakMap<EsTreeNode, boolean>;
+  readonly mediaReceiverReferences: WeakMap<EsTreeNode, Map<SymbolDescriptor, boolean>>;
   hasProviderHazard?: boolean;
 }
 
-const nativeMediaProgramProofs = new WeakMap<ScopeAnalysis, NativeMediaProgramProofs>();
+const nativeMediaFactsByScopes = new WeakMap<
+  ScopeAnalysis,
+  WeakMap<EsTreeNode, NativeMediaCapabilityFacts>
+>();
 
-const getNativeMediaProgramProofs = (scopes: ScopeAnalysis): NativeMediaProgramProofs => {
-  let proofs = nativeMediaProgramProofs.get(scopes);
-  if (!proofs) {
-    proofs = { stateProviderProofs: new WeakMap(), effectProviderProofs: new WeakMap() };
-    nativeMediaProgramProofs.set(scopes, proofs);
+const getNativeMediaCapabilityFacts = (context: RuleContext): NativeMediaCapabilityFacts => {
+  let factsByProgram = nativeMediaFactsByScopes.get(context.scopes);
+  if (!factsByProgram) {
+    factsByProgram = new WeakMap();
+    nativeMediaFactsByScopes.set(context.scopes, factsByProgram);
   }
-  return proofs;
+  const program = context.scopes.rootScope.node;
+  let facts = factsByProgram.get(program);
+  if (!facts) {
+    facts = {
+      reactEffectProviders: new Map(),
+      readonlyBindings: new Map(),
+      mediaCallbacks: new WeakMap(),
+      mediaReceiverReferences: new WeakMap(),
+    };
+    factsByProgram.set(program, facts);
+  }
+  return facts;
 };
 
-const isReadonlyBinding = (symbol: SymbolDescriptor): boolean =>
-  symbol.kind === "const" &&
-  symbol.references.every(
-    (reference) => reference.flag === "read" && !isBindingAssignmentTarget(reference.identifier),
-  );
+const hasUnmodifiedMediaReactEffect = (call: EsTreeNode, context: RuleContext): boolean => {
+  if (!isNodeOfType(call, "CallExpression") || !isReactApiCall(call, "useEffect", context.scopes))
+    return false;
+  const identifier = getRootIdentifier(call.callee);
+  const symbol = identifier ? context.scopes.symbolFor(identifier) : null;
+  if (!symbol) return false;
+  const facts = getNativeMediaCapabilityFacts(context);
+  const cached = facts.reactEffectProviders.get(symbol);
+  if (cached !== undefined) return cached;
+  const proven =
+    isProvenUnmodifiedReactApiCall(call, "useEffect", context.scopes) &&
+    !hasReactDefaultProviderMutation("useEffect", context.scopes);
+  facts.reactEffectProviders.set(symbol, proven);
+  return proven;
+};
+
+const isReadonlyBinding = (symbol: SymbolDescriptor, context: RuleContext): boolean => {
+  const facts = getNativeMediaCapabilityFacts(context);
+  const cached = facts.readonlyBindings.get(symbol);
+  if (cached !== undefined) return cached;
+  const readonly =
+    symbol.kind === "const" &&
+    symbol.references.every(
+      (reference) => reference.flag === "read" && !isBindingAssignmentTarget(reference.identifier),
+    );
+  facts.readonlyBindings.set(symbol, readonly);
+  return readonly;
+};
+
+const hasNativeMediaCall = (callback: EsTreeNode, context: RuleContext): boolean => {
+  const facts = getNativeMediaCapabilityFacts(context);
+  const cached = facts.mediaCallbacks.get(callback);
+  if (cached !== undefined) return cached;
+  let hasMediaCall = false;
+  walkAst(callback, (node) => {
+    if (node !== callback && isFunctionLike(node)) return false;
+    if (isOrdinaryMemberCall(node, "canPlayType")) hasMediaCall = true;
+  });
+  facts.mediaCallbacks.set(callback, hasMediaCall);
+  return hasMediaCall;
+};
 
 const hasCanonicalReactImport = (call: EsTreeNode, context: RuleContext): boolean => {
   if (!isNodeOfType(call, "CallExpression") || call.optional) return false;
@@ -78,34 +130,6 @@ const hasCanonicalReactImport = (call: EsTreeNode, context: RuleContext): boolea
     (!isNodeOfType(symbol?.declarationNode, "ImportSpecifier") ||
       symbol.declarationNode.importKind !== "type"),
   );
-};
-
-const isUnmodifiedNativeReactProviderCall = (
-  call: EsTreeNode,
-  apiName: "useState" | "useEffect",
-  context: RuleContext,
-): boolean => {
-  if (
-    !isNodeOfType(call, "CallExpression") ||
-    !hasCanonicalReactImport(call, context) ||
-    !isReactApiCall(call, apiName, context.scopes)
-  )
-    return false;
-  const identifier = getRootIdentifier(call.callee);
-  const symbol = identifier ? context.scopes.symbolFor(identifier) : null;
-  if (!symbol || symbol.kind !== "import") return false;
-  const programProofs = getNativeMediaProgramProofs(context.scopes);
-  const providerProofs =
-    apiName === "useState" ? programProofs.stateProviderProofs : programProofs.effectProviderProofs;
-  const cachedProof = providerProofs.get(symbol);
-  if (cachedProof !== undefined) return cachedProof;
-  const proof =
-    apiName === "useState"
-      ? isUnmodifiedLocalReactStateCall(call, context.scopes)
-      : isProvenUnmodifiedReactApiCall(call, apiName, context.scopes) &&
-        !hasReactDefaultProviderMutation(apiName, context.scopes);
-  providerProofs.set(symbol, proof);
-  return proof;
 };
 
 const isOrdinaryMemberCall = (node: EsTreeNode, memberName: string): boolean =>
@@ -134,6 +158,88 @@ const isFreshMediaElement = (node: EsTreeNode, context: RuleContext): boolean =>
   );
 };
 
+const hasNativeMediaProviderHazard = (context: RuleContext): boolean => {
+  const facts = getNativeMediaCapabilityFacts(context);
+  if (facts.hasProviderHazard !== undefined) return facts.hasProviderHazard;
+  let hasProviderHazard = false;
+  walkAst(context.scopes.rootScope.node, (node) => {
+    if (hasProviderHazard) return false;
+    if (isTypeScriptTypePosition(node)) return false;
+    if (
+      (isNodeOfType(node, "MemberExpression") && isMemberMutationTarget(node)) ||
+      isProvenGlobalObjectReference(node, context.scopes) ||
+      [...NATIVE_MEDIA_PROVIDER_NAMES].some((provider) =>
+        isProvenGlobalNamespaceReference(node, provider, context.scopes),
+      ) ||
+      ((isNodeOfType(node, "MemberExpression") ||
+        (isNodeOfType(node, "Property") && isNodeOfType(node.parent, "ObjectPattern"))) &&
+        getResolvedStaticPropertyName(node, context.scopes) === "__proto__")
+    ) {
+      hasProviderHazard = true;
+      return false;
+    }
+    if (
+      !isNodeOfType(node, "Identifier") ||
+      node.name !== "document" ||
+      !context.scopes.isGlobalReference(node)
+    )
+      return;
+    const member = findTransparentExpressionRoot(node).parent;
+    const call = member ? findTransparentExpressionRoot(member).parent : null;
+    if (
+      !isNodeOfType(member, "MemberExpression") ||
+      !isNodeOfType(call, "CallExpression") ||
+      !isFreshMediaElement(call, context)
+    )
+      hasProviderHazard = true;
+  });
+  facts.hasProviderHazard = hasProviderHazard;
+  return hasProviderHazard;
+};
+
+const hasClosedMediaReceiverReferences = (
+  symbol: SymbolDescriptor,
+  effectFunction: EsTreeNode,
+  context: RuleContext,
+): boolean => {
+  const facts = getNativeMediaCapabilityFacts(context);
+  let proofs = facts.mediaReceiverReferences.get(effectFunction);
+  if (!proofs) {
+    proofs = new Map();
+    facts.mediaReceiverReferences.set(effectFunction, proofs);
+  }
+  const cached = proofs.get(symbol);
+  if (cached !== undefined) return cached;
+  const aliases = getEquivalentSymbols(symbol.bindingIdentifier, context.scopes);
+  const isClosed = !aliases.some(
+    (alias) =>
+      !isReadonlyBinding(alias, context) ||
+      alias.references.some((reference) => {
+        const root = findTransparentExpressionRoot(reference.identifier);
+        const parent = root.parent;
+        if (findEnclosingFunction(reference.identifier) !== effectFunction) return true;
+        if (
+          isNodeOfType(parent, "VariableDeclarator") &&
+          parent.init === root &&
+          isNodeOfType(parent.id, "Identifier") &&
+          isNodeOfType(parent.parent, "VariableDeclaration") &&
+          parent.parent.kind === "const"
+        )
+          return false;
+        const call = parent ? findTransparentExpressionRoot(parent).parent : null;
+        return (
+          !isNodeOfType(parent, "MemberExpression") ||
+          parent.object !== root ||
+          !call ||
+          !isOrdinaryMemberCall(call, "canPlayType")
+        );
+      }),
+  );
+  for (const alias of aliases) proofs.set(alias, isClosed);
+  proofs.set(symbol, isClosed);
+  return isClosed;
+};
+
 export const createNativeMediaCapabilityPredicate = ({
   context,
   effectNode,
@@ -143,15 +249,10 @@ export const createNativeMediaCapabilityPredicate = ({
 }: NativeMediaCapabilityPredicateInput): ((expression: EsTreeNode) => boolean) | null => {
   if (!isNodeOfType(stateDeclarator, "VariableDeclarator") || !isFunctionLike(effectFunction))
     return null;
-  let hasMediaCall = false;
-  walkAst(effectFunction, (node) => {
-    if (node !== effectFunction && isFunctionLike(node)) return false;
-    if (isOrdinaryMemberCall(node, "canPlayType")) hasMediaCall = true;
-  });
   const importedPredicate = executionNode
     ? createImportedNativeMediaGuardPredicate({ context, effectFunction, executionNode })
     : null;
-  if (!hasMediaCall && !importedPredicate) return null;
+  if (!hasNativeMediaCall(effectFunction, context) && !importedPredicate) return null;
   const stateCall = stateDeclarator.init ? stripParenExpression(stateDeclarator.init) : null;
   const effectArgument = isNodeOfType(effectNode, "CallExpression")
     ? effectNode.arguments[FIRST_ARGUMENT_INDEX]
@@ -159,8 +260,10 @@ export const createNativeMediaCapabilityPredicate = ({
   if (
     !stateCall ||
     !effectArgument ||
-    !isUnmodifiedNativeReactProviderCall(stateCall, "useState", context) ||
-    !isUnmodifiedNativeReactProviderCall(effectNode, "useEffect", context) ||
+    !hasCanonicalReactImport(stateCall, context) ||
+    !isUnmodifiedLocalReactStateCall(stateCall, context.scopes) ||
+    !hasCanonicalReactImport(effectNode, context) ||
+    !hasUnmodifiedMediaReactEffect(effectNode, context) ||
     !isNodeOfType(effectNode, "CallExpression") ||
     stripParenExpression(effectArgument) !== effectFunction ||
     !isNodeOfType(stateDeclarator.id, "ArrayPattern") ||
@@ -172,48 +275,11 @@ export const createNativeMediaCapabilityPredicate = ({
     stateDeclarator.id.elements.some((binding) => {
       if (!isNodeOfType(binding, "Identifier")) return true;
       const symbol = context.scopes.symbolFor(binding);
-      return !symbol || !isReadonlyBinding(symbol);
+      return !symbol || !isReadonlyBinding(symbol, context);
     })
   )
     return null;
-  const programProofs = getNativeMediaProgramProofs(context.scopes);
-  let hasProviderHazard = programProofs.hasProviderHazard;
-  if (hasProviderHazard === undefined) {
-    hasProviderHazard = false;
-    walkAst(context.scopes.rootScope.node, (node) => {
-      if (hasProviderHazard) return false;
-      if (isTypeScriptTypePosition(node)) return false;
-      if (
-        (isNodeOfType(node, "MemberExpression") && isMemberMutationTarget(node)) ||
-        isProvenGlobalObjectReference(node, context.scopes) ||
-        [...NATIVE_MEDIA_PROVIDER_NAMES].some((provider) =>
-          isProvenGlobalNamespaceReference(node, provider, context.scopes),
-        ) ||
-        ((isNodeOfType(node, "MemberExpression") ||
-          (isNodeOfType(node, "Property") && isNodeOfType(node.parent, "ObjectPattern"))) &&
-          getResolvedStaticPropertyName(node, context.scopes) === "__proto__")
-      ) {
-        hasProviderHazard = true;
-        return false;
-      }
-      if (
-        !isNodeOfType(node, "Identifier") ||
-        node.name !== "document" ||
-        !context.scopes.isGlobalReference(node)
-      )
-        return;
-      const member = findTransparentExpressionRoot(node).parent;
-      const call = member ? findTransparentExpressionRoot(member).parent : null;
-      if (
-        !isNodeOfType(member, "MemberExpression") ||
-        !isNodeOfType(call, "CallExpression") ||
-        !isFreshMediaElement(call, context)
-      )
-        hasProviderHazard = true;
-    });
-    programProofs.hasProviderHazard = hasProviderHazard;
-  }
-  if (hasProviderHazard) return null;
+  if (hasNativeMediaProviderHazard(context)) return null;
 
   const resolveValue = (
     expression: EsTreeNode,
@@ -232,43 +298,15 @@ export const createNativeMediaCapabilityPredicate = ({
     if (
       !symbol ||
       visited.has(symbol.id) ||
-      !isReadonlyBinding(symbol) ||
+      !isReadonlyBinding(symbol, context) ||
       findEnclosingFunction(symbol.declarationNode) !== effectFunction
     )
       return null;
     const initializer = getUninterruptedConstInitializer(node, context);
     if (!initializer) return null;
     visited.add(symbol.id);
-    if (isReceiver) {
-      const aliases = getEquivalentSymbols(symbol.bindingIdentifier, context.scopes);
-      if (
-        aliases.some(
-          (alias) =>
-            !isReadonlyBinding(alias) ||
-            alias.references.some((reference) => {
-              const root = findTransparentExpressionRoot(reference.identifier);
-              const parent = root.parent;
-              if (findEnclosingFunction(reference.identifier) !== effectFunction) return true;
-              if (
-                isNodeOfType(parent, "VariableDeclarator") &&
-                parent.init === root &&
-                isNodeOfType(parent.id, "Identifier") &&
-                isNodeOfType(parent.parent, "VariableDeclaration") &&
-                parent.parent.kind === "const"
-              )
-                return false;
-              const call = parent ? findTransparentExpressionRoot(parent).parent : null;
-              return (
-                !isNodeOfType(parent, "MemberExpression") ||
-                parent.object !== root ||
-                !call ||
-                !isOrdinaryMemberCall(call, "canPlayType")
-              );
-            }),
-        )
-      )
-        return null;
-    }
+    if (isReceiver && !hasClosedMediaReceiverReferences(symbol, effectFunction, context))
+      return null;
     return resolveValue(initializer, isReceiver, visited);
   };
 

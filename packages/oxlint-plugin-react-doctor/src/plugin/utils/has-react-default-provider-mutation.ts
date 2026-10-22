@@ -1,3 +1,4 @@
+import { REACT_PROVIDER_MUTATION_CAPABILITY_NAMES } from "../constants/react.js";
 import type { ScopeAnalysis, SymbolDescriptor } from "../semantic/scope-analysis.js";
 import { findTransparentExpressionRoot } from "./find-transparent-expression-root.js";
 import { getEquivalentSymbols } from "./get-equivalent-symbols.js";
@@ -54,6 +55,7 @@ export const hasReactDefaultProviderMutation = (
         const referencedProperty = getStaticPropertyName(member);
         return (
           referencedProperty === null ||
+          REACT_PROVIDER_MUTATION_CAPABILITY_NAMES.has(referencedProperty) ||
           (isNamespaceImport && referencedProperty === "default") ||
           (referencedProperty === propertyName && !isNonEscapingReactApiReference(member))
         );
