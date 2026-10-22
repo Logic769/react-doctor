@@ -1,3 +1,8 @@
+import {
+  PROVIDER_PROOF_SMALL_COMPONENT_COUNT,
+  PROVIDER_PROOF_LARGE_COMPONENT_COUNT,
+  PROVIDER_PROOF_MAX_GROWTH_RATIO,
+} from "../../../test-utils/constants.js";
 import { describe, expect, it } from "vite-plus/test";
 import { runRule } from "../../../test-utils/run-rule.js";
 import { noPropCallbackInRender } from "./no-prop-callback-in-render.js";
@@ -1470,5 +1475,49 @@ describe("no-prop-callback-in-render constructor reachability", () => {
     const result = run(code);
     expect(result.parseErrors).toHaveLength(0);
     expect(result.diagnostics).toHaveLength(0);
+  });
+});
+
+describe("program provider proof growth", () => {
+  it("checks stable provider imports once as sibling components grow", () => {
+    const results = [
+      PROVIDER_PROOF_SMALL_COMPONENT_COUNT,
+      PROVIDER_PROOF_LARGE_COMPONENT_COUNT,
+    ].map((size) => {
+      const source =
+        'import {Component} from "react";' +
+        Array.from(
+          { length: size },
+          (_, index) =>
+            `export class Panel${index} extends Component {constructor(props){super(props);const {onReady}=props;onReady();}render(){return <output/>}}`,
+        ).join("\n");
+      let symbolVisits = 0;
+      const measuredRule = {
+        ...noPropCallbackInRender,
+        create: (context: Parameters<typeof noPropCallbackInRender.create>[0]) => {
+          const symbols = new Proxy(context.scopes.rootScope.symbols, {
+            get: (target, property, receiver) => {
+              if (typeof property === "string" && /^\d+$/.test(property)) symbolVisits += 1;
+              return Reflect.get(target, property, receiver);
+            },
+          });
+          const rootScope = new Proxy(context.scopes.rootScope, {
+            get: (target, property, receiver) =>
+              property === "symbols" ? symbols : Reflect.get(target, property, receiver),
+          });
+          const scopes = new Proxy(context.scopes, {
+            get: (target, property, receiver) =>
+              property === "rootScope" ? rootScope : Reflect.get(target, property, receiver),
+          });
+          return noPropCallbackInRender.create({ ...context, scopes });
+        },
+      };
+      const result = runRule(measuredRule, source);
+      expect(result.parseErrors).toEqual([]);
+      expect(result.diagnostics).toHaveLength(size);
+      return symbolVisits;
+    });
+    expect(results[0]).toBeGreaterThan(0);
+    expect(results[1]).toBeLessThanOrEqual(results[0] * PROVIDER_PROOF_MAX_GROWTH_RATIO);
   });
 });

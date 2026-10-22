@@ -44,6 +44,7 @@ interface ConstructorProgramFacts {
   readonly classOrigins: WeakMap<EsTreeNode, boolean>;
   readonly propsBindings: WeakMap<SymbolDescriptor, boolean>;
   readonly constructorBodies: WeakMap<EsTreeNode, boolean>;
+  superclassProviders?: ReadonlySet<SymbolDescriptor> | null;
 }
 
 const factsByScopes = new WeakMap<ScopeAnalysis, WeakMap<EsTreeNode, ConstructorProgramFacts>>();
@@ -139,6 +140,66 @@ const isSuperclassPosition = (expression: EsTreeNode): boolean => {
   );
 };
 
+const getGenuineReactSuperclassProviders = (
+  program: EsTreeNode,
+  scopes: ScopeAnalysis,
+  facts: ConstructorProgramFacts,
+): ReadonlySet<SymbolDescriptor> | null => {
+  if (facts.superclassProviders !== undefined) return facts.superclassProviders;
+  facts.superclassProviders = null;
+  const providers = new Set<SymbolDescriptor>();
+  for (const symbol of scopes.rootScope.symbols) {
+    const declaration = getImportDeclarationForSymbol(symbol);
+    if (declaration?.source.value !== "react") continue;
+    const specifier = symbol.declarationNode;
+    if (
+      declaration.importKind === "type" ||
+      (isNodeOfType(specifier, "ImportSpecifier") && specifier.importKind === "type")
+    ) {
+      if (symbol.references.length !== 0) return null;
+      continue;
+    }
+    if (!isReadonlyBinding(symbol, program, scopes, facts)) return null;
+    providers.add(symbol);
+    const importedName = getImportedName(specifier);
+    const isNamespace =
+      isNodeOfType(specifier, "ImportDefaultSpecifier") ||
+      isNodeOfType(specifier, "ImportNamespaceSpecifier") ||
+      importedName === "default";
+    if (
+      isNamespace &&
+      [...CONSTRUCTOR_PROP_CALLBACK_CLASS_NAMES].some((name) =>
+        hasPossibleStaticPropertyMutationOrEscape(symbol.bindingIdentifier, name, scopes),
+      )
+    )
+      return null;
+    if (
+      !symbol.references.every((reference) => {
+        const root = findTransparentExpressionRoot(reference.identifier);
+        if (!isNamespace)
+          return (
+            importedName !== undefined &&
+            CONSTRUCTOR_PROP_CALLBACK_CLASS_NAMES.has(importedName) &&
+            isSuperclassPosition(root)
+          );
+        const member = root.parent;
+        return (
+          isNodeOfType(member, "MemberExpression") &&
+          member.object === root &&
+          !member.computed &&
+          !member.optional &&
+          isNodeOfType(member.property, "Identifier") &&
+          CONSTRUCTOR_PROP_CALLBACK_CLASS_NAMES.has(member.property.name) &&
+          isSuperclassPosition(member)
+        );
+      })
+    )
+      return null;
+  }
+  facts.superclassProviders = providers;
+  return providers;
+};
+
 const hasGenuineReactSuperclass = (
   classNode: EsTreeNode,
   program: EsTreeNode,
@@ -171,55 +232,8 @@ const hasGenuineReactSuperclass = (
   const selected = resolveRuntimeValueBinding(scopes.scopeFor(identifier), identifier.name);
   if (!selected || scopes.symbolFor(identifier) !== selected || selected.kind !== "import")
     return false;
-  let foundSelected = false;
-  for (const symbol of scopes.rootScope.symbols) {
-    const declaration = getImportDeclarationForSymbol(symbol);
-    if (declaration?.source.value !== "react") continue;
-    const specifier = symbol.declarationNode;
-    if (
-      declaration.importKind === "type" ||
-      (isNodeOfType(specifier, "ImportSpecifier") && specifier.importKind === "type")
-    ) {
-      if (symbol === selected || symbol.references.length !== 0) return false;
-      continue;
-    }
-    if (!isReadonlyBinding(symbol, program, scopes, facts)) return false;
-    if (symbol === selected) foundSelected = true;
-    const importedName = getImportedName(specifier);
-    const isNamespace =
-      isNodeOfType(specifier, "ImportDefaultSpecifier") ||
-      isNodeOfType(specifier, "ImportNamespaceSpecifier") ||
-      importedName === "default";
-    if (
-      isNamespace &&
-      [...CONSTRUCTOR_PROP_CALLBACK_CLASS_NAMES].some((name) =>
-        hasPossibleStaticPropertyMutationOrEscape(symbol.bindingIdentifier, name, scopes),
-      )
-    )
-      return false;
-    if (
-      !symbol.references.every((reference) => {
-        const root = findTransparentExpressionRoot(reference.identifier);
-        if (!isNamespace)
-          return (
-            importedName !== undefined &&
-            CONSTRUCTOR_PROP_CALLBACK_CLASS_NAMES.has(importedName) &&
-            isSuperclassPosition(root)
-          );
-        const member = root.parent;
-        return (
-          isNodeOfType(member, "MemberExpression") &&
-          member.object === root &&
-          !member.computed &&
-          !member.optional &&
-          isNodeOfType(member.property, "Identifier") &&
-          CONSTRUCTOR_PROP_CALLBACK_CLASS_NAMES.has(member.property.name) &&
-          isSuperclassPosition(member)
-        );
-      })
-    )
-      return false;
-  }
+  const providers = getGenuineReactSuperclassProviders(program, scopes, facts);
+  const foundSelected = providers?.has(selected) ?? false;
   facts.classOrigins.set(classNode, foundSelected);
   return foundSelected;
 };

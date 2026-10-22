@@ -6,6 +6,10 @@ import type { EsTreeNode } from "./es-tree-node.js";
 import { isNodeOfType } from "./is-node-of-type.js";
 import { isNumericDataMemberAccess } from "./is-numeric-data-member-access.js";
 import { walkAst } from "./walk-ast.js";
+import {
+  NUMERIC_DATA_LARGE_READ_COUNT,
+  NUMERIC_DATA_SMALL_READ_COUNT,
+} from "../constants/thresholds.js";
 
 const traversalWork = vi.hoisted(() => ({ programWalkCount: 0 }));
 
@@ -35,6 +39,37 @@ const prepare = (code: string) => {
 const source = "const getKey=()=>Number(input);const value=items[getKey()]-1;";
 
 describe("numeric data stable facts lifetime", () => {
+  it("indexes exported bindings once across distinct numeric helper functions", () => {
+    const programWalkCounts = [NUMERIC_DATA_SMALL_READ_COUNT, NUMERIC_DATA_LARGE_READ_COUNT].map(
+      (helperCount) => {
+        const fixture = prepare(
+          Array.from(
+            { length: helperCount },
+            (_, helperIndex) =>
+              `const getKey${helperIndex}=()=>Number(input);const value${helperIndex}=items[getKey${helperIndex}()]-1;`,
+          ).join("\n"),
+        );
+        traversalWork.programWalkCount = 0;
+        expect(
+          fixture.members.map((member) => isNumericDataMemberAccess(member, fixture.scopes)),
+        ).toEqual(fixture.members.map(() => true));
+        return traversalWork.programWalkCount;
+      },
+    );
+    expect(programWalkCounts[0]).toBeGreaterThan(0);
+    expect(programWalkCounts[1]).toBe(programWalkCounts[0]);
+  });
+
+  it.each([
+    "const getKey=()=>Number(input);export {getKey};const value=items[getKey()]-1;",
+    "const getKey=()=>Number(input);export default getKey;const value=items[getKey()]-1;",
+  ])("declines exported numeric helpers: %s", (code) => {
+    const fixture = prepare(code);
+    expect(
+      fixture.members.map((member) => isNumericDataMemberAccess(member, fixture.scopes)),
+    ).toEqual(fixture.members.map(() => false));
+  });
+
   it("reuses facts only within the exact analysis and Program", () => {
     const fixture = prepare(source);
     traversalWork.programWalkCount = 0;
