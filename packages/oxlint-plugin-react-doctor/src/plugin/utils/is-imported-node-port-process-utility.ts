@@ -233,13 +233,20 @@ const isNativeJsonPath = (node: EsTreeNode, environment: NodePortProcessEnvironm
   );
 };
 
-const hasOnlyNativeGlobalTimerHandles = (environment: NodePortProcessEnvironment): boolean => {
+interface ClosedNodeProviderValidator {
+  readonly inspect: (node: EsTreeNode) => boolean | void;
+  readonly isClosed: () => boolean;
+}
+
+const createClosedNodeProviderValidator = (
+  environment: NodePortProcessEnvironment,
+): ClosedNodeProviderValidator => {
   const clearedProperties = new Set<string>();
   const scheduledProperties = new Set<string>();
   const allowedTimerReferences = new Set<EsTreeNode>();
   const timerReferences = new Set<EsTreeNode>();
   let valid = true;
-  walkAst(environment.program, (node) => {
+  const inspectTimer = (node: EsTreeNode): boolean | void => {
     if (!valid) return false;
     if (!isNodeOfType(node, "Identifier") || isNonReferenceIdentifier(node)) return;
     if (
@@ -307,21 +314,8 @@ const hasOnlyNativeGlobalTimerHandles = (environment: NodePortProcessEnvironment
     }
     scheduledProperties.add(propertyName);
     allowedTimerReferences.add(schedule.callee);
-  });
-  return (
-    valid &&
-    [...clearedProperties].every((property) => scheduledProperties.has(property)) &&
-    [...scheduledProperties].every((property) => clearedProperties.has(property)) &&
-    [...timerReferences].every(
-      (reference) => !isWithinAssignmentTarget(reference) && allowedTimerReferences.has(reference),
-    )
-  );
-};
-
-const hasClosedNodeProviders = (environment: NodePortProcessEnvironment): boolean => {
-  if (!hasOnlyNativeGlobalTimerHandles(environment)) return false;
-  let valid = true;
-  walkAst(environment.program, (node) => {
+  };
+  const inspectProvider = (node: EsTreeNode): boolean | void => {
     if (!valid) return false;
     if (
       isNodeOfType(node, "ThisExpression") ||
@@ -496,8 +490,27 @@ const hasClosedNodeProviders = (environment: NodePortProcessEnvironment): boolea
         break;
       }
     }
-  });
-  return valid;
+  };
+  return {
+    inspect: (node) => {
+      if (inspectTimer(node) === false) return false;
+      return inspectProvider(node);
+    },
+    isClosed: () =>
+      valid &&
+      [...clearedProperties].every((property) => scheduledProperties.has(property)) &&
+      [...scheduledProperties].every((property) => clearedProperties.has(property)) &&
+      [...timerReferences].every(
+        (reference) =>
+          !isWithinAssignmentTarget(reference) && allowedTimerReferences.has(reference),
+      ),
+  };
+};
+
+const hasClosedNodeProviders = (environment: NodePortProcessEnvironment): boolean => {
+  const validator = createClosedNodeProviderValidator(environment);
+  walkAst(environment.program, validator.inspect);
+  return validator.isClosed();
 };
 
 const hasPortProcessBody = (environment: NodePortProcessEnvironment): boolean => {
@@ -914,8 +927,13 @@ const hasPortProcessBody = (environment: NodePortProcessEnvironment): boolean =>
     !allowedResolveReferences.size
   )
     return false;
+  const providerValidator = createClosedNodeProviderValidator(environment);
   walkAst(environment.program, (node) => {
     if (!valid) return false;
+    if (providerValidator.inspect(node) === false) {
+      valid = false;
+      return false;
+    }
     if (
       isNodeOfType(node, "MemberExpression") &&
       errorParameter &&
@@ -965,7 +983,7 @@ const hasPortProcessBody = (environment: NodePortProcessEnvironment): boolean =>
   });
   return (
     valid &&
-    hasClosedNodeProviders(environment) &&
+    providerValidator.isClosed() &&
     closedReferences(resolveSymbol, environment, allowedResolveReferences) &&
     [...allowedImportReferences].every(([symbol, references]) =>
       closedReferences(symbol, environment, references),
