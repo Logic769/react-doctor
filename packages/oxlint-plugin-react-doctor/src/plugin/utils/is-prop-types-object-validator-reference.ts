@@ -126,22 +126,17 @@ const getValidatorImport = (
   return imported;
 };
 
-export const isPropTypesObjectValidatorReference = (
-  node: EsTreeNode,
+const validatorReferencesByScopes = new WeakMap<
+  ScopeAnalysis,
+  WeakMap<ControlFlowAnalysis, Map<string, ReadonlySet<EsTreeNode>>>
+>();
+
+const collectValidatorReferences = (
+  program: EsTreeNode,
   context: PropTypesObjectValidatorContext,
-): boolean => {
-  const objectReference = stripParenExpression(node);
-  const imported = getValidatorImport(objectReference, context);
-  const program = findProgramRoot(objectReference);
-  const { scopes, filename } = context;
-  if (
-    !imported ||
-    !program ||
-    !filename ||
-    !path.isAbsolute(filename) ||
-    !hasCompleteSymbolReferences(imported, program, scopes)
-  )
-    return false;
+): ReadonlySet<EsTreeNode> => {
+  const { scopes } = context;
+  const references = new Set<EsTreeNode>();
   for (const provider of scopes.rootScope.symbols) {
     const declaration = getImportDeclarationForSymbol(provider);
     if (!declaration || declaration.source.value !== "prop-types") continue;
@@ -151,18 +146,21 @@ export const isPropTypesObjectValidatorReference = (
         provider.declarationNode.importKind === "type")
     ) {
       if (provider.references.some((reference) => !isTypeScriptTypePosition(reference.identifier)))
-        return false;
+        return new Set();
       continue;
     }
-    if (!hasCompleteSymbolReferences(provider, program, scopes)) return false;
+    if (!hasCompleteSymbolReferences(provider, program, scopes)) return new Set();
     for (const reference of provider.references) {
-      if (reference.flag !== "read" || isWithinAssignmentTarget(reference.identifier)) return false;
+      if (reference.flag !== "read" || isWithinAssignmentTarget(reference.identifier))
+        return new Set();
       const receiver = findTransparentExpressionRoot(reference.identifier);
       const member = receiver.parent;
       const invocation = member && findTransparentExpressionRoot(member).parent;
       const argument = isNodeOfType(invocation, "CallExpression") ? invocation.arguments[0] : null;
-      if (!argument || getValidatorImport(stripParenExpression(argument), context) !== provider)
-        return false;
+      const objectReference = argument && stripParenExpression(argument);
+      if (!objectReference || getValidatorImport(objectReference, context) !== provider)
+        return new Set();
+      references.add(objectReference);
     }
   }
   let unsupported = false;
@@ -182,9 +180,35 @@ export const isPropTypesObjectValidatorReference = (
       isProvenGlobalObjectReference(candidate, scopes) ||
       (candidate.name === "Object" &&
         scopes.isGlobalReference(candidate) &&
-        getValidatorImport(candidate, context) === null)
+        !references.has(candidate))
     )
       unsupported = true;
   });
-  return !unsupported && resolveModulePath(filename, "prop-types") === null;
+  return unsupported ? new Set() : references;
+};
+
+export const isPropTypesObjectValidatorReference = (
+  node: EsTreeNode,
+  context: PropTypesObjectValidatorContext,
+): boolean => {
+  const objectReference = stripParenExpression(node);
+  const program = findProgramRoot(objectReference);
+  const { scopes, cfg, filename } = context;
+  if (!program || !filename || !path.isAbsolute(filename)) return false;
+  let referencesByControlFlow = validatorReferencesByScopes.get(scopes);
+  if (!referencesByControlFlow) {
+    referencesByControlFlow = new WeakMap();
+    validatorReferencesByScopes.set(scopes, referencesByControlFlow);
+  }
+  let referencesByFilename = referencesByControlFlow.get(cfg);
+  if (!referencesByFilename) {
+    referencesByFilename = new Map();
+    referencesByControlFlow.set(cfg, referencesByFilename);
+  }
+  let references = referencesByFilename.get(filename);
+  if (!references) {
+    references = collectValidatorReferences(program, context);
+    referencesByFilename.set(filename, references);
+  }
+  return references.has(objectReference) && resolveModulePath(filename, "prop-types") === null;
 };

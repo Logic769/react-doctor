@@ -1,3 +1,4 @@
+import { getManifestCacheGeneration } from "../../utils/read-nearest-package-manifest.js";
 import * as fs from "node:fs";
 import os from "node:os";
 import * as path from "node:path";
@@ -405,7 +406,10 @@ describe("prop-types provider proof and resolution epochs", () => {
           const propTypesObjectValidator = (candidate: EsTreeNode): boolean =>
             isPropTypesObjectValidatorReference(candidate, context);
           certify = () =>
-            hasRefNotificationReactCall(node, "useState", context, { propTypesObjectValidator });
+            hasRefNotificationReactCall(node, "useState", context, {
+              propTypesObjectValidator,
+              propTypesObjectValidatorGeneration: getManifestCacheGeneration(),
+            });
         },
       }),
     };
@@ -457,5 +461,122 @@ describe("prop-types provider proof and resolution epochs", () => {
     );
     expect(result.parseErrors).toEqual([]);
     expect(result.diagnostics).toHaveLength(1);
+  });
+});
+
+describe("prop-types metadata proof work", () => {
+  it("shares provider validation across Object tokens in the same analysis", () => {
+    const measureSymbolLookups = (componentCount: number, includeStateCalls = false): number => {
+      let symbolLookups = 0;
+      const probe: Rule = {
+        ...hookUseState,
+        create: (context) => {
+          const originalScopes = context.scopes;
+          const scopes = {
+            ...originalScopes,
+            symbolFor: (node: EsTreeNode) => {
+              symbolLookups += 1;
+              return originalScopes.symbolFor(node);
+            },
+          };
+          const validatedContext = { ...context, scopes };
+          if (includeStateCalls) return hookUseState.create(validatedContext);
+          return {
+            Identifier: (node: EsTreeNode) => {
+              if (!isNodeOfType(node, "Identifier") || node.name !== "Object") return;
+              expect(isPropTypesObjectValidatorReference(node, validatedContext)).toBe(true);
+            },
+          };
+        },
+      };
+      const components = Array.from(
+        { length: componentCount },
+        (_, componentIndex) =>
+          `const Panel${componentIndex}=()=>{${includeStateCalls ? "const[value]=useState(0);return <span>{value}</span>" : "return <span/>"}};Panel${componentIndex}.propTypes={items:PropTypes.arrayOf(Object)};`,
+      ).join("");
+      const result = runRule(
+        probe,
+        `import {useState} from 'react';import PropTypes from 'prop-types';${components}`,
+        {
+          filename,
+        },
+      );
+      expect(result.parseErrors).toEqual([]);
+      return symbolLookups;
+    };
+    const smallLookups = measureSymbolLookups(8);
+    const largeLookups = measureSymbolLookups(32);
+    expect(smallLookups).toBeGreaterThan(0);
+    expect(largeLookups).toBeLessThanOrEqual(smallLookups * 6);
+    const smallRuleLookups = measureSymbolLookups(8, true);
+    const largeRuleLookups = measureSymbolLookups(32, true);
+    expect(smallRuleLookups).toBeGreaterThan(0);
+    expect(largeRuleLookups).toBeLessThanOrEqual(smallRuleLookups * 6);
+  });
+});
+
+describe("prop-types provider cache mode identities", () => {
+  it("keeps callback identities, live callbacks and generation-bound results distinct", () => {
+    const certificates: boolean[] = [];
+    const probe: Rule = {
+      ...hookUseState,
+      create: (context) => ({
+        CallExpression: (node: EsTreeNode) => {
+          if (
+            !isNodeOfType(node, "CallExpression") ||
+            !isNodeOfType(node.callee, "Identifier") ||
+            node.callee.name !== "useState"
+          )
+            return;
+          let acceptsObject = true;
+          const acceptingValidator = () => acceptsObject;
+          const rejectingValidator = () => false;
+          const classify = (
+            validator: (candidate: EsTreeNode) => boolean,
+            generation?: number,
+          ): void => {
+            const options = {
+              propTypesObjectValidator: validator,
+              propTypesObjectValidatorGeneration: generation,
+            };
+            certificates.push(hasRefNotificationReactCall(node, "useState", context, options));
+            certificates.push(isUnmodifiedLocalReactStateCall(node, context.scopes, options));
+          };
+          classify(acceptingValidator, 1);
+          classify(rejectingValidator, 1);
+          acceptsObject = false;
+          classify(acceptingValidator, 2);
+          acceptsObject = true;
+          classify(acceptingValidator, 3);
+          classify(acceptingValidator);
+          acceptsObject = false;
+          classify(acceptingValidator);
+          certificates.push(hasRefNotificationReactCall(node, "useState", context));
+          certificates.push(isUnmodifiedLocalReactStateCall(node, context.scopes));
+        },
+      }),
+    };
+    const result = runRule(
+      probe,
+      'import {useState} from "react";import PropTypes from "prop-types";export const Panel=()=>{const[value]=useState(0);return <span>{value}</span>};Panel.propTypes={items:PropTypes.arrayOf(Object)};',
+      { filename },
+    );
+    expect(result.parseErrors).toEqual([]);
+    expect(certificates).toEqual([
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+    ]);
   });
 });

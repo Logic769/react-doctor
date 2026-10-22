@@ -29,15 +29,23 @@ import {
 interface RefNotificationReactCallOptions {
   readonly allowNativeWindowEventListeners?: boolean;
   readonly propTypesObjectValidator?: (node: EsTreeNode) => boolean;
+  readonly propTypesObjectValidatorGeneration?: number;
 }
 
 interface RefNotificationReactCertificate {
+  readonly generation?: number;
   readonly allowNativeWindowEventListeners: boolean;
   readonly sourceText: string;
   readonly filename: string;
   readonly accepted: ReadonlySet<SymbolDescriptor>;
 }
-const certificates = new WeakMap<ScopeAnalysis, RefNotificationReactCertificate>();
+const certificates = new WeakMap<
+  ScopeAnalysis,
+  Map<
+    RefNotificationReactCallOptions["propTypesObjectValidator"],
+    Map<boolean, RefNotificationReactCertificate>
+  >
+>();
 
 export const hasRefNotificationReactCall = (
   call: EsTreeNode,
@@ -66,10 +74,25 @@ export const hasRefNotificationReactCall = (
   const program = findProgramRoot(call);
   if (sourceText === undefined || !program) return false;
   const allowNativeWindowEventListeners = options.allowNativeWindowEventListeners === true;
-  const cached = options.propTypesObjectValidator ? undefined : certificates.get(scopes);
+  let certificatesByValidator = certificates.get(scopes);
+  if (!certificatesByValidator) {
+    certificatesByValidator = new Map();
+    certificates.set(scopes, certificatesByValidator);
+  }
+  let certificatesByListenerMode = certificatesByValidator.get(options.propTypesObjectValidator);
+  if (!certificatesByListenerMode) {
+    certificatesByListenerMode = new Map();
+    certificatesByValidator.set(options.propTypesObjectValidator, certificatesByListenerMode);
+  }
+  const shouldCacheCertificate =
+    !options.propTypesObjectValidator || options.propTypesObjectValidatorGeneration !== undefined;
+  const cached = shouldCacheCertificate
+    ? certificatesByListenerMode.get(allowNativeWindowEventListeners)
+    : undefined;
   if (
     cached?.sourceText === sourceText &&
     cached.filename === filename &&
+    cached.generation === options.propTypesObjectValidatorGeneration &&
     cached.allowNativeWindowEventListeners === allowNativeWindowEventListeners
   )
     return cached.accepted.has(symbol);
@@ -211,7 +234,13 @@ export const hasRefNotificationReactCall = (
   });
   const accepted = new Set<SymbolDescriptor>();
   if (!unsupported) for (const [imported, valid] of imports) if (valid) accepted.add(imported);
-  if (!options.propTypesObjectValidator)
-    certificates.set(scopes, { sourceText, filename, accepted, allowNativeWindowEventListeners });
+  if (shouldCacheCertificate)
+    certificatesByListenerMode.set(allowNativeWindowEventListeners, {
+      generation: options.propTypesObjectValidatorGeneration,
+      sourceText,
+      filename,
+      accepted,
+      allowNativeWindowEventListeners,
+    });
   return accepted.has(symbol);
 };

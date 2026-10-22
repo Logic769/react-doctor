@@ -1,3 +1,4 @@
+import { getManifestCacheGeneration } from "../../utils/read-nearest-package-manifest.js";
 import { getImportDeclarationForSymbol } from "../../utils/get-import-declaration-for-symbol.js";
 import { isPropTypesObjectValidatorReference } from "../../utils/is-prop-types-object-validator-reference.js";
 import { hasRefNotificationReactCall } from "../state-and-effects/utils/has-ref-notification-react-call.js";
@@ -92,6 +93,9 @@ export const hookUseState = defineRule({
       CallExpression(node: EsTreeNodeOfType<"CallExpression">) {
         const callExpressionNode: EsTreeNode = node;
         if (!isReactFunctionCall(callExpressionNode, "useState")) return;
+        const propTypesObjectValidatorGeneration = propTypesObjectValidator
+          ? getManifestCacheGeneration()
+          : undefined;
         const expressionRoot = findTransparentExpressionRoot(callExpressionNode);
         const expressionParent = expressionRoot.parent;
         if (isNodeOfType(expressionParent, "ReturnStatement")) return;
@@ -143,10 +147,12 @@ export const hookUseState = defineRule({
               (hasRefNotificationReactCall(node, "useState", context, {
                 allowNativeWindowEventListeners: true,
                 propTypesObjectValidator,
+                propTypesObjectValidatorGeneration,
               }) &&
                 isUnmodifiedLocalReactStateCall(node, context.scopes, {
                   allowNumericDataAccess: true,
                   propTypesObjectValidator,
+                  propTypesObjectValidatorGeneration,
                 })))
           )
             return;
