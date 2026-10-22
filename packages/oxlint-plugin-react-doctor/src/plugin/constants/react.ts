@@ -328,3 +328,10 @@ export const MOUNT_GATE_INITIAL_STATE_ARGUMENT_COUNT = 1;
 export const MOUNT_GATE_STATE_SETTER_INDEX = 1;
 export const MOUNT_GATE_STATE_TUPLE_LENGTH = 2;
 export const MOUNT_GATE_RETURN_STATEMENT_COUNT = 1;
+
+export const REACT_PROVIDER_MUTATION_CAPABILITY_NAMES = new Set([
+  "__defineGetter__",
+  "__defineSetter__",
+  "__proto__",
+  "prototype",
+]);
