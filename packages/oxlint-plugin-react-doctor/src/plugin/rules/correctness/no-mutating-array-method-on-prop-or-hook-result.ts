@@ -1,3 +1,4 @@
+import { isClosedLocalUtilityFunction } from "../../utils/is-closed-local-utility-function.js";
 import { componentOrHookDisplayNameForFunction } from "../../utils/component-or-hook-display-name.js";
 import { defineRule } from "../../utils/define-rule.js";
 import type { EsTreeNode } from "../../utils/es-tree-node.js";
@@ -694,6 +695,7 @@ const resolveSharedArraySource = (
   // draft/mutation params of `produce`/`useMutation` callbacks are not
   // components, so they never reach this branch.
   if (isParameterBinding(binding)) {
+    if (isClosedLocalUtilityFunction(binding.scopeOwner, context)) return null;
     return componentOrHookDisplayNameForFunction(binding.scopeOwner) ? "prop" : null;
   }
   const aliasSource = aliasSourceFor(binding);
