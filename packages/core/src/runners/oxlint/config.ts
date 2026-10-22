@@ -18,6 +18,7 @@ import type { UnpluginAutoImportGlobalScope } from "./collect-unplugin-auto-impo
 
 export interface OxlintConfigOptions {
   pluginPath: string;
+  diagnosticContextDirectory?: string;
   project: ProjectInfo;
   customRulesOnly?: boolean;
   extendsPaths?: string[];
@@ -125,6 +126,7 @@ const buildUserPluginRules = (
 
 export const createOxlintConfig = ({
   pluginPath,
+  diagnosticContextDirectory,
   project,
   customRulesOnly = false,
   extendsPaths = [],
@@ -290,6 +292,7 @@ export const createOxlintConfig = ({
       ...adoptedSettings,
       "react-doctor": {
         portedRuleMode: "curated",
+        ...(diagnosticContextDirectory ? { diagnosticContextDirectory } : {}),
         framework: project.framework,
         rootDirectory: settingsRootDirectory,
         // The framework-capability vocabulary, available to any rule via
