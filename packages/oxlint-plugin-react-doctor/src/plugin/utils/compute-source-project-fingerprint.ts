@@ -1,3 +1,4 @@
+import { hasCurrentContextRecordEnvironment } from "../rules/state-and-effects/utils/has-current-context-record-environment.js";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import { analyzeScopes } from "../semantic/scope-analysis.js";
@@ -88,6 +89,9 @@ export const computeSourceProjectFingerprint = (rootDirectory: string): string |
     resetFilesystemCaches();
     const capture = captureCrossFileProbes(
       () => {
+        for (const filePath of productionFiles.sourceFilePaths) {
+          hasCurrentContextRecordEnvironment(filePath);
+        }
         const firstFilePath = productionFiles.sourceFilePaths[0];
         if (!firstFilePath) return true;
         const programNode = parseSourceFile(firstFilePath);
