@@ -16,3 +16,7 @@ export const NATIVE_MEDIA_PROVIDER_NAMES: ReadonlySet<string> = new Set([
   "HTMLVideoElement",
   "HTMLAudioElement",
 ]);
+
+export const NATIVE_MEDIA_SMALL_COMPONENT_COUNT = 16;
+export const NATIVE_MEDIA_LARGE_COMPONENT_COUNT = 64;
+export const NATIVE_MEDIA_MAXIMUM_PROVIDER_LOOKUP_GROWTH_MULTIPLIER = 6;
