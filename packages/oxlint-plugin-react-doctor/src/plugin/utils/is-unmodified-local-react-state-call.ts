@@ -1,3 +1,4 @@
+import { isFiniteCharacterMapLookup } from "./is-finite-character-map-lookup.js";
 import { CANONICAL_REACT_REQUIRE_ARGUMENT_COUNT } from "../constants/react.js";
 import type { ScopeAnalysis } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
@@ -42,6 +43,7 @@ const PROVIDER_GLOBAL_NAMES = new Set([
 
 interface LocalReactStateCallOptions {
   readonly allowNumericDataAccess?: boolean;
+  readonly allowFiniteCharacterMapLookup?: boolean;
 }
 
 export const isUnmodifiedLocalReactStateCall = (
@@ -186,7 +188,8 @@ export const isUnmodifiedLocalReactStateCall = (
         allowConstTemplateLiteral: true,
         stringifyNonStringLiterals: true,
       }) === null &&
-      !(options.allowNumericDataAccess && isNumericDataMemberAccess(child, scopes))
+      !(options.allowNumericDataAccess && isNumericDataMemberAccess(child, scopes)) &&
+      !(options.allowFiniteCharacterMapLookup && isFiniteCharacterMapLookup(child, scopes))
     ) {
       hasProviderHazard = true;
     }
