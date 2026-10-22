@@ -11,6 +11,8 @@ import {
   NODE_PORT_PROCESS_SMALL_CALL_COUNT,
   NODE_PORT_PROCESS_LARGE_CALL_COUNT,
   NODE_PORT_PROCESS_MAXIMUM_LOOKUP_GROWTH_MULTIPLIER,
+  NODE_PORT_PROCESS_MAXIMUM_PROVIDER_WALK_COUNT,
+  NODE_PORT_PROCESS_SINGLE_VALUE_COUNT,
 } from "../../constants/react.js";
 import { collectCrossFileDependencyProbes } from "../../cross-file-dependencies.js";
 import { isImportedNodePortProcessUtility } from "../../utils/is-imported-node-port-process-utility.js";
@@ -18,7 +20,28 @@ import { resetFilesystemCaches } from "../../utils/reset-filesystem-caches.js";
 import type { Rule } from "../../utils/rule.js";
 import { rulesOfHooks } from "./rules-of-hooks.js";
 
-const providerWork = vi.hoisted(() => ({ inspectedReferences: 0 }));
+const providerWork = vi.hoisted(() => ({ inspectedReferences: 0, programTraversals: 0 }));
+vi.mock("../../utils/walk-ast.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../utils/walk-ast.js")>();
+  const { isNodeOfType } = await import("../../utils/is-node-of-type.js");
+  return {
+    ...original,
+    walkAst: (...arguments_: Parameters<typeof original.walkAst>): void => {
+      const [program] = arguments_;
+      const firstStatement = isNodeOfType(program, "Program") ? program.body[0] : undefined;
+      if (
+        isNodeOfType(firstStatement, "VariableDeclaration") &&
+        firstStatement.declarations.some(
+          (declaration) =>
+            isNodeOfType(declaration.id, "Identifier") && declaration.id.name === "reservePort",
+        )
+      )
+        providerWork.programTraversals += 1;
+      original.walkAst(...arguments_);
+    },
+  };
+});
+
 vi.mock("../../utils/is-within-assignment-target.js", async (importOriginal) => {
   const original =
     await importOriginal<typeof import("../../utils/is-within-assignment-target.js")>();
@@ -711,11 +734,17 @@ describe("memoized Node utility proofs", () => {
           }),
       };
       providerWork.inspectedReferences = 0;
+      providerWork.programTraversals = 0;
       const result = runRule(probe, source, {
         filename: path.join(temporaryDirectory, "src/start.js"),
       });
       expect(result.parseErrors).toEqual([]);
       expect(result.diagnostics).toHaveLength(callCount);
+      expect(providerWork.programTraversals).toBeGreaterThan(0);
+      expect(providerWork.programTraversals).toBeLessThanOrEqual(
+        (distinctProviders ? callCount : NODE_PORT_PROCESS_SINGLE_VALUE_COUNT) *
+          NODE_PORT_PROCESS_MAXIMUM_PROVIDER_WALK_COUNT,
+      );
       return { lookups, inspectedReferences: providerWork.inspectedReferences };
     });
     expect(measurements[0].lookups).toBeGreaterThan(0);

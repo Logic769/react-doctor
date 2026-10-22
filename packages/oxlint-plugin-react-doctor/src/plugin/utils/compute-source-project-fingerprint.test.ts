@@ -1,8 +1,10 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import * as crypto from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import * as scopeAnalysis from "../semantic/scope-analysis.js";
+import * as projectIndex from "./build-source-project-index.js";
 import { buildSourceProjectIndex } from "./build-source-project-index.js";
 import { isNodeOfType } from "./is-node-of-type.js";
 import { parseSourceFile } from "./parse-source-file.js";
@@ -13,6 +15,10 @@ import {
   replayCrossFileProbes,
 } from "./cross-file-probe-recorder.js";
 import { SOURCE_PROJECT_FINGERPRINT_MAX_FILE_SIZE_BYTES } from "./constants.js";
+import type {
+  SourceProjectFingerprintCache,
+  SourceProjectProbeSnapshot,
+} from "./read-source-project-fingerprint-snapshot.js";
 
 let temporaryDirectory: string;
 let projectDirectory: string;
@@ -34,6 +40,153 @@ beforeEach(() => {
 afterEach(() => fs.rmSync(temporaryDirectory, { recursive: true, force: true }));
 
 describe("source project fingerprint", () => {
+  it("recaptures a retained proof whose resolver trace or probe was removed", () => {
+    writeProjectFile("entry.js", "import { value } from '@local/value'; export { value };");
+    const configPath = fs.realpathSync(
+      writeProjectFile("tsconfig.json", JSON.stringify({ compilerOptions: { baseUrl: "." } })),
+    );
+    const cache: SourceProjectFingerprintCache = {};
+    const build = vi.spyOn(projectIndex, "buildSourceProjectIndex");
+    try {
+      const initial = captureCrossFileProbes(() =>
+        computeSourceProjectFingerprint(projectDirectory, cache),
+      );
+      expect(initial.trace.contentPaths.has(configPath)).toBe(true);
+      if (!cache.snapshot) throw new Error("Expected a complete fingerprint snapshot");
+      const snapshot = JSON.parse(cache.snapshot);
+      const shortenedTrace = {
+        ...snapshot.trace,
+        contentPaths: snapshot.trace.contentPaths.filter(
+          (filename: string) => filename !== configPath,
+        ),
+      };
+      const shortenedBody = {
+        version: snapshot.version,
+        rootDirectory: snapshot.rootDirectory,
+        membership: snapshot.membership,
+        probes: snapshot.probes,
+        trace: shortenedTrace,
+      };
+      const variants = [
+        { ...snapshot, trace: shortenedTrace },
+        {
+          ...snapshot,
+          trace: shortenedTrace,
+          probes: snapshot.probes.filter(
+            (probe: SourceProjectProbeSnapshot) =>
+              probe.absolutePath !== configPath || probe.kind !== "content",
+          ),
+        },
+        {
+          ...shortenedBody,
+          checksum: crypto.createHash("sha256").update(JSON.stringify(shortenedBody)).digest("hex"),
+        },
+      ];
+      for (const [index, variant] of variants.entries()) {
+        cache.snapshot = JSON.stringify(variant);
+        const repeated = captureCrossFileProbes(() =>
+          computeSourceProjectFingerprint(projectDirectory, cache),
+        );
+        expect(repeated.value).toBe(initial.value);
+        expect(repeated.trace).toEqual(initial.trace);
+        expect(build).toHaveBeenCalledTimes(index + 2);
+      }
+    } finally {
+      build.mockRestore();
+    }
+  });
+
+  it("revalidates a retained proof without rebuilding the project graph", () => {
+    writeProjectFile("entry.js", "import { value } from './child.js'; export { value };");
+    writeProjectFile("child.js", "export const value = 1;");
+    const cache: SourceProjectFingerprintCache = {};
+    const build = vi.spyOn(projectIndex, "buildSourceProjectIndex");
+    try {
+      const initial = captureCrossFileProbes(() =>
+        computeSourceProjectFingerprint(projectDirectory, cache),
+      );
+      const repeated = captureCrossFileProbes(() =>
+        computeSourceProjectFingerprint(projectDirectory, cache),
+      );
+      expect(repeated.value).toBe(initial.value);
+      expect(repeated.value).not.toBeNull();
+      expect(repeated.trace).toEqual(initial.trace);
+      expect(build).toHaveBeenCalledTimes(1);
+    } finally {
+      build.mockRestore();
+    }
+  });
+
+  it("recaptures retained proofs for same-size source and negative external changes", () => {
+    writeProjectFile("entry.js", "import { value } from '@local/value'; export { value };");
+    writeProjectFile("tsconfig.json", JSON.stringify({ extends: "../shared.json" }));
+    const cache: SourceProjectFingerprintCache = {};
+    const absent = computeSourceProjectFingerprint(projectDirectory, cache);
+    expect(absent).not.toBeNull();
+    const shared = path.join(temporaryDirectory, "shared.json");
+    fs.writeFileSync(
+      shared,
+      JSON.stringify({ compilerOptions: { baseUrl: "./external", paths: { "@local/*": ["*"] } } }),
+    );
+    const configured = computeSourceProjectFingerprint(projectDirectory, cache);
+    expect(configured).not.toBeNull();
+    expect(configured).not.toBe(absent);
+    fs.mkdirSync(path.join(temporaryDirectory, "external"));
+    const external = path.join(temporaryDirectory, "external/value.js");
+    fs.writeFileSync(external, "export const value = 1;");
+    const present = computeSourceProjectFingerprint(projectDirectory, cache);
+    expect(present).not.toBeNull();
+    expect(present).not.toBe(configured);
+    const initialStat = fs.statSync(external);
+    fs.writeFileSync(external, "export const value = 2;");
+    fs.utimesSync(external, initialStat.atime, initialStat.mtime);
+    const changed = computeSourceProjectFingerprint(projectDirectory, cache);
+    expect(changed).toBe(present);
+    const entry = path.join(projectDirectory, "entry.js");
+    const entryStat = fs.statSync(entry);
+    fs.writeFileSync(entry, "import { value } from '@local/vxlue'; export { value };");
+    fs.utimesSync(entry, entryStat.atime, entryStat.mtime);
+    expect(fs.statSync(entry).size).toBe(entryStat.size);
+    expect(computeSourceProjectFingerprint(projectDirectory, cache)).not.toBe(changed);
+    expect(computeSourceProjectFingerprint(projectDirectory, cache)).toBe(
+      computeSourceProjectFingerprint(projectDirectory),
+    );
+  });
+
+  it("recaptures malformed and incomplete retained proofs", () => {
+    const cache: SourceProjectFingerprintCache = {};
+    const expected = computeSourceProjectFingerprint(projectDirectory, cache);
+    const serialized = cache.snapshot;
+    if (!serialized) throw new Error("Expected a complete fingerprint snapshot");
+    const snapshot = JSON.parse(serialized);
+    for (const invalid of [
+      "invalid",
+      JSON.stringify({ ...snapshot, version: -1 }),
+      JSON.stringify({ ...snapshot, rootDirectory: temporaryDirectory }),
+      JSON.stringify({ ...snapshot, probes: [] }),
+      JSON.stringify({ ...snapshot, trace: { contentPaths: ["relative"], existencePaths: [] } }),
+    ]) {
+      cache.snapshot = invalid;
+      expect(computeSourceProjectFingerprint(projectDirectory, cache)).toBe(expected);
+      expect(cache.snapshot).toBe(serialized);
+    }
+  });
+
+  it("declines a retained proof when a replay observer changes an input", () => {
+    const entry = fs.realpathSync(writeProjectFile("entry.js", "export const source = 1;"));
+    const cache: SourceProjectFingerprintCache = {};
+    expect(computeSourceProjectFingerprint(projectDirectory, cache)).not.toBeNull();
+    const captured = captureCrossFileProbes(
+      () => computeSourceProjectFingerprint(projectDirectory, cache),
+      {
+        beforeProbe: (filename) => {
+          if (filename === entry) fs.writeFileSync(entry, "export const source = 2;");
+        },
+      },
+    );
+    expect(captured.value).toBeNull();
+  });
+
   it("fingerprints dependency contents without constructing unused scope analyses", () => {
     writeProjectFile("entry.js", "import { value } from './child.js'; export { value };");
     writeProjectFile("child.js", "export const value = 1;");
