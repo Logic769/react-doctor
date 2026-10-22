@@ -9,6 +9,7 @@ import {
   PROVIDER_PROOF_MAX_GROWTH_RATIO,
 } from "../../../test-utils/constants.js";
 import * as astWalking from "../../utils/walk-ast.js";
+import * as tsconfigAliasResolution from "../../utils/resolve-tsconfig-alias.js";
 import { collectCrossFileDependencyProbes } from "../../cross-file-dependencies.js";
 import { resetFilesystemCaches } from "../../utils/reset-filesystem-caches.js";
 import { resolveReactRefSymbol } from "../../utils/react-ref-origin.js";
@@ -611,12 +612,18 @@ describe("typed Redux store guarded initialization", () => {
           return visitor(candidate);
         }),
       );
+      const jsxConfigurationProof = vi.spyOn(
+        tsconfigAliasResolution,
+        "hasStandardReactJsxConfiguration",
+      );
       try {
         const result = runRule(noRefCurrentInRender, code, { filename });
         expect(result.parseErrors).toEqual([]);
         expect(result.diagnostics).toHaveLength(componentCount);
+        expect(jsxConfigurationProof).not.toHaveBeenCalled();
       } finally {
         traversal.mockRestore();
+        jsxConfigurationProof.mockRestore();
       }
       return visitedNodes;
     };
