@@ -28,6 +28,7 @@ import {
 
 interface RefNotificationReactCallOptions {
   readonly allowNativeWindowEventListeners?: boolean;
+  readonly propTypesObjectValidator?: (node: EsTreeNode) => boolean;
 }
 
 interface RefNotificationReactCertificate {
@@ -65,7 +66,7 @@ export const hasRefNotificationReactCall = (
   const program = findProgramRoot(call);
   if (sourceText === undefined || !program) return false;
   const allowNativeWindowEventListeners = options.allowNativeWindowEventListeners === true;
-  const cached = certificates.get(scopes);
+  const cached = options.propTypesObjectValidator ? undefined : certificates.get(scopes);
   if (
     cached?.sourceText === sourceText &&
     cached.filename === filename &&
@@ -180,7 +181,11 @@ export const hasRefNotificationReactCall = (
         (capture === undefined ||
           (isNodeOfType(capture, "Literal") && typeof capture.value === "boolean")) &&
         extraArguments.length === 0;
-      if (!passiveObjectCall && !nativeWindowEventCall) {
+      if (
+        !passiveObjectCall &&
+        !nativeWindowEventCall &&
+        !(node.name === "Object" && options.propTypesObjectValidator?.(node))
+      ) {
         unsupported = true;
         return false;
       }
@@ -206,6 +211,7 @@ export const hasRefNotificationReactCall = (
   });
   const accepted = new Set<SymbolDescriptor>();
   if (!unsupported) for (const [imported, valid] of imports) if (valid) accepted.add(imported);
-  certificates.set(scopes, { sourceText, filename, accepted, allowNativeWindowEventListeners });
+  if (!options.propTypesObjectValidator)
+    certificates.set(scopes, { sourceText, filename, accepted, allowNativeWindowEventListeners });
   return accepted.has(symbol);
 };

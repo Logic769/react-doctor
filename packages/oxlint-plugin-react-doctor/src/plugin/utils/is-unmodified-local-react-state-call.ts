@@ -42,6 +42,7 @@ const PROVIDER_GLOBAL_NAMES = new Set([
 
 interface LocalReactStateCallOptions {
   readonly allowNumericDataAccess?: boolean;
+  readonly propTypesObjectValidator?: (node: EsTreeNode) => boolean;
 }
 
 export const isUnmodifiedLocalReactStateCall = (
@@ -153,7 +154,8 @@ export const isUnmodifiedLocalReactStateCall = (
       isNodeOfType(child, "ImportExpression") ||
       isProvenGlobalNamespaceReference(child, "Function", scopes) ||
       isProvenGlobalNamespaceReference(child, "eval", scopes) ||
-      isProvenGlobalNamespaceReference(child, "Object", scopes) ||
+      (isProvenGlobalNamespaceReference(child, "Object", scopes) &&
+        !options.propTypesObjectValidator?.(child)) ||
       isProvenGlobalNamespaceReference(child, "Reflect", scopes)
     ) {
       hasProviderHazard = true;
