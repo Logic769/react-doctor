@@ -11,6 +11,11 @@ interface NumericDataProviderCase {
 }
 
 const cases: NumericDataProviderCase[] = [
+  ...["__defineGetter__", "__defineSetter__"].map((method) => ({
+    name: `rejects React provider replacement through ${method}`,
+    code: `import React from "react";React.${method}("useState",()=>customState);export const Panel=()=>{const [stored]=React.useState(7);return <span>{stored}</span>;};`,
+    expectedCount: 1,
+  })),
   {
     name: "ordinary numeric data",
     code: 'import {useState} from "react";export const Panel=(input)=>{const [storedKey]=useState(7);const values=[3,7];const index=Number(input);const amount=values[index]+1;return <span>{storedKey+amount}</span>};',
