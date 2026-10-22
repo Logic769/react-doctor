@@ -1,9 +1,16 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { parseFixture } from "../../../test-utils/parse-fixture.js";
 import { runRule } from "../../../test-utils/run-rule.js";
+import {
+  PROVIDER_PROOF_SMALL_COMPONENT_COUNT,
+  PROVIDER_PROOF_LARGE_COMPONENT_COUNT,
+  PROVIDER_PROOF_MAX_GROWTH_RATIO,
+} from "../../../test-utils/constants.js";
+import * as astWalking from "../../utils/walk-ast.js";
+import { collectCrossFileDependencyProbes } from "../../cross-file-dependencies.js";
 import type { EsTreeNodeOfType } from "../../utils/es-tree-node-of-type.js";
 import type { Rule } from "../../utils/rule.js";
 import { resetFilesystemCaches } from "../../utils/reset-filesystem-caches.js";
@@ -578,3 +585,142 @@ for (const testCase of cases)
       }
     });
   });
+
+for (const phase of ["rule", "dependency collector"])
+  it(`keeps ${phase} readiness reference proofs linear across refused consumers`, () => {
+    const directory = mkdtempSync(join(tmpdir(), "readiness-reference-growth-"));
+    try {
+      writeFileSync(join(directory, "package.json"), fixture.files["package.json"]);
+      const filename = join(directory, "Panel.tsx");
+      const countVisitedNodes = (componentCount: number): number => {
+        const code =
+          "import {useState,useEffect} from 'react';\n" +
+          Array.from(
+            { length: componentCount },
+            (_, index) => `
+            export const Panel${index}=({value})=>{
+              const [state,setState]=useState("");
+              useEffect(()=>{setState("")},[value]);
+              return <input value={state} onChange={event=>setState(event.target.value)}/>;
+            };
+          `,
+          ).join("\n");
+        writeFileSync(filename, code);
+        expect(parseFixture(code, { filename }).errors).toEqual([]);
+        resetFilesystemCaches();
+        let visitedNodes = 0;
+        const walkAst = astWalking.walkAst;
+        const traversal = vi.spyOn(astWalking, "walkAst").mockImplementation((node, visitor) =>
+          walkAst(node, (candidate) => {
+            visitedNodes++;
+            return visitor(candidate);
+          }),
+        );
+        try {
+          if (phase === "rule") {
+            const result = runRule(noResetAllStateOnPropChange, code, { filename });
+            expect(result.parseErrors).toEqual([]);
+            expect(result.diagnostics).toHaveLength(componentCount);
+          } else {
+            const probes = collectCrossFileDependencyProbes({
+              absoluteFilePath: filename,
+              sourceText: code,
+              ruleIds: ["no-reset-all-state-on-prop-change"],
+            });
+            expect(probes).not.toBeNull();
+          }
+        } finally {
+          traversal.mockRestore();
+        }
+        return visitedNodes;
+      };
+      const smallVisits = countVisitedNodes(PROVIDER_PROOF_SMALL_COMPONENT_COUNT);
+      const largeVisits = countVisitedNodes(PROVIDER_PROOF_LARGE_COMPONENT_COUNT);
+      expect(smallVisits).toBeGreaterThan(0);
+      expect(largeVisits).toBeLessThan(smallVisits * PROVIDER_PROOF_MAX_GROWTH_RATIO);
+    } finally {
+      resetFilesystemCaches();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+it("keeps warm reference proofs separate from live resolver and provider checks", () => {
+  const directory = mkdtempSync(join(tmpdir(), "readiness-reference-replay-"));
+  try {
+    for (const [relative, contents] of Object.entries(fixture.files)) {
+      const filename = join(directory, relative);
+      mkdirSync(dirname(filename), { recursive: true });
+      writeFileSync(filename, contents);
+    }
+    const filename = join(directory, "Panel.tsx");
+    const input = {
+      absoluteFilePath: filename,
+      sourceText: fixture.files["Panel.tsx"],
+      ruleIds: ["no-reset-all-state-on-prop-change"],
+    };
+    resetFilesystemCaches();
+    const cold = collectCrossFileDependencyProbes(input);
+    const warm = collectCrossFileDependencyProbes(input);
+    expect(cold).not.toBeNull();
+    expect(warm).not.toBeNull();
+    expect(cold?.contentPaths.has(join(directory, "Frame.tsx"))).toBe(true);
+    expect(cold?.contentPaths.has(join(directory, "channel/index.ts"))).toBe(true);
+    expect([...(warm?.contentPaths ?? [])].sort()).toEqual([...(cold?.contentPaths ?? [])].sort());
+    expect([...(warm?.existencePaths ?? [])].sort()).toEqual(
+      [...(cold?.existencePaths ?? [])].sort(),
+    );
+    let didReplay = false;
+    const certificates: boolean[] = [];
+    const replayRule: Rule = {
+      id: "test-native-readiness-reference-replay",
+      severity: "error",
+      create: (context) => ({
+        CallExpression: (node: EsTreeNodeOfType<"CallExpression">) => {
+          if (didReplay || !hasNativeIframeReadinessConsumption(node, context)) return;
+          didReplay = true;
+          certificates.push(true);
+          writeFileSync(join(directory, "replacement.ts"), "export const useEffect=custom;");
+          writeFileSync(
+            join(directory, "tsconfig.json"),
+            '{"compilerOptions":{"paths":{"react":["./replacement.ts"]}}}',
+          );
+          resetFilesystemCaches();
+          certificates.push(hasNativeIframeReadinessConsumption(node, context));
+          writeFileSync(join(directory, "tsconfig.json"), "{}");
+          resetFilesystemCaches();
+          certificates.push(hasNativeIframeReadinessConsumption(node, context));
+          writeFileSync(
+            join(directory, "Frame.tsx"),
+            fixture.files["Frame.tsx"].replace(
+              "const {src,hidden}=props;",
+              "const {src,hidden}=props; observe(props);",
+            ),
+          );
+          resetFilesystemCaches();
+          certificates.push(hasNativeIframeReadinessConsumption(node, context));
+          writeFileSync(join(directory, "Frame.tsx"), fixture.files["Frame.tsx"]);
+          resetFilesystemCaches();
+          certificates.push(hasNativeIframeReadinessConsumption(node, context));
+        },
+      }),
+    };
+    const result = runRule(replayRule, fixture.files["Panel.tsx"], { filename });
+    expect(result.parseErrors).toEqual([]);
+    expect(certificates).toEqual([true, false, true, false, true]);
+    for (const code of [
+      fixture.files["Panel.tsx"],
+      fixture.files["Panel.tsx"].replace(
+        "const receive=useCallback",
+        "observe(useEffect); const receive=useCallback",
+      ),
+      fixture.files["Panel.tsx"],
+    ]) {
+      const result = runRule(noResetAllStateOnPropChange, code, { filename });
+      expect(result.parseErrors).toEqual([]);
+      expect(result.diagnostics).toHaveLength(Number(code.includes("observe(useEffect)")));
+    }
+  } finally {
+    resetFilesystemCaches();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

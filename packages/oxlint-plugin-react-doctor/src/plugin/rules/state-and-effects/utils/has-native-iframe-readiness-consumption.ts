@@ -58,6 +58,24 @@ interface ReadinessModule {
   readonly snapshotPayload?: EsTreeNode;
 }
 
+interface ReadinessReferenceProofs {
+  readonly program: EsTreeNode;
+  readonly complete: WeakMap<SymbolDescriptor, boolean>;
+  readonly reactCalls: WeakMap<SymbolDescriptor, boolean>;
+}
+
+const referenceProofsByScopes = new WeakMap<ScopeAnalysis, ReadinessReferenceProofs>();
+const immediateModuleScopes = new WeakMap<EsTreeNode, ScopeAnalysis>();
+
+const getReferenceProofs = (module: ReadinessModule): ReadinessReferenceProofs => {
+  let proofs = referenceProofsByScopes.get(module.scopes);
+  if (proofs?.program !== module.program) {
+    proofs = { program: module.program, complete: new WeakMap(), reactCalls: new WeakMap() };
+    referenceProofsByScopes.set(module.scopes, proofs);
+  }
+  return proofs;
+};
+
 interface ReadinessBridge {
   readonly send: SymbolDescriptor;
   readonly attach: SymbolDescriptor;
@@ -73,16 +91,25 @@ const hasOnlyReferences = (
   binding: SymbolDescriptor,
   module: ReadinessModule,
   accepts: (node: EsTreeNode) => boolean,
-): boolean =>
-  hasCompleteSymbolReferences(binding, module.program, module.scopes) &&
-  binding.references.every(
-    (reference) =>
-      isNonReferenceIdentifier(reference.identifier) ||
-      isTypeScriptTypePosition(reference.identifier) ||
-      (reference.flag === "read" &&
-        !isWithinAssignmentTarget(reference.identifier) &&
-        accepts(reference.identifier)),
+): boolean => {
+  const proofs = getReferenceProofs(module);
+  let complete = proofs.complete.get(binding);
+  if (complete === undefined) {
+    complete = hasCompleteSymbolReferences(binding, module.program, module.scopes);
+    proofs.complete.set(binding, complete);
+  }
+  return (
+    complete &&
+    binding.references.every(
+      (reference) =>
+        isNonReferenceIdentifier(reference.identifier) ||
+        isTypeScriptTypePosition(reference.identifier) ||
+        (reference.flag === "read" &&
+          !isWithinAssignmentTarget(reference.identifier) &&
+          accepts(reference.identifier)),
+    )
   );
+};
 
 const memberName = (node: EsTreeNode | null | undefined): string | null =>
   isNodeOfType(node, "MemberExpression") &&
@@ -160,13 +187,17 @@ const isReactCall = (node: EsTreeNode, name: string, module: ReadinessModule): b
   const call = callOf(node);
   if (!call || !isNodeOfType(call.callee, "Identifier")) return false;
   const binding = directImport(call.callee, module, "react", name);
-  return Boolean(
-    binding &&
-    hasOnlyReferences(binding, module, (reference) => {
+  if (!binding) return false;
+  const proofs = getReferenceProofs(module);
+  let reactCalls = proofs.reactCalls.get(binding);
+  if (reactCalls === undefined) {
+    reactCalls = hasOnlyReferences(binding, module, (reference) => {
       const root = findTransparentExpressionRoot(reference);
       return callOf(root.parent)?.callee === root;
-    }),
-  );
+    });
+    proofs.reactCalls.set(binding, reactCalls);
+  }
+  return reactCalls;
 };
 
 const isClosedProgram = (module: ReadinessModule, sourceText: string): boolean => {
@@ -402,10 +433,15 @@ const loadImmediateModule = (
         return null;
     }
   }
+  let scopes = immediateModuleScopes.get(resolved.programNode);
+  if (!scopes) {
+    scopes = analyzeScopes(resolved.programNode);
+    immediateModuleScopes.set(resolved.programNode, scopes);
+  }
   const module = {
     filename: resolved.filePath,
     program: resolved.programNode,
-    scopes: analyzeScopes(resolved.programNode),
+    scopes,
   };
   let text: string;
   try {
