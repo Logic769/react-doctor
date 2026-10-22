@@ -1,3 +1,6 @@
+import { getManifestCacheGeneration } from "../../../utils/read-nearest-package-manifest.js";
+import { getTsconfigAliasCacheGeneration } from "../../../utils/resolve-tsconfig-alias.js";
+import { getModuleResolutionCacheGeneration } from "../../../utils/resolve-relative-import-path.js";
 import { analyzeScopes } from "../../../semantic/scope-analysis.js";
 import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
@@ -47,6 +50,10 @@ interface ImportedNativeMediaGuardInput {
 }
 
 interface ImportedMediaProgramFacts {
+  readonly generation: number;
+  readonly aliasGeneration: number;
+  readonly resolutionGeneration: number;
+  readonly program: EsTreeNode;
   supported: boolean;
   providersByFilePath: Map<string, SymbolDescriptor[]>;
   providerProofsByFunction: WeakMap<EsTreeNode, boolean>;
@@ -173,9 +180,25 @@ export const createImportedNativeMediaGuardPredicate = ({
     programs = new Map();
     importedMediaProgramFacts.set(context.scopes, programs);
   }
+  const generation = getManifestCacheGeneration();
+  const aliasGeneration = getTsconfigAliasCacheGeneration();
+  const resolutionGeneration = getModuleResolutionCacheGeneration();
+  const program = context.scopes.rootScope.node;
   let programFacts = shouldCaptureDependencies ? undefined : programs.get(filename);
+  if (
+    programFacts &&
+    (programFacts.generation !== generation ||
+      programFacts.aliasGeneration !== aliasGeneration ||
+      programFacts.resolutionGeneration !== resolutionGeneration ||
+      programFacts.program !== program)
+  )
+    programFacts = undefined;
   if (!programFacts) {
     programFacts = {
+      generation,
+      aliasGeneration,
+      resolutionGeneration,
+      program,
       supported: false,
       providersByFilePath: new Map(),
       providerProofsByFunction: new WeakMap(),

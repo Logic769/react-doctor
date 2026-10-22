@@ -1,3 +1,4 @@
+import { resetFilesystemCaches } from "../../utils/reset-filesystem-caches.js";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -1508,3 +1509,88 @@ describe("shared importer media dependency recording", () => {
     }
   });
 });
+
+for (const resetKind of ["resolution", "filesystem"]) {
+  for (const initiallyAccepted of [false, true]) {
+    for (const recording of [false, true]) {
+      it(`refreshes ${initiallyAccepted ? "accepted" : "refused"} media proofs after ${resetKind} resets with recording ${recording}`, () => {
+        const fixture = cases[0];
+        if (!fixture) throw new Error("Expected the authored native importer");
+        writeFixtureFiles(fixture.files);
+        const nativeProvider =
+          'export const supportsClip = (mime) => document.createElement("video").canPlayType(mime) !== "";\n';
+        const pureProvider = 'export const supportsClip = (mime) => mime.startsWith("video/");\n';
+        const providerFilename = path.join(temporaryDirectory, "capability.ts");
+        const relocatedFilename = path.join(temporaryDirectory, "relocated.ts");
+        writeFixtureFiles({ "capability.js": nativeProvider });
+        const setProvider = (accepted: boolean): void => {
+          if (resetKind === "filesystem")
+            fs.writeFileSync(providerFilename, accepted ? nativeProvider : pureProvider);
+          else if (accepted) {
+            if (fs.existsSync(providerFilename)) fs.renameSync(providerFilename, relocatedFilename);
+          } else fs.writeFileSync(providerFilename, pureProvider);
+        };
+        setProvider(initiallyAccepted);
+        resetFilesystemCaches();
+        const parsed = parseFixture(fixture.code);
+        expect(parsed.errors).toEqual([]);
+        attachParentReferences(parsed.program);
+        const scopes = analyzeScopes(parsed.program);
+        let effectFunction: EsTreeNode | null = null;
+        let executionNode: EsTreeNode | null = null;
+        let condition: EsTreeNode | null = null;
+        walkAst(parsed.program, (node) => {
+          if (isNodeOfType(node, "IfStatement")) condition = node.test;
+          if (!isNodeOfType(node, "CallExpression") || !isNodeOfType(node.callee, "Identifier"))
+            return;
+          if (node.callee.name === "setSelected") executionNode = node;
+          const callback = node.arguments[0];
+          if (
+            node.callee.name === "useEffect" &&
+            callback &&
+            isNodeOfType(callback, "ArrowFunctionExpression")
+          )
+            effectFunction = callback;
+        });
+        if (!effectFunction || !executionNode || !condition)
+          throw new Error("Expected the authored conditional state write");
+        const selectedEffect = effectFunction;
+        const selectedExecution = executionNode;
+        const selectedCondition = condition;
+        const context: RuleContext = {
+          scopes,
+          cfg: analyzeControlFlow(parsed.program),
+          filename: path.join(temporaryDirectory, "consumer.tsx"),
+          settings: fixture.options.settings,
+          sourceCode: { ast: parsed.program, getText: () => fixture.code },
+          report: () => {},
+        };
+        const evaluate = (): boolean =>
+          Boolean(
+            createImportedNativeMediaGuardPredicate({
+              context,
+              effectFunction: selectedEffect,
+              executionNode: selectedExecution,
+            })?.(selectedCondition),
+          );
+        for (const accepted of [initiallyAccepted, !initiallyAccepted, initiallyAccepted]) {
+          setProvider(accepted);
+          if (resetKind === "resolution") resetModuleResolutionCaches();
+          else resetFilesystemCaches();
+          if (recording) {
+            const cold = captureCrossFileProbes(evaluate);
+            const warm = captureCrossFileProbes(evaluate);
+            expect(cold.value).toBe(accepted);
+            expect(warm.value).toBe(accepted);
+            expect(warm.trace).toEqual(cold.trace);
+          } else {
+            expect(evaluate()).toBe(accepted);
+            expect(evaluate()).toBe(accepted);
+          }
+        }
+        expect(context.scopes).toBe(scopes);
+        expect(fs.readFileSync(context.filename ?? "", "utf8")).toBe(fixture.code);
+      });
+    }
+  }
+}
