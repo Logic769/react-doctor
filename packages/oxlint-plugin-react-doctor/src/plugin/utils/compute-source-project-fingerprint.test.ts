@@ -1,7 +1,11 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import * as scopeAnalysis from "../semantic/scope-analysis.js";
+import { buildSourceProjectIndex } from "./build-source-project-index.js";
+import { isNodeOfType } from "./is-node-of-type.js";
+import { parseSourceFile } from "./parse-source-file.js";
 import { computeSourceProjectFingerprint } from "./compute-source-project-fingerprint.js";
 import {
   captureCrossFileProbes,
@@ -30,6 +34,60 @@ beforeEach(() => {
 afterEach(() => fs.rmSync(temporaryDirectory, { recursive: true, force: true }));
 
 describe("source project fingerprint", () => {
+  it("fingerprints dependency contents without constructing unused scope analyses", () => {
+    writeProjectFile("entry.js", "import { value } from './child.js'; export { value };");
+    writeProjectFile("child.js", "export const value = 1;");
+    const analysis = vi.spyOn(scopeAnalysis, "analyzeScopes");
+    try {
+      expect(computeSourceProjectFingerprint(projectDirectory)).not.toBeNull();
+      expect(analysis).not.toHaveBeenCalled();
+    } finally {
+      analysis.mockRestore();
+    }
+  });
+
+  it("builds module scopes on demand and preserves their identity", () => {
+    const filename = writeProjectFile(
+      "entry.js",
+      "import { value } from './child.js'; export { value };",
+    );
+    const childFilename = writeProjectFile("child.js", "export const value = 1;");
+    const program = parseSourceFile(filename);
+    if (!program || !isNodeOfType(program, "Program"))
+      throw new Error("Expected the entry program");
+    const analysis = vi.spyOn(scopeAnalysis, "analyzeScopes");
+    try {
+      const index = buildSourceProjectIndex({
+        rootDirectory: projectDirectory,
+        currentFilePath: filename,
+        currentProgramNode: program,
+      });
+      expect(index).not.toBeNull();
+      expect(analysis).not.toHaveBeenCalled();
+      const entryModule = index?.modulesByFilePath.get(filename);
+      const childModule = index?.modulesByFilePath.get(childFilename);
+      if (!entryModule || !childModule) throw new Error("Expected both indexed modules");
+      const entryScopes = entryModule.scopes;
+      expect(analysis).toHaveBeenCalledTimes(1);
+      expect(entryModule.scopes).toBe(entryScopes);
+      expect(analysis).toHaveBeenCalledTimes(1);
+      const childScopes = childModule.scopes;
+      expect(analysis).toHaveBeenCalledTimes(2);
+      expect(childModule.scopes).toBe(childScopes);
+      expect(analysis).toHaveBeenCalledTimes(2);
+      const suppliedIndex = buildSourceProjectIndex({
+        rootDirectory: projectDirectory,
+        currentFilePath: filename,
+        currentProgramNode: program,
+        currentScopes: entryScopes,
+      });
+      expect(suppliedIndex?.modulesByFilePath.get(filename)?.scopes).toBe(entryScopes);
+      expect(analysis).toHaveBeenCalledTimes(2);
+    } finally {
+      analysis.mockRestore();
+    }
+  });
+
   it("freshly hashes ignored appearance, same-size restored-mtime edits, and deletion", () => {
     writeProjectFile(".gitignore", "private/\n");
     const initial = computeSourceProjectFingerprint(projectDirectory);

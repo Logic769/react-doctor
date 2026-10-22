@@ -9,3 +9,5 @@ Detect unescaped regular expressions built from quoted Gradle project names forw
 Refresh whole-scan cache entries when indexed production sources or resolver dependencies change, including ignored files. Skip reuse when the dependency snapshot is incomplete.
 
 Index repeated quoted-name caller proofs once per resolver generation and replay their dependency probes on cache hits.
+
+Build source-module scope analyses only when a rule needs them so dependency fingerprints avoid unused semantic work.

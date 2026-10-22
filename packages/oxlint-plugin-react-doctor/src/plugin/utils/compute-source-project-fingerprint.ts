@@ -1,6 +1,5 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
-import { analyzeScopes } from "../semantic/scope-analysis.js";
 import {
   SOURCE_PROJECT_FINGERPRINT_MAX_ENTRY_COUNT,
   SOURCE_PROJECT_FINGERPRINT_MAX_FILE_COUNT,
@@ -97,7 +96,6 @@ export const computeSourceProjectFingerprint = (rootDirectory: string): string |
             rootDirectory: absoluteRoot,
             currentFilePath: firstFilePath,
             currentProgramNode: programNode,
-            currentScopes: analyzeScopes(programNode),
           }) !== null
         );
       },
