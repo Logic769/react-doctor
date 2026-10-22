@@ -37,7 +37,7 @@ import { isFunctionLike } from "./is-function-like.js";
 import { isNodeOfType } from "./is-node-of-type.js";
 import { isNonReferenceIdentifier } from "./is-non-reference-identifier.js";
 import { isWithinAssignmentTarget } from "./is-within-assignment-target.js";
-import { parseSourceFile } from "./parse-source-file.js";
+import { getParseSourceFileCacheGeneration, parseSourceFile } from "./parse-source-file.js";
 import { parsePackageVersion } from "./parse-package-version.js";
 import {
   getManifestCacheGeneration,
@@ -58,6 +58,7 @@ interface NodePortProcessFacts {
   readonly generation: number;
   readonly aliasGeneration: number;
   readonly resolutionGeneration: number;
+  readonly parserGeneration: number;
   readonly origins: Map<SymbolDescriptor, CapturedCrossFileProbes<boolean>>;
   readonly providerBodies: Map<string, CapturedCrossFileProbes<boolean>>;
   closedProviders?: CapturedCrossFileProbes<boolean>;
@@ -83,17 +84,20 @@ const getNodePortProcessFacts = (environment: NodePortProcessEnvironment): NodeP
   const generation = getManifestCacheGeneration();
   const aliasGeneration = getTsconfigAliasCacheGeneration();
   const resolutionGeneration = getModuleResolutionCacheGeneration();
+  const parserGeneration = getParseSourceFileCacheGeneration();
   let facts = filenames.get(environment.filename);
   if (
     !facts ||
     facts.generation !== generation ||
     facts.aliasGeneration !== aliasGeneration ||
-    facts.resolutionGeneration !== resolutionGeneration
+    facts.resolutionGeneration !== resolutionGeneration ||
+    facts.parserGeneration !== parserGeneration
   ) {
     facts = {
       generation,
       aliasGeneration,
       resolutionGeneration,
+      parserGeneration,
       origins: new Map(),
       providerBodies: new Map(),
     };

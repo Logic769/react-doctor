@@ -605,13 +605,15 @@ describe("typed Redux store guarded initialization", () => {
       const filename = writeFile("src/panel.tsx", code);
       resetFilesystemCaches();
       let visitedNodes = 0;
+      let wholeProgramWalks = 0;
       const walkAst = astWalking.walkAst;
-      const traversal = vi.spyOn(astWalking, "walkAst").mockImplementation((node, visitor) =>
-        walkAst(node, (candidate) => {
+      const traversal = vi.spyOn(astWalking, "walkAst").mockImplementation((node, visitor) => {
+        if (node.type === "Program") wholeProgramWalks++;
+        return walkAst(node, (candidate) => {
           visitedNodes++;
           return visitor(candidate);
-        }),
-      );
+        });
+      });
       const jsxConfigurationProof = vi.spyOn(
         tsconfigAliasResolution,
         "hasStandardReactJsxConfiguration",
@@ -621,6 +623,7 @@ describe("typed Redux store guarded initialization", () => {
         expect(result.parseErrors).toEqual([]);
         expect(result.diagnostics).toHaveLength(componentCount);
         expect(jsxConfigurationProof).not.toHaveBeenCalled();
+        expect(wholeProgramWalks).toBe(0);
       } finally {
         traversal.mockRestore();
         jsxConfigurationProof.mockRestore();
