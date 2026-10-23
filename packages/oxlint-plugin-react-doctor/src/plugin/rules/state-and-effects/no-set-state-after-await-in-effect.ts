@@ -7,6 +7,7 @@ import { getPromiseChainCallForCallback } from "../../utils/collect-effect-invok
 import { collectFunctionReturnStatements } from "../../utils/collect-function-return-statements.js";
 import { resolveCleanupFunctions } from "../../utils/collect-returned-cleanup-functions.js";
 import { hasUnguardedOwnedAbortContinuation } from "./utils/has-unguarded-owned-abort-continuation.js";
+import { ASYNC_WHILE_UNSUPPORTED_CONTROL_TYPES } from "./utils/constants.js";
 import { defineRule } from "../../utils/define-rule.js";
 import { doNodesCoverEveryPathAfterNode } from "../../utils/do-nodes-cover-every-path-after-node.js";
 import { findEnclosingFunction } from "../../utils/find-enclosing-function.js";
@@ -1192,6 +1193,125 @@ const analyzeAsyncStatements = (
       states = [...consequent.states, ...alternate.states];
       states = dedupeAsyncPathStates(states);
       continue;
+    }
+    if (isNodeOfType(statement, "WhileStatement")) {
+      let supportsStructuredFlow =
+        sequenceSnapshots.size === 0 &&
+        [...cleanupWrites.keys()].every((targetKey) => !targetKey.includes("."));
+      let ancestor = statement.parent;
+      while (ancestor && !isFunctionLike(ancestor)) {
+        if (isNodeOfType(ancestor, "TryStatement")) supportsStructuredFlow = false;
+        ancestor = ancestor.parent;
+      }
+      walkWithoutNestedFunctions(statement, (candidate) => {
+        if (
+          ASYNC_WHILE_UNSUPPORTED_CONTROL_TYPES.has(candidate.type) ||
+          (isNodeOfType(candidate, "ReturnStatement") && candidate.argument) ||
+          (isNodeOfType(candidate, "IfStatement") &&
+            !candidate.alternate &&
+            isEarlyExitStatement(candidate.consequent) &&
+            collectOrderedAsyncEvents(candidate.consequent, context).length > 0)
+        ) {
+          supportsStructuredFlow = false;
+          return false;
+        }
+      });
+      if (supportsStructuredFlow) {
+        const invalidatedGuardKeys = new Set<string>();
+        walkAst(context.scopes.rootScope.node, (candidate) => {
+          const callee = isNodeOfType(candidate, "CallExpression")
+            ? stripParenExpression(candidate.callee)
+            : null;
+          if (isNodeOfType(callee, "Identifier") && callee.name === "eval") {
+            for (const targetKey of cleanupWrites.keys()) invalidatedGuardKeys.add(targetKey);
+          }
+          if (!isNodeOfType(candidate, "Identifier")) return;
+          const reference = context.scopes.referenceFor(candidate);
+          if (!reference || reference.flag === "read") return;
+          const targetKey = serializeReferenceKey({ node: candidate, scopes: context.scopes });
+          if (!targetKey || !cleanupWrites.has(targetKey)) return;
+          const symbol = context.scopes.symbolFor(candidate);
+          const declaration = symbol?.declarationNode;
+          if (
+            !symbol ||
+            !isNodeOfType(declaration, "VariableDeclarator") ||
+            declaration.id !== symbol.bindingIdentifier ||
+            !isNodeOfType(declaration.init, "Literal") ||
+            typeof declaration.init.value !== "boolean"
+          ) {
+            invalidatedGuardKeys.add(targetKey);
+            return;
+          }
+          if (symbol.bindingIdentifier === candidate) return;
+          const assignment = candidate.parent;
+          if (
+            isNodeOfType(assignment, "AssignmentExpression") &&
+            assignment.operator === "=" &&
+            assignment.left === candidate &&
+            isNodeOfType(assignment.right, "Literal") &&
+            assignment.right.value === cleanupWrites.get(targetKey)
+          ) {
+            return;
+          }
+          invalidatedGuardKeys.add(targetKey);
+        });
+        const loopCleanupWrites = new Map(
+          [...cleanupWrites].filter(([targetKey]) => !invalidatedGuardKeys.has(targetKey)),
+        );
+        let headerStates = dedupeAsyncPathStates(states);
+        const exitStates: AsyncPathState[] = [];
+        let hasFreshIterationTest = true;
+        const pendingTests = [statement.test];
+        while (pendingTests.length > 0) {
+          const pendingTest = pendingTests.pop();
+          if (!pendingTest) break;
+          const test = stripParenExpression(pendingTest);
+          if (
+            isNodeOfType(test, "CallExpression") ||
+            (isNodeOfType(test, "Identifier") && getUninterruptedConstInitializer(test, context))
+          ) {
+            hasFreshIterationTest = false;
+          } else if (isNodeOfType(test, "UnaryExpression")) {
+            pendingTests.push(test.argument);
+          } else if (isNodeOfType(test, "LogicalExpression")) {
+            pendingTests.push(test.left, test.right);
+          }
+        }
+        const doesCleanupPreventIteration =
+          hasFreshIterationTest &&
+          doesCleanupForceGuardValue(statement.test, false, loopCleanupWrites, context);
+        while (true) {
+          const tested = analyzeAsyncEvents(
+            statement.test,
+            headerStates,
+            context,
+            abortProtectedControllers,
+          );
+          if (tested.hasUnsafeSetter) return tested;
+          exitStates.push(...tested.states);
+          const body = analyzeAsyncStatements(
+            isNodeOfType(statement.body, "BlockStatement") ? statement.body.body : [statement.body],
+            tested.states.map((state) => ({
+              ...state,
+              hasDominatingGuard:
+                state.hasDominatingGuard || (state.didSuspend && doesCleanupPreventIteration),
+            })),
+            context,
+            loopCleanupWrites,
+            abortProtectedControllers,
+            sequenceSnapshots,
+          );
+          if (body.hasUnsafeSetter) return body;
+          const nextHeaderStates = dedupeAsyncPathStates([
+            ...headerStates,
+            ...body.states.map((state) => ({ ...state, suspensionNode: null })),
+          ]);
+          if (nextHeaderStates.length === headerStates.length) break;
+          headerStates = nextHeaderStates;
+        }
+        states = dedupeAsyncPathStates(exitStates);
+        continue;
+      }
     }
     if (isNodeOfType(statement, "SwitchStatement")) {
       const discriminated = analyzeAsyncEvents(

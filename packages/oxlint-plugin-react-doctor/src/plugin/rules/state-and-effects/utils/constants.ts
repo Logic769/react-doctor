@@ -203,3 +203,15 @@ export const RADIX_DRAFT_INHERITED_OBJECT_KEYS: ReadonlySet<string> = new Set([
   "toString",
   "valueOf",
 ]);
+export const ASYNC_WHILE_UNSUPPORTED_CONTROL_TYPES: ReadonlySet<string> = new Set([
+  "BreakStatement",
+  "ContinueStatement",
+  "DoWhileStatement",
+  "ForStatement",
+  "ForInStatement",
+  "ForOfStatement",
+  "LabeledStatement",
+  "SwitchStatement",
+  "ThrowStatement",
+  "TryStatement",
+]);
