@@ -36,7 +36,6 @@ const hasClosedRuntimeReferences = (
   scopes: ScopeAnalysis,
   allowed: ReadonlySet<EsTreeNode>,
 ): boolean =>
-  hasCompleteSymbolReferences(symbol, program, scopes) &&
   symbol.references.every(
     (reference) =>
       isTypeScriptTypePosition(reference.identifier) ||
@@ -44,9 +43,13 @@ const hasClosedRuntimeReferences = (
       (reference.flag === "read" &&
         !isWithinAssignmentTarget(reference.identifier) &&
         allowed.has(reference.identifier)),
-  );
+  ) && hasCompleteSymbolReferences(symbol, program, scopes);
+
+const supportedProgramSyntaxByProgram = new WeakMap<EsTreeNode, boolean>();
 
 const hasSupportedProgramSyntax = (program: EsTreeNode): boolean => {
+  const cached = supportedProgramSyntaxByProgram.get(program);
+  if (cached !== undefined) return cached;
   let supported = true;
   walkAst(program, (node) => {
     if (!supported) return false;
@@ -84,6 +87,7 @@ const hasSupportedProgramSyntax = (program: EsTreeNode): boolean => {
       supported = false;
     if ("typeParameters" in node && node.typeParameters) supported = false;
   });
+  supportedProgramSyntaxByProgram.set(program, supported);
   return supported;
 };
 
@@ -294,7 +298,21 @@ export const isTypedReduxStoreFactoryInitialization = (
     !isNodeOfType(call.callee, "Identifier") ||
     !isNodeOfType(refCall, "CallExpression") ||
     refCall.arguments.length !== 1 ||
-    refCall.typeArguments?.params.length !== 1 ||
+    refCall.typeArguments?.params.length !== 1
+  )
+    return false;
+  const factoryImport = context.scopes.symbolFor(call.callee);
+  if (
+    !factoryImport ||
+    !hasClosedRuntimeReferences(
+      factoryImport,
+      consumerProgram,
+      context.scopes,
+      new Set([call.callee]),
+    )
+  )
+    return false;
+  if (
     !hasRefNotificationReactCall(refCall, "useRef", context) ||
     !hasPrivateGuardedStoreSlot(value, refSymbol, consumerProgram, context.scopes) ||
     !hasSupportedProgramSyntax(consumerProgram) ||
@@ -321,7 +339,6 @@ export const isTypedReduxStoreFactoryInitialization = (
     declaredType.typeArguments
   )
     return false;
-  const factoryImport = context.scopes.symbolFor(call.callee);
   const typeImport = findVisibleSymbol(declaredType.typeName, context.scopes);
   const factoryDeclaration = factoryImport && getImportDeclarationForSymbol(factoryImport);
   const typeDeclaration = typeImport && getImportDeclarationForSymbol(typeImport);
@@ -332,13 +349,7 @@ export const isTypedReduxStoreFactoryInitialization = (
     !typeImport ||
     !typeDeclaration ||
     !isNodeOfType(typeImport.declarationNode, "ImportSpecifier") ||
-    factoryDeclaration.source.value !== typeDeclaration.source.value ||
-    !hasClosedRuntimeReferences(
-      factoryImport,
-      consumerProgram,
-      context.scopes,
-      new Set([call.callee]),
-    )
+    factoryDeclaration.source.value !== typeDeclaration.source.value
   )
     return false;
   const factoryName = getImportedName(factoryImport.declarationNode);
