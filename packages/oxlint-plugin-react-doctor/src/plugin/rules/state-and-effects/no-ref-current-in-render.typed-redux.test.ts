@@ -1,8 +1,15 @@
 import * as fs from "node:fs";
 import os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { runRule } from "../../../test-utils/run-rule.js";
+import {
+  PROVIDER_PROOF_SMALL_COMPONENT_COUNT,
+  PROVIDER_PROOF_LARGE_COMPONENT_COUNT,
+  PROVIDER_PROOF_MAX_GROWTH_RATIO,
+} from "../../../test-utils/constants.js";
+import * as astWalking from "../../utils/walk-ast.js";
+import * as tsconfigAliasResolution from "../../utils/resolve-tsconfig-alias.js";
 import { collectCrossFileDependencyProbes } from "../../cross-file-dependencies.js";
 import { resetFilesystemCaches } from "../../utils/reset-filesystem-caches.js";
 import { resolveReactRefSymbol } from "../../utils/react-ref-origin.js";
@@ -582,6 +589,51 @@ describe("typed Redux store guarded initialization", () => {
     expect(proof.diagnostics.length > 0).toBe(fixture.certificate);
     if (fixture.diagnostics !== undefined)
       expect(result.diagnostics).toHaveLength(fixture.diagnostics);
+  });
+
+  it("keeps whole-program proof work linear across refused shared-factory consumers", () => {
+    writeFile("src/engine.ts", provider);
+    writeFile("src/reducer.ts", "export default (state = { count: 0 }) => state;");
+    const countVisitedNodes = (componentCount: number): number => {
+      const imports = consumer.match(/^import[^\n]+\n/gm)?.join("") ?? "";
+      const component = consumer.replace(/^import[^\n]+\n/gm, "");
+      const code =
+        imports +
+        Array.from({ length: componentCount }, (_, index) =>
+          component.replace("StorePanel", `StorePanel${index}`),
+        ).join("\n");
+      const filename = writeFile("src/panel.tsx", code);
+      resetFilesystemCaches();
+      let visitedNodes = 0;
+      let wholeProgramWalks = 0;
+      const walkAst = astWalking.walkAst;
+      const traversal = vi.spyOn(astWalking, "walkAst").mockImplementation((node, visitor) => {
+        if (node.type === "Program") wholeProgramWalks++;
+        return walkAst(node, (candidate) => {
+          visitedNodes++;
+          return visitor(candidate);
+        });
+      });
+      const jsxConfigurationProof = vi.spyOn(
+        tsconfigAliasResolution,
+        "hasStandardReactJsxConfiguration",
+      );
+      try {
+        const result = runRule(noRefCurrentInRender, code, { filename });
+        expect(result.parseErrors).toEqual([]);
+        expect(result.diagnostics).toHaveLength(componentCount);
+        expect(jsxConfigurationProof).not.toHaveBeenCalled();
+        expect(wholeProgramWalks).toBe(0);
+      } finally {
+        traversal.mockRestore();
+        jsxConfigurationProof.mockRestore();
+      }
+      return visitedNodes;
+    };
+    const smallVisits = countVisitedNodes(PROVIDER_PROOF_SMALL_COMPONENT_COUNT);
+    const largeVisits = countVisitedNodes(PROVIDER_PROOF_LARGE_COMPONENT_COUNT);
+    expect(smallVisits).toBeGreaterThan(0);
+    expect(largeVisits).toBeLessThan(smallVisits * PROVIDER_PROOF_MAX_GROWTH_RATIO);
   });
 });
 

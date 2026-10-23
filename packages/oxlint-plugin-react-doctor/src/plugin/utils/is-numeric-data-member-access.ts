@@ -18,6 +18,7 @@ import { walkAst } from "./walk-ast.js";
 
 interface NumericDataProgramFacts {
   hasNumberWrite: boolean | null;
+  exportedBindings: Set<SymbolDescriptor>;
   readonlyBindings: Map<SymbolDescriptor, boolean>;
   directCalls: Map<SymbolDescriptor, EsTreeNodeOfType<"CallExpression">[] | null>;
   earliestCalls: Map<SymbolDescriptor, number>;
@@ -39,6 +40,7 @@ export const isNumericDataMemberAccess = (member: EsTreeNode, scopes: ScopeAnaly
   if (!facts) {
     facts = {
       hasNumberWrite: null,
+      exportedBindings: new Set(),
       readonlyBindings: new Map(),
       directCalls: new Map(),
       earliestCalls: new Map(),
@@ -55,6 +57,21 @@ export const isNumericDataMemberAccess = (member: EsTreeNode, scopes: ScopeAnaly
         isBindingAssignmentTarget(node)
       )
         facts.hasNumberWrite = true;
+      if (isNodeOfType(node, "ExportNamedDeclaration") && !node.source) {
+        for (const specifier of node.specifiers) {
+          if (!isNodeOfType(specifier, "ExportSpecifier")) continue;
+          const localName = specifier.local.name;
+          const binding = localName && resolveRuntimeValueBinding(scopes.rootScope, localName);
+          if (binding) facts.exportedBindings.add(binding);
+        }
+      }
+      if (isNodeOfType(node, "ExportDefaultDeclaration")) {
+        const exportedValue = stripParenExpression(node.declaration);
+        const binding =
+          isNodeOfType(exportedValue, "Identifier") &&
+          resolveRuntimeValueBinding(scopes.rootScope, exportedValue.name);
+        if (binding) facts.exportedBindings.add(binding);
+      }
     });
   }
   if (facts.hasNumberWrite) return false;
@@ -100,27 +117,7 @@ export const isNumericDataMemberAccess = (member: EsTreeNode, scopes: ScopeAnaly
       isNodeOfType(statement?.parent, "ExportDefaultDeclaration")
     )
       return null;
-    let exported = false;
-    walkAst(program, (node) => {
-      if (exported) return false;
-      if (isNodeOfType(node, "ExportNamedDeclaration") && !node.source) {
-        for (const specifier of node.specifiers) {
-          if (!isNodeOfType(specifier, "ExportSpecifier")) continue;
-          const localName = specifier.local.name;
-          if (localName && resolveRuntimeValueBinding(scopes.rootScope, localName) === symbol)
-            exported = true;
-        }
-      }
-      if (isNodeOfType(node, "ExportDefaultDeclaration")) {
-        const exportedValue = stripParenExpression(node.declaration);
-        if (
-          isNodeOfType(exportedValue, "Identifier") &&
-          resolveRuntimeValueBinding(scopes.rootScope, exportedValue.name) === symbol
-        )
-          exported = true;
-      }
-    });
-    if (exported) return null;
+    if (facts.exportedBindings.has(symbol)) return null;
     const initializer = getDirectConstInitializer(symbol);
     const calls: EsTreeNodeOfType<"CallExpression">[] = [];
     let earliestCallPosition = program.range[1];

@@ -1,5 +1,6 @@
 import { BUILTIN_HOOK_NAMES } from "../constants/react.js";
 import type { ScopeAnalysis } from "../semantic/scope-analysis.js";
+import type { EsTreeNodeOfType } from "./es-tree-node-of-type.js";
 import type { EsTreeNode } from "./es-tree-node.js";
 import type { RuleContext } from "./rule-context.js";
 import { findEnclosingFunction } from "./find-enclosing-function.js";
@@ -25,7 +26,7 @@ import { walkAst } from "./walk-ast.js";
 interface ClosedLocalUtilityFacts {
   readonly scopes: ScopeAnalysis;
   readonly cfg: RuleContext["cfg"];
-  readonly isClosed: boolean;
+  readonly calls: ReadonlyArray<EsTreeNodeOfType<"CallExpression">> | null;
 }
 
 const programFacts = new WeakMap<ScopeAnalysis, WeakMap<EsTreeNode, boolean>>();
@@ -78,7 +79,10 @@ const hasExplicitStrictScope = (functionNode: EsTreeNode): boolean => {
   return false;
 };
 
-const computeClosedLocalUtility = (functionNode: EsTreeNode, context: RuleContext): boolean => {
+const computeClosedLocalUtilityCalls = (
+  functionNode: EsTreeNode,
+  context: RuleContext,
+): ReadonlyArray<EsTreeNodeOfType<"CallExpression">> | null => {
   if (
     !isNodeOfType(functionNode, "FunctionDeclaration") ||
     !isNodeOfType(functionNode.parent, "BlockStatement") ||
@@ -89,7 +93,7 @@ const computeClosedLocalUtility = (functionNode: EsTreeNode, context: RuleContex
     !findEnclosingFunction(functionNode) ||
     !hasExplicitStrictScope(functionNode)
   )
-    return false;
+    return null;
   const binding = getDirectFunctionBindingIdentifier(functionNode);
   const program = findProgramRoot(functionNode);
   const scopes = context.scopes;
@@ -100,7 +104,7 @@ const computeClosedLocalUtility = (functionNode: EsTreeNode, context: RuleContex
     !hasClosedCallableSurface(program, scopes) ||
     functionHasReactComponentEvidence(functionNode, scopes, context.cfg)
   )
-    return false;
+    return null;
   const symbols = new Set([
     ...getFunctionBindingSymbols(functionNode, scopes),
     ...getEquivalentSymbols(binding, scopes),
@@ -108,7 +112,8 @@ const computeClosedLocalUtility = (functionNode: EsTreeNode, context: RuleContex
       .ownScopeFor(functionNode)
       ?.symbols.filter((symbol) => symbol.bindingIdentifier === binding) ?? []),
   ]);
-  if (symbols.size === 0) return false;
+  if (symbols.size === 0) return null;
+  const calls = new Set<EsTreeNodeOfType<"CallExpression">>();
   let hasExternalDirectCall = false;
   for (const symbol of symbols) {
     if (
@@ -116,7 +121,7 @@ const computeClosedLocalUtility = (functionNode: EsTreeNode, context: RuleContex
       !hasCompleteSymbolReferences(symbol, program, scopes) ||
       symbolHasReactComponentTypeAnnotation(symbol, scopes)
     )
-      return false;
+      return null;
     for (const reference of symbol.references) {
       const identifier = reference.identifier;
       const root = findTransparentExpressionRoot(identifier);
@@ -128,11 +133,12 @@ const computeClosedLocalUtility = (functionNode: EsTreeNode, context: RuleContex
         call.optional ||
         call.callee !== root
       )
-        return false;
+        return null;
+      calls.add(call);
       if (symbol.scope.node !== functionNode) hasExternalDirectCall = true;
     }
   }
-  if (!hasExternalDirectCall) return false;
+  if (!hasExternalDirectCall) return null;
   let hasReactOrImplicitSelfRole = false;
   walkAst(functionNode, (node) => {
     if (hasReactOrImplicitSelfRole) return false;
@@ -154,17 +160,16 @@ const computeClosedLocalUtility = (functionNode: EsTreeNode, context: RuleContex
     )
       hasReactOrImplicitSelfRole = true;
   });
-  return !hasReactOrImplicitSelfRole;
+  return hasReactOrImplicitSelfRole ? null : [...calls];
 };
 
-export const isClosedLocalUtilityFunction = (
+export const getClosedLocalUtilityCalls = (
   functionNode: EsTreeNode,
   context: RuleContext,
-): boolean => {
+): ReadonlyArray<EsTreeNodeOfType<"CallExpression">> | null => {
   const cached = functionFacts.get(functionNode);
-  if (cached && cached.scopes === context.scopes && cached.cfg === context.cfg)
-    return cached.isClosed;
-  const isClosed = computeClosedLocalUtility(functionNode, context);
-  functionFacts.set(functionNode, { scopes: context.scopes, cfg: context.cfg, isClosed });
-  return isClosed;
+  if (cached && cached.scopes === context.scopes && cached.cfg === context.cfg) return cached.calls;
+  const calls = computeClosedLocalUtilityCalls(functionNode, context);
+  functionFacts.set(functionNode, { scopes: context.scopes, cfg: context.cfg, calls });
+  return calls;
 };
