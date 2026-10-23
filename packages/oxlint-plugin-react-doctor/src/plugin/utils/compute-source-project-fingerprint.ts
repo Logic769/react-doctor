@@ -1,26 +1,26 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
-import { analyzeScopes } from "../semantic/scope-analysis.js";
 import {
   SOURCE_PROJECT_FINGERPRINT_MAX_ENTRY_COUNT,
   SOURCE_PROJECT_FINGERPRINT_MAX_FILE_COUNT,
   SOURCE_PROJECT_FINGERPRINT_MAX_FILE_SIZE_BYTES,
   SOURCE_PROJECT_FINGERPRINT_MAX_TOTAL_BYTES,
   SOURCE_PROJECT_FINGERPRINT_MAX_PROBE_COUNT,
+  SOURCE_PROJECT_FINGERPRINT_SNAPSHOT_VERSION,
 } from "./constants.js";
 import { buildSourceProjectIndex } from "./build-source-project-index.js";
-import { captureCrossFileProbes } from "./cross-file-probe-recorder.js";
+import { captureCrossFileProbes, replayCrossFileProbes } from "./cross-file-probe-recorder.js";
+import type { CrossFileProbeTrace } from "./cross-file-probe-recorder.js";
 import { isNodeOfType } from "./is-node-of-type.js";
 import type { ProductionSourceFiles } from "./list-production-source-files.js";
 import { listProductionSourceFiles } from "./list-production-source-files.js";
 import { parseSourceFile } from "./parse-source-file.js";
 import { resetFilesystemCaches } from "./reset-filesystem-caches.js";
-
-interface SourceProjectProbeSnapshot {
-  readonly absolutePath: string;
-  readonly kind: "content" | "existence";
-  readonly signature: string;
-}
+import { readSourceProjectFingerprintSnapshot } from "./read-source-project-fingerprint-snapshot.js";
+import type {
+  SourceProjectFingerprintCache,
+  SourceProjectProbeSnapshot,
+} from "./read-source-project-fingerprint-snapshot.js";
 
 const serializeProductionMembership = (files: ProductionSourceFiles): string =>
   JSON.stringify({
@@ -29,7 +29,10 @@ const serializeProductionMembership = (files: ProductionSourceFiles): string =>
     hasOpaqueMdxConsumerSurface: files.hasOpaqueMdxConsumerSurface,
   });
 
-export const computeSourceProjectFingerprint = (rootDirectory: string): string | null => {
+export const computeSourceProjectFingerprint = (
+  rootDirectory: string,
+  cache?: SourceProjectFingerprintCache,
+): string | null => {
   const snapshots = new Map<string, SourceProjectProbeSnapshot>();
   let isComplete = true;
   let totalBytes = 0;
@@ -86,29 +89,95 @@ export const computeSourceProjectFingerprint = (rootDirectory: string): string |
       beforeProbe(filePath, "content");
     }
     resetFilesystemCaches();
-    const capture = captureCrossFileProbes(
-      () => {
-        const firstFilePath = productionFiles.sourceFilePaths[0];
-        if (!firstFilePath) return true;
-        const programNode = parseSourceFile(firstFilePath);
-        if (!isNodeOfType(programNode, "Program")) return false;
-        return (
-          buildSourceProjectIndex({
-            rootDirectory: absoluteRoot,
-            currentFilePath: firstFilePath,
-            currentProgramNode: programNode,
-            currentScopes: analyzeScopes(programNode),
-          }) !== null
+    const previousSnapshot = readSourceProjectFingerprintSnapshot(cache?.snapshot);
+    let trace: CrossFileProbeTrace | undefined;
+    if (
+      previousSnapshot?.rootDirectory === absoluteRoot &&
+      previousSnapshot.membership === membership
+    ) {
+      const cachedTrace = {
+        contentPaths: new Set(previousSnapshot.trace.contentPaths),
+        existencePaths: new Set(previousSnapshot.trace.existencePaths),
+      };
+      const htmlFiles = new Set(productionFiles.htmlFilePaths);
+      let isSnapshotReusable = true;
+      try {
+        for (const probe of previousSnapshot.probes) beforeProbe(probe.absolutePath, probe.kind);
+      } catch {
+        isSnapshotReusable = false;
+      }
+      if (
+        isSnapshotReusable &&
+        productionFiles.sourceFilePaths.every((filePath) =>
+          cachedTrace.contentPaths.has(filePath),
+        ) &&
+        previousSnapshot.probes.every((probe) =>
+          probe.kind === "existence"
+            ? cachedTrace.existencePaths.has(probe.absolutePath)
+            : htmlFiles.has(probe.absolutePath) || cachedTrace.contentPaths.has(probe.absolutePath),
+        ) &&
+        snapshots.size === previousSnapshot.probes.length &&
+        previousSnapshot.probes.every(
+          (probe) =>
+            snapshots.get(JSON.stringify([probe.kind, probe.absolutePath]))?.signature ===
+            probe.signature,
+        )
+      ) {
+        trace = cachedTrace;
+        captureCrossFileProbes(() => replayCrossFileProbes(cachedTrace), { beforeProbe });
+      } else {
+        snapshots.clear();
+        totalBytes = 0;
+        isComplete = true;
+        for (const filePath of [
+          ...productionFiles.sourceFilePaths,
+          ...productionFiles.htmlFilePaths,
+        ])
+          beforeProbe(filePath, "content");
+      }
+    }
+    const capture = trace
+      ? null
+      : captureCrossFileProbes(
+          () => {
+            const firstFilePath = productionFiles.sourceFilePaths[0];
+            if (!firstFilePath) return true;
+            const programNode = parseSourceFile(firstFilePath);
+            if (!isNodeOfType(programNode, "Program")) return false;
+            return (
+              buildSourceProjectIndex({
+                rootDirectory: absoluteRoot,
+                currentFilePath: firstFilePath,
+                currentProgramNode: programNode,
+              }) !== null
+            );
+          },
+          { beforeProbe },
         );
-      },
-      { beforeProbe },
-    );
-    if (!capture.value || !isComplete) return null;
+    if ((capture && !capture.value) || !isComplete) return null;
+    trace ??= capture?.trace;
+    if (!trace) return null;
     const finalProductionFiles = listProductionSourceFiles(absoluteRoot, limits);
     if (!finalProductionFiles || serializeProductionMembership(finalProductionFiles) !== membership)
       return null;
     for (const snapshot of snapshots.values()) {
       if (readSignature(snapshot.absolutePath, snapshot.kind) !== snapshot.signature) return null;
+    }
+    if (cache && capture) {
+      const snapshot = {
+        version: SOURCE_PROJECT_FINGERPRINT_SNAPSHOT_VERSION,
+        rootDirectory: absoluteRoot,
+        membership,
+        probes: [...snapshots.values()],
+        trace: {
+          contentPaths: [...trace.contentPaths],
+          existencePaths: [...trace.existencePaths],
+        },
+      };
+      cache.snapshot = JSON.stringify({
+        ...snapshot,
+        checksum: crypto.createHash("sha256").update(JSON.stringify(snapshot)).digest("hex"),
+      });
     }
     return crypto
       .createHash("sha256")

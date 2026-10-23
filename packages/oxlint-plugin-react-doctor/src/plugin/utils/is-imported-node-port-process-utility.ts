@@ -1,3 +1,5 @@
+import { getTsconfigAliasCacheGeneration } from "./resolve-tsconfig-alias.js";
+import { getModuleResolutionCacheGeneration } from "./resolve-relative-import-path.js";
 import * as path from "node:path";
 import { BUILTIN_GLOBAL_NAMESPACE_NAMES } from "../constants/js.js";
 import {
@@ -20,6 +22,11 @@ import {
   NODE_PORT_PROCESS_CONSUMER_GLOBAL_NAMES,
   NODE_PORT_PROCESS_RANGE_PREFIX_PATTERN,
 } from "../constants/react.js";
+import {
+  captureCrossFileProbes,
+  replayCrossFileProbes,
+  type CapturedCrossFileProbes,
+} from "./cross-file-probe-recorder.js";
 import type { EsTreeNode } from "./es-tree-node.js";
 import type { EsTreeNodeOfType } from "./es-tree-node-of-type.js";
 import { findProgramRoot } from "./find-program-root.js";
@@ -30,9 +37,12 @@ import { isFunctionLike } from "./is-function-like.js";
 import { isNodeOfType } from "./is-node-of-type.js";
 import { isNonReferenceIdentifier } from "./is-non-reference-identifier.js";
 import { isWithinAssignmentTarget } from "./is-within-assignment-target.js";
-import { parseSourceFile } from "./parse-source-file.js";
+import { getParseSourceFileCacheGeneration, parseSourceFile } from "./parse-source-file.js";
 import { parsePackageVersion } from "./parse-package-version.js";
-import { readNearestPackageManifest } from "./read-nearest-package-manifest.js";
+import {
+  getManifestCacheGeneration,
+  readNearestPackageManifest,
+} from "./read-nearest-package-manifest.js";
 import { resolveModulePath } from "./resolve-module-path.js";
 import type { RuleContext } from "./rule-context.js";
 import { stripParenExpression } from "./strip-paren-expression.js";
@@ -43,6 +53,58 @@ interface NodePortProcessEnvironment {
   readonly scopes: ScopeAnalysis;
   readonly filename: string;
 }
+
+interface NodePortProcessFacts {
+  readonly generation: number;
+  readonly aliasGeneration: number;
+  readonly resolutionGeneration: number;
+  readonly parserGeneration: number;
+  readonly origins: Map<SymbolDescriptor, CapturedCrossFileProbes<boolean>>;
+  readonly providerBodies: Map<string, CapturedCrossFileProbes<boolean>>;
+  closedProviders?: CapturedCrossFileProbes<boolean>;
+  exposures?: CapturedCrossFileProbes<Map<string, Set<EsTreeNode>>>;
+}
+
+const nodePortProcessFacts = new WeakMap<
+  ScopeAnalysis,
+  WeakMap<EsTreeNode, Map<string, NodePortProcessFacts>>
+>();
+
+const getNodePortProcessFacts = (environment: NodePortProcessEnvironment): NodePortProcessFacts => {
+  let programs = nodePortProcessFacts.get(environment.scopes);
+  if (!programs) {
+    programs = new WeakMap();
+    nodePortProcessFacts.set(environment.scopes, programs);
+  }
+  let filenames = programs.get(environment.program);
+  if (!filenames) {
+    filenames = new Map();
+    programs.set(environment.program, filenames);
+  }
+  const generation = getManifestCacheGeneration();
+  const aliasGeneration = getTsconfigAliasCacheGeneration();
+  const resolutionGeneration = getModuleResolutionCacheGeneration();
+  const parserGeneration = getParseSourceFileCacheGeneration();
+  let facts = filenames.get(environment.filename);
+  if (
+    !facts ||
+    facts.generation !== generation ||
+    facts.aliasGeneration !== aliasGeneration ||
+    facts.resolutionGeneration !== resolutionGeneration ||
+    facts.parserGeneration !== parserGeneration
+  ) {
+    facts = {
+      generation,
+      aliasGeneration,
+      resolutionGeneration,
+      parserGeneration,
+      origins: new Map(),
+      providerBodies: new Map(),
+    };
+    filenames.set(environment.filename, facts);
+  }
+  return facts;
+};
 
 const directCall = (
   node: EsTreeNode | null | undefined,
@@ -171,13 +233,20 @@ const isNativeJsonPath = (node: EsTreeNode, environment: NodePortProcessEnvironm
   );
 };
 
-const hasOnlyNativeGlobalTimerHandles = (environment: NodePortProcessEnvironment): boolean => {
+interface ClosedNodeProviderValidator {
+  readonly inspect: (node: EsTreeNode) => boolean | void;
+  readonly isClosed: () => boolean;
+}
+
+const createClosedNodeProviderValidator = (
+  environment: NodePortProcessEnvironment,
+): ClosedNodeProviderValidator => {
   const clearedProperties = new Set<string>();
   const scheduledProperties = new Set<string>();
   const allowedTimerReferences = new Set<EsTreeNode>();
   const timerReferences = new Set<EsTreeNode>();
   let valid = true;
-  walkAst(environment.program, (node) => {
+  const inspectTimer = (node: EsTreeNode): boolean | void => {
     if (!valid) return false;
     if (!isNodeOfType(node, "Identifier") || isNonReferenceIdentifier(node)) return;
     if (
@@ -245,21 +314,8 @@ const hasOnlyNativeGlobalTimerHandles = (environment: NodePortProcessEnvironment
     }
     scheduledProperties.add(propertyName);
     allowedTimerReferences.add(schedule.callee);
-  });
-  return (
-    valid &&
-    [...clearedProperties].every((property) => scheduledProperties.has(property)) &&
-    [...scheduledProperties].every((property) => clearedProperties.has(property)) &&
-    [...timerReferences].every(
-      (reference) => !isWithinAssignmentTarget(reference) && allowedTimerReferences.has(reference),
-    )
-  );
-};
-
-const hasClosedNodeProviders = (environment: NodePortProcessEnvironment): boolean => {
-  if (!hasOnlyNativeGlobalTimerHandles(environment)) return false;
-  let valid = true;
-  walkAst(environment.program, (node) => {
+  };
+  const inspectProvider = (node: EsTreeNode): boolean | void => {
     if (!valid) return false;
     if (
       isNodeOfType(node, "ThisExpression") ||
@@ -434,8 +490,27 @@ const hasClosedNodeProviders = (environment: NodePortProcessEnvironment): boolea
         break;
       }
     }
-  });
-  return valid;
+  };
+  return {
+    inspect: (node) => {
+      if (inspectTimer(node) === false) return false;
+      return inspectProvider(node);
+    },
+    isClosed: () =>
+      valid &&
+      [...clearedProperties].every((property) => scheduledProperties.has(property)) &&
+      [...scheduledProperties].every((property) => clearedProperties.has(property)) &&
+      [...timerReferences].every(
+        (reference) =>
+          !isWithinAssignmentTarget(reference) && allowedTimerReferences.has(reference),
+      ),
+  };
+};
+
+const hasClosedNodeProviders = (environment: NodePortProcessEnvironment): boolean => {
+  const validator = createClosedNodeProviderValidator(environment);
+  walkAst(environment.program, validator.inspect);
+  return validator.isClosed();
 };
 
 const hasPortProcessBody = (environment: NodePortProcessEnvironment): boolean => {
@@ -852,8 +927,13 @@ const hasPortProcessBody = (environment: NodePortProcessEnvironment): boolean =>
     !allowedResolveReferences.size
   )
     return false;
+  const providerValidator = createClosedNodeProviderValidator(environment);
   walkAst(environment.program, (node) => {
     if (!valid) return false;
+    if (providerValidator.inspect(node) === false) {
+      valid = false;
+      return false;
+    }
     if (
       isNodeOfType(node, "MemberExpression") &&
       errorParameter &&
@@ -903,7 +983,7 @@ const hasPortProcessBody = (environment: NodePortProcessEnvironment): boolean =>
   });
   return (
     valid &&
-    hasClosedNodeProviders(environment) &&
+    providerValidator.isClosed() &&
     closedReferences(resolveSymbol, environment, allowedResolveReferences) &&
     [...allowedImportReferences].every(([symbol, references]) =>
       closedReferences(symbol, environment, references),
@@ -911,40 +991,21 @@ const hasPortProcessBody = (environment: NodePortProcessEnvironment): boolean =>
   );
 };
 
-export const isImportedNodePortProcessUtility = (
-  call: EsTreeNodeOfType<"CallExpression">,
-  context: Pick<RuleContext, "filename" | "scopes">,
+const hasNodePortProcessOrigin = (
+  symbol: SymbolDescriptor,
+  source: string,
+  environment: NodePortProcessEnvironment,
+  facts: NodePortProcessFacts,
 ): boolean => {
-  const selectedCall = directCall(call);
-  const filename = context.filename;
-  if (
-    !filename ||
-    !selectedCall ||
-    !isNodeOfType(selectedCall.callee, "Identifier") ||
-    selectedCall.arguments.length !== NODE_PORT_PROCESS_ARGUMENT_COUNT
-  )
-    return false;
-  const [, , port] = selectedCall.arguments;
-  if (
-    !isNodeOfType(port, "Literal") ||
-    typeof port.value !== "number" ||
-    !Number.isFinite(port.value)
-  )
-    return false;
-  const program = findProgramRoot(call);
-  const symbol = context.scopes.symbolFor(selectedCall.callee);
-  if (!program || symbol?.kind !== "const" || !symbol.initializer) return false;
-  const source = requireSource(symbol.initializer, context.scopes);
-  if (!source || (!source.startsWith("./") && !source.startsWith("../"))) return false;
-  const environment = { program, scopes: context.scopes, filename: filename };
+  const { filename } = environment;
+  if (!symbol.initializer) return false;
   const references = new Set<EsTreeNode>();
   for (const reference of symbol.references) {
     const use = directCall(reference.identifier.parent);
     if (!use || use.callee !== reference.identifier) return false;
     references.add(reference.identifier);
   }
-  if (!closedReferences(symbol, environment, references) || !hasClosedNodeProviders(environment))
-    return false;
+  if (!closedReferences(symbol, environment, references)) return false;
   const extension = path.extname(source);
   if (extension && extension !== ".js") return false;
   const filePath = resolveModulePath(filename, source);
@@ -982,32 +1043,99 @@ export const isImportedNodePortProcessUtility = (
     )
   )
     return false;
-  let hasOtherExposure = false;
-  walkAst(program, (node) => {
-    if (hasOtherExposure) return false;
-    if (
-      isNodeOfType(node, "ImportDeclaration") &&
-      node.importKind !== "type" &&
-      typeof node.source.value === "string" &&
-      (node.source.value.startsWith("./") || node.source.value.startsWith("../")) &&
-      resolveModulePath(filename, node.source.value) === filePath
-    )
-      hasOtherExposure = true;
-    if (!isNodeOfType(node, "CallExpression") || node === symbol.initializer) return;
-    const otherSource = requireSource(node, context.scopes);
-    if (
-      otherSource &&
-      (otherSource.startsWith("./") || otherSource.startsWith("../")) &&
-      resolveModulePath(filename, otherSource) === filePath
-    )
-      hasOtherExposure = true;
+  if (!facts.exposures) {
+    facts.exposures = captureCrossFileProbes(() => {
+      const exposures = new Map<string, Set<EsTreeNode>>();
+      walkAst(environment.program, (node) => {
+        const moduleSource =
+          isNodeOfType(node, "ImportDeclaration") &&
+          node.importKind !== "type" &&
+          typeof node.source.value === "string"
+            ? node.source.value
+            : isNodeOfType(node, "CallExpression")
+              ? requireSource(node, environment.scopes)
+              : null;
+        if (!moduleSource || (!moduleSource.startsWith("./") && !moduleSource.startsWith("../")))
+          return;
+        const resolved = resolveModulePath(filename, moduleSource);
+        if (!resolved) return;
+        let references = exposures.get(resolved);
+        if (!references) {
+          references = new Set();
+          exposures.set(resolved, references);
+        }
+        references.add(node);
+      });
+      return exposures;
+    });
+  }
+  const exposures = facts.exposures?.value.get(filePath);
+  if (
+    exposures?.size !== NODE_PORT_PROCESS_SINGLE_VALUE_COUNT ||
+    !exposures.has(symbol.initializer)
+  )
+    return false;
+  let supported = facts.providerBodies.get(filePath);
+  if (supported) {
+    replayCrossFileProbes(supported.trace);
+    return supported.value;
+  }
+  supported = captureCrossFileProbes(() => {
+    const provider = parseSourceFile(filePath);
+    return (
+      isNodeOfType(provider, "Program") &&
+      hasPortProcessBody({
+        program: provider,
+        scopes: analyzeScopes(provider),
+        filename: filePath,
+      })
+    );
   });
-  if (hasOtherExposure) return false;
-  const provider = parseSourceFile(filePath);
-  if (!isNodeOfType(provider, "Program")) return false;
-  return hasPortProcessBody({
-    program: provider,
-    scopes: analyzeScopes(provider),
-    filename: filePath,
-  });
+  facts.providerBodies.set(filePath, supported);
+  return supported.value;
+};
+
+export const isImportedNodePortProcessUtility = (
+  call: EsTreeNodeOfType<"CallExpression">,
+  context: Pick<RuleContext, "filename" | "scopes">,
+): boolean => {
+  const selectedCall = directCall(call);
+  const filename = context.filename;
+  if (
+    !filename ||
+    !selectedCall ||
+    !isNodeOfType(selectedCall.callee, "Identifier") ||
+    selectedCall.arguments.length !== NODE_PORT_PROCESS_ARGUMENT_COUNT
+  )
+    return false;
+  const [, , port] = selectedCall.arguments;
+  if (
+    !isNodeOfType(port, "Literal") ||
+    typeof port.value !== "number" ||
+    !Number.isFinite(port.value)
+  )
+    return false;
+  const program = findProgramRoot(call);
+  const symbol = context.scopes.symbolFor(selectedCall.callee);
+  if (!program || symbol?.kind !== "const" || !symbol.initializer) return false;
+  const source = requireSource(symbol.initializer, context.scopes);
+  if (!source || (!source.startsWith("./") && !source.startsWith("../"))) return false;
+  const environment = { program, scopes: context.scopes, filename: filename };
+  const facts = getNodePortProcessFacts(environment);
+  if (!facts.closedProviders)
+    facts.closedProviders = captureCrossFileProbes(() => hasClosedNodeProviders(environment));
+  replayCrossFileProbes(facts.closedProviders.trace);
+  if (!facts.closedProviders.value) return false;
+  const cached = facts.origins.get(symbol);
+  if (cached) {
+    replayCrossFileProbes(cached.trace);
+    if (facts.exposures) replayCrossFileProbes(facts.exposures.trace);
+    return cached.value;
+  }
+  const supported = captureCrossFileProbes(() =>
+    hasNodePortProcessOrigin(symbol, source, environment, facts),
+  );
+  facts.origins.set(symbol, supported);
+  if (facts.exposures) replayCrossFileProbes(facts.exposures.trace);
+  return supported.value;
 };
