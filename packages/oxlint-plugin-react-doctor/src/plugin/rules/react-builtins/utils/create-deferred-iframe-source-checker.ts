@@ -216,6 +216,8 @@ const staticMetadata = (reference: EsTreeNode, module: DeferredIframeModule): bo
 
 export const createDeferredIframeSourceChecker = (context: RuleContext) => {
   let modules: ReadonlyArray<DeferredIframeModule> | null | undefined;
+  const modulesByProgram = new Map<EsTreeNode | null, DeferredIframeModule>();
+  const modulesByFilePath = new Map<string, DeferredIframeModule>();
   let index: SourceProjectIndex | null = null;
   let documentLookups: ReadonlyArray<EsTreeNode> | undefined;
   let sourceQueryClass: string | null = null;
@@ -247,7 +249,7 @@ export const createDeferredIframeSourceChecker = (context: RuleContext) => {
     DeferredIframeCarrierChildren
   >();
   const nativeRefUses = new Map<SymbolDescriptor, boolean>();
-  const moduleFor = (filePath: string) => modules?.find((module) => module.filePath === filePath);
+  const moduleFor = (filePath: string) => modulesByFilePath.get(filePath);
   const reachable = (node: EsTreeNode, module: DeferredIframeModule) =>
     isNodeReachableWithinFunction(node, { ...context, scopes: module.scopes, cfg: module.cfg });
   const resolveComponent = (
@@ -478,9 +480,7 @@ export const createDeferredIframeSourceChecker = (context: RuleContext) => {
     if (uses.length === 0) return runtimeFunctionExports(origin.component, owner).size > 0;
     const values = new Map<EsTreeNode, DeferredIframeModule>();
     for (const use of uses) {
-      const useModule = modules?.find(
-        (candidate) => candidate.programNode === findProgramRoot(use),
-      );
+      const useModule = modulesByProgram.get(findProgramRoot(use));
       const value = attributeValue(use.openingElement, origin.propName);
       if (!useModule || !value) return false;
       values.set(value, useModule);
@@ -514,7 +514,7 @@ export const createDeferredIframeSourceChecker = (context: RuleContext) => {
     hasSupportedDeferredIframeRenderUse(node, module, {
       moduleForNode: (use) => {
         const program = findProgramRoot(use);
-        return modules?.find((candidate) => candidate.programNode === program) ?? null;
+        return modulesByProgram.get(program) ?? null;
       },
       isExportedFunction: (functionNode, owner) =>
         runtimeFunctionExports(functionNode, owner).size > 0,
@@ -999,6 +999,14 @@ export const createDeferredIframeSourceChecker = (context: RuleContext) => {
               : fs.readFileSync(module.filePath, "utf8"),
           cfg: module.filePath === filename ? context.cfg : analyzeControlFlow(module.programNode),
         }));
+        for (const module of modules) {
+          if (!modulesByProgram.has(module.programNode)) {
+            modulesByProgram.set(module.programNode, module);
+          }
+          if (!modulesByFilePath.has(module.filePath)) {
+            modulesByFilePath.set(module.filePath, module);
+          }
+        }
       } catch {
         return false;
       }
@@ -1023,8 +1031,7 @@ export const createDeferredIframeSourceChecker = (context: RuleContext) => {
       if (lookups.length === DEFERRED_IFRAME_SINGLE_ARGUMENT_COUNT) {
         const lookup = lookups[0];
         const declaration = lookup && findTransparentExpressionRoot(lookup).parent;
-        const lookupModule =
-          lookup && modules.find((module) => module.programNode === findProgramRoot(lookup));
+        const lookupModule = lookup && modulesByProgram.get(findProgramRoot(lookup));
         if (
           lookup &&
           lookupModule &&
@@ -1122,7 +1129,7 @@ export const createDeferredIframeSourceChecker = (context: RuleContext) => {
       return false;
     if (
       !uses.every((use) => {
-        const useModule = modules?.find((module) => module.programNode === findProgramRoot(use));
+        const useModule = modulesByProgram.get(findProgramRoot(use));
         return Boolean(useModule && supportedRenderUse(use, useModule));
       })
     )
