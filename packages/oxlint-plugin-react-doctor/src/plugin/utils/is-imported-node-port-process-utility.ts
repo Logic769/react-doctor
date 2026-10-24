@@ -493,8 +493,26 @@ const createClosedNodeProviderValidator = (
   };
   return {
     inspect: (node) => {
-      if (inspectTimer(node) === false) return false;
-      return inspectProvider(node);
+      if (!valid) return false;
+      switch (node.type) {
+        case "Identifier":
+          if (inspectTimer(node) === false) return false;
+          return inspectProvider(node);
+        case "ThisExpression":
+        case "Property":
+        case "ClassDeclaration":
+        case "ClassExpression":
+        case "ImportExpression":
+        case "WithStatement":
+        case "TaggedTemplateExpression":
+        case "MemberExpression":
+        case "ImportDeclaration":
+          return inspectProvider(node);
+        default:
+          if (node.type.startsWith("TS") || node.type.startsWith("JSX")) {
+            return inspectProvider(node);
+          }
+      }
     },
     isClosed: () =>
       valid &&
