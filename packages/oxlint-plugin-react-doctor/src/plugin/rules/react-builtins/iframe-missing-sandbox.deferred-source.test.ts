@@ -133,6 +133,90 @@ export const FrameBody = props => <div className="frame-body">{props.children}<b
 
 const cases: ReadonlyArray<DeferredIframeCase> = [
   {
+    name: "source query receiver parenthesized-lookup",
+    source:
+      "import {useRef} from 'react';export const Preview=()=>{const frame0=useRef(null);const open=()=>{const container=(document.querySelector('#preview'));container.querySelector('.carrier0 > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier0\"><iframe ref={frame0}/></div><button onClick={open}>Open</button></div>;};",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "source query receiver asserted-lookup",
+    source:
+      "import {useRef} from 'react';export const Preview=()=>{const frame0=useRef(null);const open=()=>{const container=(document.querySelector('#preview') as HTMLDivElement);container.querySelector('.carrier0 > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier0\"><iframe ref={frame0}/></div><button onClick={open}>Open</button></div>;};",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "source query receiver satisfied-lookup",
+    source:
+      "import {useRef} from 'react';export const Preview=()=>{const frame0=useRef(null);const open=()=>{const container=(document.querySelector('#preview') satisfies unknown);container.querySelector('.carrier0 > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier0\"><iframe ref={frame0}/></div><button onClick={open}>Open</button></div>;};",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "source query receiver classlist-other-class",
+    source:
+      "import {useRef} from 'react';export const Preview=()=>{const frame0=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.classList.toggle('active');container.querySelector('.carrier0 > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier0\"><iframe ref={frame0}/></div><button onClick={open}>Open</button></div>;};",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "source query receiver duplicate-frame-query",
+    source:
+      "import {useRef} from 'react';export const Preview=()=>{const frame0=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier0 > iframe').setAttribute('src','https://media.example/video');container.querySelector('.carrier0 > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier0\"><iframe ref={frame0}/></div><button onClick={open}>Open</button></div>;};",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "source query receiver different-frame-query",
+    source:
+      "import {useRef} from 'react';export const Preview=()=>{const frame0=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier0 > iframe').setAttribute('src','https://media.example/video');container.querySelector('.other > iframe').setAttribute('src','https://media.example/other');};return <div id=\"preview\"><div className=\"carrier0\"><iframe ref={frame0}/></div><button onClick={open}>Open</button></div>;};",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "source query receiver different-receiver-symbol",
+    source:
+      "import {useRef} from 'react';export const Preview=()=>{const frame0=useRef(null);const noise=(container)=>container.querySelector('.other > iframe');const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier0 > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier0\"><iframe ref={frame0}/></div><button onClick={open}>Open</button></div>;};",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "source query receiver document-lookup-name-shadow",
+    source:
+      "import {useRef} from 'react';export const Preview=()=>{const frame0=useRef(null);const noise=()=>{const document={querySelector:()=>null};document.querySelector('.other > iframe');};const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier0 > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier0\"><iframe ref={frame0}/></div><button onClick={open}>Open</button></div>;};",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "source query receiver same-class-clear-branch",
+    source:
+      "import {useRef} from 'react';export const Preview=()=>{const frame0=useRef(null);const open=()=>{const container=document.querySelector('#preview');if (true) {container.querySelector('.carrier0 > iframe').setAttribute('src','https://media.example/video');} else {container.querySelector('.carrier0').innerHTML='';}};return <div id=\"preview\"><div className=\"carrier0\"><iframe ref={frame0}/></div><button onClick={open}>Open</button></div>;};",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "source query receiver computed-other-query",
+    source:
+      "import {useRef} from 'react';export const Preview=()=>{const frame0=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier0 > iframe').setAttribute('src','https://media.example/video');container['querySelector']('.other > iframe');};return <div id=\"preview\"><div className=\"carrier0\"><iframe ref={frame0}/></div><button onClick={open}>Open</button></div>;};",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "source query receiver mutable-one-query",
+    source:
+      "import {useRef} from 'react';export const Preview=()=>{const frame0=useRef(null);const open=()=>{let container=document.querySelector('#preview');container.querySelector('.carrier0 > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier0\"><iframe ref={frame0}/></div><button onClick={open}>Open</button></div>;};",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "source query receiver mutable-duplicate-query",
+    source:
+      "import {useRef} from 'react';export const Preview=()=>{const frame0=useRef(null);const open=()=>{let container=document.querySelector('#preview');container.querySelector('.carrier0 > iframe').setAttribute('src','https://media.example/video');container.querySelector('.carrier0 > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier0\"><iframe ref={frame0}/></div><button onClick={open}>Open</button></div>;};",
+    files: {},
+    certificate: false,
+  },
+  {
     name: "direct native div and executable button",
     source: NATIVE_SOURCE,
     files: {},
@@ -1057,6 +1141,706 @@ const cases: ReadonlyArray<DeferredIframeCase> = [
     ]),
     files: {},
     certificate: false,
+  },
+  {
+    name: "reviewed capture-stop",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>event.stopPropagation()}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed capture-prevent-default",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>event.preventDefault()}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed capture-log-only",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>console.log(event.type)}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed capture-stop-unrelated-sibling",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><span onClickCapture={event=>event.stopPropagation()}/><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed local-only-svg-parent",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nexport const Surface=()=> <svg><Preview/></svg>;",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed local-only-template-parent",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nexport const Surface=()=> <template><Preview/></template>;",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed local-html-parent",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nexport const Surface=()=> <div><Preview/></div>;",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed svg-foreign-object-html-parent",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nexport const Surface=()=> <svg><foreignObject><Preview/></foreignObject></svg>;",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed unrelated-svg-sibling",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nexport const Surface=()=> <div><svg/><Preview/></div>;",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed local-hidden-parent",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nexport const Surface=()=> <div hidden><Preview/></div>;",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed local-inert-parent",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nexport const Surface=()=> <div inert><Preview/></div>;",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed local-capture-stop-parent",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nexport const Surface=()=> <div onClickCapture={event=>event.stopPropagation()}><Preview/></div>;",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed local-capture-prevent-parent",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nexport const Surface=()=> <div onClickCapture={event=>event.preventDefault()}><Preview/></div>;",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed local-capture-log-parent",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nexport const Surface=()=> <div onClickCapture={event=>console.log(event.type)}><Preview/></div>;",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed local-svg-mapped",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nexport const Surface=()=> <svg>{[1].map(()=> <Preview/>)}</svg>;",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed local-html-mapped",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nexport const Surface=()=> <div>{[1].map(()=> <Preview/>)}</div>;",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed local-foreign-object-hidden",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nexport const Surface=()=> <svg hidden><foreignObject><Preview/></foreignObject></svg>;",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed local-foreign-object-capture",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nexport const Surface=()=> <svg onClickCapture={event=>event.stopPropagation()}><foreignObject><Preview/></foreignObject></svg>;",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed transitive-svg",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nconst Stage=()=> <Preview/>;export const Surface=()=> <svg><Stage/></svg>;",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed transitive-template",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nconst Stage=()=> <Preview/>;export const Surface=()=> <template><Stage/></template>;",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed transitive-html",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nconst Stage=()=> <Preview/>;export const Surface=()=> <div><Stage/></div>;",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed transitive-foreign-object",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nconst Stage=()=> <Preview/>;export const Surface=()=> <svg><foreignObject><Stage/></foreignObject></svg>;",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed passive-contract-direct-log-primitive",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={()=>console.log(\"click\",1,true,null)}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed passive-contract-body-prevent-and-log",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>{event.preventDefault();console.log(event.type);}}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed passive-contract-empty-body",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={()=>{}}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed passive-contract-return-prevent-default",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>{return event.preventDefault();}}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed passive-contract-return-primitive",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={()=>42}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed passive-contract-null-handler",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={null}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed passive-contract-false-handler",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={false}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed passive-contract-const-handler",
+    source:
+      "const handle=event=>event.preventDefault();import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={handle}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed passive-contract-const-alias",
+    source:
+      "const handle=event=>console.log(event.type);const alias=handle;import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={alias}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed passive-contract-optional-stop",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>event?.stopPropagation()}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-computed-stop",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>event[\"stopPropagation\"]()}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-dynamic-method",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>event[method]()}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-native-immediate",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>event.nativeEvent.stopImmediatePropagation()}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-cancel-bubble",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>{event.cancelBubble=true;}}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-alias-event",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>{const alias=event;alias.stopPropagation();}}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-closure-stop",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>{const stop=()=>event.stopPropagation();stop();}}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-unknown-forward",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>forward(event)}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-unknown-no-argument",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={()=>unknown()}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-escape-log-object",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>console.log(event)}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-unknown-getter",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>console.log(other.type)}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-native-object-log",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>console.log(event.nativeEvent)}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-parameter-rebind",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>{event=other;event.preventDefault();}}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-member-rebind",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>{event.preventDefault=event.stopPropagation;event.preventDefault();}}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-optional-benign",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>event?.preventDefault()}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-computed-benign",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>event[\"preventDefault\"]()}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-extra-argument",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>event.preventDefault(other())}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-async-handler",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={async event=>event.preventDefault()}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-destructured-parameter",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={({preventDefault})=>preventDefault()}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-rest-parameter",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={(...events)=>events[0].stopPropagation()}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-second-parameter",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={(event,extra)=>extra()}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-local-console",
+    source:
+      "const console={log(){throw Error(\"opaque\");}};import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>console.log(event.type)}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-unknown-handler",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={handle}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-mutable-handler",
+    source:
+      "let handle=event=>event.preventDefault();import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={handle}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-returned-closure",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>()=>event.stopPropagation()}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-nested-log-call",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>console.log(other())}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-spread-log",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>console.log(...other)}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-member-handler",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={handlers.capture}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed passive-contract-function-declaration",
+    source:
+      "function handle(event){event.preventDefault();}import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={handle}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed jsx-attribute-unmounted",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nexport const Surface=()=> <div ignored={<Preview/>}/>;",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed dead-local-jsx",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nexport const Surface=()=> {const unused=<Preview/>;return <div/>;};",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed unknown-call-argument",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nconst consume=value=>null;export const Surface=()=> consume(<Preview/>);",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed conditional-test-jsx",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nexport const Surface=()=> <>{<Preview/> ? null:null}</>;",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed logical-left-jsx",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nexport const Surface=()=> <>{<Preview/> && null}</>;",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed async-map-callback",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nexport const Surface=()=> <div>{[1].map(async()=> <Preview/>)}</div>;",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed sync-map-return-block",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nexport const Surface=()=> <div>{[1].map(()=> {return <Preview/>;})}</div>;",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed unused-top-level-jsx",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nconst unused=<Preview/>;export const Surface=()=> <div/>;",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed custom-map-discard",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nconst opaque={map:()=>null};export const Surface=()=> <div>{opaque.map(()=> <Preview/>)}</div>;",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed empty-array-map",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nexport const Surface=()=> <div>{[].map(()=> <Preview/>)}</div>;",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed readonly-array-map",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nconst values=[1];export const Surface=()=> <div>{values.map(()=> <Preview/>)}</div>;",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed overridden-array-map",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nconst values=[1];values.map=()=>null;export const Surface=()=> <div>{values.map(()=> <Preview/>)}</div>;",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed aliased-array-escape",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nconst values=[1];const alias=values;alias.map=()=>null;export const Surface=()=> <div>{values.map(()=> <Preview/>)}</div>;",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed known-caller-object-map-parameter",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nconst values={map:()=>[]};const Gallery=({values})=>values.map(()=> <Preview/>);export const Surface=()=> <Gallery values={values}/>;",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed known-caller-empty-array-parameter",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nconst values=[];const Gallery=({values})=>values.map(()=> <Preview/>);export const Surface=()=> <Gallery values={values}/>;",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed known-caller-array-parameter",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nconst values=[1];const Gallery=({values})=>values.map(()=> <Preview/>);export const Surface=()=> <Gallery values={values}/>;",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed known-caller-object-props-alias",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nconst values={map:()=>[]};const Gallery=props=>{const items=props.values;return items.map(()=> <Preview/>);};export const Surface=()=> <Gallery values={values}/>;",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed bound-dynamic-stop-capture",
+    source:
+      "const method='stopPropagation';import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>event[method]()}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed forwarded-nativebutton-stop-capture",
+    source:
+      "const Button=props=> <button onClickCapture={event=>event.stopPropagation()} onClick={props.onClick ? ()=>props.onClick():null}>{props.children}</button>;const Action=props=> <Button onClick={props.onClick ? ()=>props.onClick():null}>{props.children}</Button>;import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><Action onClick={open}>Open</Action></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed forwarded-nativebutton-benign-capture",
+    source:
+      "const Button=props=> <button onClickCapture={event=>event.preventDefault()} onClick={props.onClick ? ()=>props.onClick():null}>{props.children}</button>;const Action=props=> <Button onClick={props.onClick ? ()=>props.onClick():null}>{props.children}</Button>;import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><Action onClick={open}>Open</Action></div>;};\n",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed nested-shadowed-unmounted-export",
+    source:
+      'import React,{useRef} from "react";\nconst HiddenRoot=()=>{const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector("#preview");container.querySelector(".carrier > iframe").setAttribute("src","https://media.example/video");};return <div id="preview"><div className="carrier"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nreturn null;};const Preview=()=>null;export {Preview};',
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed type-only-unmounted-export",
+    source:
+      'import React,{useRef} from "react";\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector("#preview");container.querySelector(".carrier > iframe").setAttribute("src","https://media.example/video");};return <div id="preview"><div className="carrier"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nexport type {Preview};',
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed runtime-export-alias",
+    source:
+      'import React,{useRef} from "react";\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector("#preview");container.querySelector(".carrier > iframe").setAttribute("src","https://media.example/video");};return <div id="preview"><div className="carrier"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nexport {Preview as Player};',
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed local-unused-refusal",
+    source:
+      'import React,{useRef} from "react";\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector("#preview");container.querySelector(".carrier > iframe").setAttribute("src","https://media.example/video");};return <div id="preview"><div className="carrier"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nexport const Surface=()=>null;',
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed known-caller-nonempty-array-length-read",
+    source:
+      "import React,{useRef} from 'react';\nconst Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\"><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\nconst values=[1];const count=values.length;const Gallery=({values})=>values.map(()=> <Preview/>);export const Surface=()=> <Gallery values={values}/>;",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed fuzz-void-no-op-in-every-body",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{ void 0;const frame=useRef(null);const open=()=>{ void 0;const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={()=>{ void 0;}}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed void-literal-zero",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={()=>{void 0;}}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed void-parenthesized-literal",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={()=>{void (0);}}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed void-string-literal",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={()=>{void \"noop\";}}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "reviewed void-stop-propagation",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>{void event.stopPropagation();}}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed void-unknown-call",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>{void forward(event);}}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed void-getter",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>{void event.target;}}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "reviewed void-alias-event",
+    source:
+      "import React,{useRef} from 'react';\nexport const Preview=()=>{const frame=useRef(null);const open=()=>{const container=document.querySelector('#preview');container.querySelector('.carrier > iframe').setAttribute('src','https://media.example/video');};return <div id=\"preview\" onClickCapture={event=>{void event;}}><div className=\"carrier\"><iframe ref={frame}/></div><button onClick={open}>Open</button></div>;};\n",
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "transparent carrier remains selected",
+    source:
+      'import {useRef} from "react";const Frame=props=><div className="carrier">{props.children}</div>;export const Preview=()=>{const frame0=useRef(null);const open=()=>{const container=document.querySelector("#preview");container.querySelector(".carrier > iframe").setAttribute("src","https://media.example/video");};return <div id="preview"><Frame><iframe ref={frame0}/></Frame><button onClick={open}>Open</button></div>;};',
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "transparent carrier native siblings and whitespace",
+    source:
+      'import {useRef} from "react";const Frame=props=><div className="carrier">{props.children}</div>;export const Preview=()=>{const frame0=useRef(null);const open=()=>{const container=document.querySelector("#preview");container.querySelector(".carrier > iframe").setAttribute("src","https://media.example/video");};return <div id="preview"><Frame> <span/><iframe ref={frame0}/> </Frame><button onClick={open}>Open</button></div>;};',
+    files: {},
+    certificate: true,
+  },
+  {
+    name: "transparent carrier opaque child refuses",
+    source:
+      'import {useRef} from "react";const Frame=props=><div className="carrier">{props.children}</div>;export const Preview=()=>{const frame0=useRef(null);const open=()=>{const container=document.querySelector("#preview");container.querySelector(".carrier > iframe").setAttribute("src","https://media.example/video");};return <div id="preview"><Frame><Unknown/><iframe ref={frame0}/></Frame><button onClick={open}>Open</button></div>;};',
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "transparent carrier another opaque use refuses",
+    source:
+      'import {useRef} from "react";const Frame=props=><div className="carrier">{props.children}</div>;export const Preview=()=>{const frame0=useRef(null);const open=()=>{const container=document.querySelector("#preview");container.querySelector(".carrier > iframe").setAttribute("src","https://media.example/video");};return <div id="preview"><Frame><iframe ref={frame0}/></Frame><button onClick={open}>Open</button></div>;};const Unknown=()=>null;const Other=()=> <Frame><Unknown/></Frame>;',
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "transparent carrier opening ref refuses",
+    source:
+      'import {useRef} from "react";const Frame=props=><div className="carrier">{props.children}</div>;export const Preview=()=>{const frame0=useRef(null);const open=()=>{const container=document.querySelector("#preview");container.querySelector(".carrier > iframe").setAttribute("src","https://media.example/video");};return <div id="preview"><Frame ref={frame0}><iframe ref={frame0}/></Frame><button onClick={open}>Open</button></div>;};',
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "mixed literal and transparent same class refuses",
+    source:
+      'import {useRef} from "react";const Frame=props=><div className="carrier">{props.children}</div>;export const Preview=()=>{const frame0=useRef(null);const open=()=>{const container=document.querySelector("#preview");container.querySelector(".carrier > iframe").setAttribute("src","https://media.example/video");};return <div id="preview"><Frame><iframe ref={frame0}/></Frame><div className="carrier"><iframe/></div><button onClick={open}>Open</button></div>;};',
+    files: {},
+    certificate: false,
+  },
+  {
+    name: "repeated other-class transparent carrier preserves selected route",
+    source:
+      'import {useRef} from "react";const Frame=props=><div className="carrier">{props.children}</div>;const Other=props=><div className="other">{props.children}</div>;export const Preview=()=>{const frame0=useRef(null);const other0=useRef(null);const other1=useRef(null);const open=()=>{const container=document.querySelector("#preview");container.querySelector(".carrier > iframe").setAttribute("src","https://media.example/video");};return <div id="preview"><Frame><iframe ref={frame0}/></Frame><Other><iframe ref={other0}/></Other><Other><iframe ref={other1}/></Other><button onClick={open}>Open</button></div>;};',
+    files: {},
+    certificate: true,
   },
 ];
 let temporaryDirectory = "";

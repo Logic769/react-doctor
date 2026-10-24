@@ -1,10 +1,18 @@
+import { getTsconfigAliasCacheGeneration } from "../../../utils/resolve-tsconfig-alias.js";
+import { getModuleResolutionCacheGeneration } from "../../../utils/resolve-relative-import-path.js";
 import * as path from "node:path";
-import type { SymbolDescriptor } from "../../../semantic/scope-analysis.js";
+import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import { buildSourceProjectIndex } from "../../../utils/build-source-project-index.js";
 import type {
   SourceProjectIndex,
   SourceProjectModule,
 } from "../../../utils/build-source-project-index.js";
+import {
+  captureCrossFileProbes,
+  replayCrossFileProbes,
+  type CapturedCrossFileProbes,
+} from "../../../utils/cross-file-probe-recorder.js";
+import { getManifestCacheGeneration } from "../../../utils/read-nearest-package-manifest.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
 import { findEnclosingFunction } from "../../../utils/find-enclosing-function.js";
@@ -55,6 +63,20 @@ interface ProjectNameCall {
   readonly node: EsTreeNodeOfType<"CallExpression">;
 }
 
+interface ProjectNameOriginFacts {
+  readonly generation: number;
+  readonly aliasGeneration: number;
+  readonly resolutionGeneration: number;
+  readonly program: EsTreeNodeOfType<"Program">;
+  readonly scopes: ScopeAnalysis;
+  readonly filename: string;
+  readonly rootDirectory: string;
+  readonly origins: WeakMap<EsTreeNode, Map<string, CapturedCrossFileProbes<boolean>>>;
+  index?: CapturedCrossFileProbes<SourceProjectIndex | null>;
+  closedSurface?: CapturedCrossFileProbes<boolean>;
+  calls?: CapturedCrossFileProbes<ReadonlyMap<EsTreeNode, ReadonlyArray<ProjectNameCall>>>;
+}
+
 const isLiteral = (node: EsTreeNode | null | undefined, value: string | number): boolean =>
   Boolean(node && isNodeOfType(node, "Literal") && node.value === value);
 
@@ -80,18 +102,37 @@ const getDirectCall = (
     ? node
     : null;
 
+const readonlySymbolsByScopes = new WeakMap<
+  ScopeAnalysis,
+  WeakMap<EsTreeNode, Map<SymbolDescriptor, boolean>>
+>();
+
 const getReadonlySymbol = (
   node: EsTreeNode,
   module: SourceProjectModule,
 ): SymbolDescriptor | null => {
   const symbol = module.scopes.symbolFor(node);
-  return symbol &&
-    hasCompleteSymbolReferences(symbol, module.programNode, module.scopes) &&
-    symbol.references.every(
-      (reference) => reference.flag === "read" && !isWithinAssignmentTarget(reference.identifier),
-    )
-    ? symbol
-    : null;
+  if (!symbol) return null;
+  let programs = readonlySymbolsByScopes.get(module.scopes);
+  if (!programs) {
+    programs = new WeakMap();
+    readonlySymbolsByScopes.set(module.scopes, programs);
+  }
+  let symbols = programs.get(module.programNode);
+  if (!symbols) {
+    symbols = new Map();
+    programs.set(module.programNode, symbols);
+  }
+  let readonly = symbols.get(symbol);
+  if (readonly === undefined) {
+    readonly =
+      hasCompleteSymbolReferences(symbol, module.programNode, module.scopes) &&
+      symbol.references.every(
+        (reference) => reference.flag === "read" && !isWithinAssignmentTarget(reference.identifier),
+      );
+    symbols.set(symbol, readonly);
+  }
+  return readonly ? symbol : null;
 };
 
 const hasSameBinding = (
@@ -334,7 +375,7 @@ const resolveDirectFunction = (
   const importedModule = resolvedPath
     ? index.modulesByFilePath.get(normalizeFilename(resolvedPath))
     : null;
-  if (!importedModule || !hasClosedNativeSurface(importedModule)) return null;
+  if (!importedModule) return null;
   const value = findExportedValue(importedModule.programNode, exportedName);
   if (!value || !isFunctionLike(value) || ("generator" in value && value.generator)) return null;
   const binding = getDirectFunctionBindingIdentifier(value);
@@ -342,19 +383,19 @@ const resolveDirectFunction = (
   return { module: importedModule, node: value };
 };
 
-const collectDirectCallsTo = (
-  target: ProjectNameFunction,
+const collectProjectNameCalls = (
   index: SourceProjectIndex,
-): ReadonlyArray<ProjectNameCall> => {
-  const calls: ProjectNameCall[] = [];
+): ReadonlyMap<EsTreeNode, ReadonlyArray<ProjectNameCall>> => {
+  const calls = new Map<EsTreeNode, ProjectNameCall[]>();
   for (const module of index.modulesByFilePath.values()) {
-    if (!hasClosedNativeSurface(module)) continue;
     walkAst(module.programNode, (node) => {
       const invocation = getDirectCall(node);
       if (!invocation || !isNodeOfType(invocation.callee, "Identifier")) return;
       const resolved = resolveDirectFunction(invocation.callee, module, index);
-      if (resolved?.module === target.module && resolved.node === target.node)
-        calls.push({ module, node: invocation });
+      if (!resolved) return;
+      const invocations = calls.get(resolved.node) ?? [];
+      invocations.push({ module, node: invocation });
+      calls.set(resolved.node, invocations);
     });
   }
   return calls;
@@ -532,6 +573,7 @@ const tracesQuotedProjectName = (
   module: SourceProjectModule,
   index: SourceProjectIndex,
   hops: number,
+  calls: ReadonlyMap<EsTreeNode, ReadonlyArray<ProjectNameCall>>,
 ): boolean => {
   const inner = stripParenExpression(expression);
   if (isNodeOfType(inner, "Identifier")) {
@@ -582,12 +624,14 @@ const tracesQuotedProjectName = (
       })
     )
       return false;
-    return collectDirectCallsTo(owner, index).some((caller) => {
+    return (calls.get(owner.node) ?? []).some((caller) => {
       if (caller.node.arguments.length !== 1) return false;
       const argument = caller.node.arguments[0];
       const properties = argument ? getOwnStaticProperties(argument) : null;
       const value = properties?.get(property);
-      return Boolean(value && tracesQuotedProjectName(value, caller.module, index, hops - 1));
+      return Boolean(
+        value && tracesQuotedProjectName(value, caller.module, index, hops - 1, calls),
+      );
     });
   }
   return false;
@@ -630,7 +674,8 @@ const isDescriptorPattern = (construction: EsTreeNode, owner: ProjectNameFunctio
   return Boolean(
     descriptor?.has("files") &&
     descriptor.has("to") &&
-    descriptors?.elements.some((element) => element === property.parent),
+    descriptors &&
+    property.parent.parent === descriptors,
   );
 };
 
@@ -738,7 +783,7 @@ const hasPreservingReplacementConsumer = (
 export const createQuotedProjectNameRegexpOriginChecker = (
   context: RuleContext,
 ): ((construction: EsTreeNode, argument: EsTreeNode) => boolean) => {
-  let index: SourceProjectIndex | null | undefined;
+  let facts: ProjectNameOriginFacts | undefined;
   return (construction, argument) => {
     if (!isNodeOfType(argument, "Identifier")) return false;
     const program = findProgramRoot(construction);
@@ -759,43 +804,88 @@ export const createQuotedProjectNameRegexpOriginChecker = (
       scopes: context.scopes,
     };
     const functionNode = findEnclosingFunction(construction);
-    if (!isFunctionLike(functionNode) || !hasClosedNativeSurface(module)) return false;
+    if (!isFunctionLike(functionNode)) return false;
     const owner = { module, node: functionNode };
     const property = getParameterProperty(argument, owner);
     if (!property || !isDescriptorPattern(construction, owner)) return false;
-    if (index === undefined)
-      index = buildSourceProjectIndex({
+    const generation = getManifestCacheGeneration();
+    const aliasGeneration = getTsconfigAliasCacheGeneration();
+    const resolutionGeneration = getModuleResolutionCacheGeneration();
+    if (
+      !facts ||
+      facts.generation !== generation ||
+      facts.aliasGeneration !== aliasGeneration ||
+      facts.resolutionGeneration !== resolutionGeneration ||
+      facts.program !== program ||
+      facts.scopes !== context.scopes ||
+      facts.filename !== filename ||
+      facts.rootDirectory !== rootDirectory
+    ) {
+      facts = {
+        generation,
+        aliasGeneration,
+        resolutionGeneration,
+        program,
+        scopes: context.scopes,
+        filename,
+        rootDirectory,
+        origins: new WeakMap(),
+      };
+    }
+    const currentFacts = facts;
+    let origins = currentFacts.origins.get(functionNode);
+    if (!origins) {
+      origins = new Map();
+      currentFacts.origins.set(functionNode, origins);
+    }
+    currentFacts.index ??= captureCrossFileProbes(() =>
+      buildSourceProjectIndex({
         rootDirectory,
         currentFilePath: module.filePath,
         currentProgramNode: program,
         currentScopes: context.scopes,
+      }),
+    );
+    replayCrossFileProbes(currentFacts.index.trace);
+    const index = currentFacts.index.value;
+    if (!index) return false;
+    currentFacts.closedSurface ??= captureCrossFileProbes(() =>
+      [...index.modulesByFilePath.values()].every(hasClosedNativeSurface),
+    );
+    replayCrossFileProbes(currentFacts.closedSurface.trace);
+    if (!currentFacts.closedSurface.value) return false;
+    currentFacts.calls ??= captureCrossFileProbes(() => collectProjectNameCalls(index));
+    replayCrossFileProbes(currentFacts.calls.trace);
+    const calls = currentFacts.calls.value;
+    const cached = origins.get(property);
+    if (cached) {
+      replayCrossFileProbes(cached.trace);
+      return cached.value;
+    }
+    const proof = captureCrossFileProbes(() => {
+      const selectedModule = index.modulesByFilePath.get(module.filePath);
+      if (!selectedModule) return false;
+      const currentIndex = index;
+      const indexedOwner = { module: selectedModule, node: functionNode };
+      return (calls.get(indexedOwner.node) ?? []).some((caller) => {
+        if (caller.node.arguments.length !== 1) return false;
+        const argumentObject = caller.node.arguments[0];
+        const values = argumentObject ? getOwnStaticProperties(argumentObject) : null;
+        const value = values?.get(property);
+        return Boolean(
+          value &&
+          tracesQuotedProjectName(
+            value,
+            caller.module,
+            currentIndex,
+            QUOTED_PROJECT_NAME_FORWARDING_HOPS,
+            calls,
+          ) &&
+          hasPreservingReplacementConsumer(caller, currentIndex),
+        );
       });
-    if (
-      !index ||
-      [...index.modulesByFilePath.values()].some(
-        (indexedModule) => !hasClosedNativeSurface(indexedModule),
-      )
-    )
-      return false;
-    const selectedModule = index.modulesByFilePath.get(module.filePath);
-    if (!selectedModule) return false;
-    const currentIndex = index;
-    const indexedOwner = { module: selectedModule, node: functionNode };
-    return collectDirectCallsTo(indexedOwner, currentIndex).some((caller) => {
-      if (caller.node.arguments.length !== 1) return false;
-      const argumentObject = caller.node.arguments[0];
-      const values = argumentObject ? getOwnStaticProperties(argumentObject) : null;
-      const value = values?.get(property);
-      return Boolean(
-        value &&
-        tracesQuotedProjectName(
-          value,
-          caller.module,
-          currentIndex,
-          QUOTED_PROJECT_NAME_FORWARDING_HOPS,
-        ) &&
-        hasPreservingReplacementConsumer(caller, currentIndex),
-      );
     });
+    origins.set(property, proof);
+    return proof.value;
   };
 };

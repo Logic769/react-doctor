@@ -16,6 +16,7 @@ import { isUnmodifiedLocalReactStateCall } from "../../../utils/is-unmodified-lo
 import { isWithinAssignmentTarget } from "../../../utils/is-within-assignment-target.js";
 import { resolveReactUseStatePair } from "../../../utils/resolve-react-use-state-pair.js";
 import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
+import { MAX_CURRENT_CONTEXT_RECORD_UPDATER_EXCEPTIONS } from "./constants.js";
 import { hasCurrentContextRecordEnvironment } from "./has-current-context-record-environment.js";
 import { hasRefNotificationReactCall } from "./has-ref-notification-react-call.js";
 
@@ -30,6 +31,47 @@ interface ContextRecordRetirementProof {
   readonly selectedUpdater: EsTreeNode;
 }
 
+interface ContextRecordWriterFacts {
+  readonly areReferencesClosed: boolean;
+  readonly unsupportedUpdaters: ReadonlySet<EsTreeNode>;
+}
+
+interface ContextRecordBindingFacts {
+  isReadonly?: boolean;
+  isClosedReadonly?: boolean;
+  guardUsesByState?: WeakMap<SymbolDescriptor, boolean>;
+  stateReadsByComponent?: WeakMap<EsTreeNode, WeakMap<SymbolDescriptor, Map<string, boolean>>>;
+  writersByStamp?: Map<string, ContextRecordWriterFacts>;
+}
+
+const bindingFactsByScopes = new WeakMap<
+  ScopeAnalysis,
+  WeakMap<EsTreeNode, WeakMap<SymbolDescriptor, ContextRecordBindingFacts>>
+>();
+
+const getContextRecordBindingFacts = (
+  symbol: SymbolDescriptor,
+  program: EsTreeNode,
+  scopes: ScopeAnalysis,
+): ContextRecordBindingFacts => {
+  let factsByProgram = bindingFactsByScopes.get(scopes);
+  if (!factsByProgram) {
+    factsByProgram = new WeakMap();
+    bindingFactsByScopes.set(scopes, factsByProgram);
+  }
+  let factsBySymbol = factsByProgram.get(program);
+  if (!factsBySymbol) {
+    factsBySymbol = new WeakMap();
+    factsByProgram.set(program, factsBySymbol);
+  }
+  let facts = factsBySymbol.get(symbol);
+  if (!facts) {
+    facts = {};
+    factsBySymbol.set(symbol, facts);
+  }
+  return facts;
+};
+
 const isBinding = (node: EsTreeNode, symbol: SymbolDescriptor, scopes: ScopeAnalysis): boolean => {
   const identifier = stripParenExpression(node);
   return isNodeOfType(identifier, "Identifier") && scopes.symbolFor(identifier) === symbol;
@@ -39,26 +81,36 @@ const hasCompleteReadonlyReferences = (
   symbol: SymbolDescriptor,
   program: EsTreeNode,
   scopes: ScopeAnalysis,
-): boolean =>
-  !isErasedTypeScriptBinding(symbol) &&
-  hasCompleteSymbolReferences(symbol, program, scopes) &&
-  symbol.references.every(
-    (reference) =>
-      isNonReferenceIdentifier(reference.identifier) ||
-      (reference.flag === "read" && !isWithinAssignmentTarget(reference.identifier)),
-  );
+): boolean => {
+  const facts = getContextRecordBindingFacts(symbol, program, scopes);
+  if (facts.isReadonly !== undefined) return facts.isReadonly;
+  const isReadonly =
+    !isErasedTypeScriptBinding(symbol) &&
+    hasCompleteSymbolReferences(symbol, program, scopes) &&
+    symbol.references.every(
+      (reference) =>
+        isNonReferenceIdentifier(reference.identifier) ||
+        (reference.flag === "read" && !isWithinAssignmentTarget(reference.identifier)),
+    );
+  facts.isReadonly = isReadonly;
+  return isReadonly;
+};
 
 const hasClosedReadonlyBinding = (
   symbol: SymbolDescriptor,
   program: EsTreeNode,
   scopes: ScopeAnalysis,
 ): boolean => {
+  const facts = getContextRecordBindingFacts(symbol, program, scopes);
+  if (facts.isClosedReadonly !== undefined) return facts.isClosedReadonly;
   const equivalents = new Set([symbol, ...getEquivalentSymbols(symbol.bindingIdentifier, scopes)]);
-  return [...equivalents].every(
+  const isClosedReadonly = [...equivalents].every(
     (equivalent) =>
       equivalent.bindingIdentifier === symbol.bindingIdentifier &&
       hasCompleteReadonlyReferences(equivalent, program, scopes),
   );
+  facts.isClosedReadonly = isClosedReadonly;
+  return isClosedReadonly;
 };
 
 const isNull = (node: EsTreeNode): boolean => {
@@ -185,17 +237,43 @@ const hasClosedWriter = (call: EsTreeNode, proof: ContextRecordRetirementProof):
   });
 };
 
-const hasOnlyClosedWriters = (proof: ContextRecordRetirementProof): boolean =>
-  hasClosedReadonlyBinding(proof.setter, proof.program, proof.scopes) &&
-  proof.setter.references.every((reference) => {
-    const identifier = reference.identifier;
-    if (isNonReferenceIdentifier(identifier)) return true;
-    const root = findTransparentExpressionRoot(identifier);
-    const call = root.parent;
-    return (
-      isNodeOfType(call, "CallExpression") && call.callee === root && hasClosedWriter(call, proof)
-    );
-  });
+const hasOnlyClosedWriters = (proof: ContextRecordRetirementProof): boolean => {
+  const facts = getContextRecordBindingFacts(proof.setter, proof.program, proof.scopes);
+  const writersByStamp = (facts.writersByStamp ??= new Map());
+  let writerFacts = writersByStamp.get(proof.stampName);
+  if (!writerFacts) {
+    let areReferencesClosed = hasClosedReadonlyBinding(proof.setter, proof.program, proof.scopes);
+    const unsupportedUpdaters = new Set<EsTreeNode>();
+    const independentProof = { ...proof, selectedUpdater: proof.setter.bindingIdentifier };
+    if (areReferencesClosed) {
+      for (const reference of proof.setter.references) {
+        const identifier = reference.identifier;
+        if (isNonReferenceIdentifier(identifier)) continue;
+        const root = findTransparentExpressionRoot(identifier);
+        const call = root.parent;
+        if (!isNodeOfType(call, "CallExpression") || call.callee !== root || call.optional) {
+          areReferencesClosed = false;
+          break;
+        }
+        const [argument, ...extraArguments] = call.arguments;
+        if (!argument || extraArguments.length) {
+          areReferencesClosed = false;
+          break;
+        }
+        if (!hasClosedWriter(call, independentProof))
+          unsupportedUpdaters.add(stripParenExpression(argument));
+      }
+    }
+    writerFacts = { areReferencesClosed, unsupportedUpdaters };
+    writersByStamp.set(proof.stampName, writerFacts);
+  }
+  return (
+    writerFacts.areReferencesClosed &&
+    (writerFacts.unsupportedUpdaters.size === 0 ||
+      (writerFacts.unsupportedUpdaters.size === MAX_CURRENT_CONTEXT_RECORD_UPDATER_EXCEPTIONS &&
+        writerFacts.unsupportedUpdaters.has(proof.selectedUpdater)))
+  );
+};
 
 const isMaskedPayloadRead = (
   member: EsTreeNode,
@@ -229,21 +307,44 @@ const isCurrentStampComparison = (
 const hasOnlyPayloadGuardUses = (
   symbol: SymbolDescriptor,
   proof: ContextRecordRetirementProof,
-): boolean =>
-  hasClosedReadonlyBinding(symbol, proof.program, proof.scopes) &&
-  Boolean(symbol.references.length) &&
-  symbol.references.every((reference) => {
-    const root = findTransparentExpressionRoot(reference.identifier);
-    const conditional = root.parent;
-    return (
-      reference.flag === "read" &&
-      isNodeOfType(conditional, "ConditionalExpression") &&
-      conditional.test === root &&
-      isMaskedPayloadRead(stripParenExpression(conditional.consequent), conditional, proof)
-    );
-  });
+): boolean => {
+  const facts = getContextRecordBindingFacts(symbol, proof.program, proof.scopes);
+  const guardUsesByState = (facts.guardUsesByState ??= new WeakMap());
+  const cached = guardUsesByState.get(proof.state);
+  if (cached !== undefined) return cached;
+  const hasOnlyGuardUses =
+    hasClosedReadonlyBinding(symbol, proof.program, proof.scopes) &&
+    Boolean(symbol.references.length) &&
+    symbol.references.every((reference) => {
+      const root = findTransparentExpressionRoot(reference.identifier);
+      const conditional = root.parent;
+      return (
+        reference.flag === "read" &&
+        isNodeOfType(conditional, "ConditionalExpression") &&
+        conditional.test === root &&
+        isMaskedPayloadRead(stripParenExpression(conditional.consequent), conditional, proof)
+      );
+    });
+  guardUsesByState.set(proof.state, hasOnlyGuardUses);
+  return hasOnlyGuardUses;
+};
 
 const hasClosedStateReads = (proof: ContextRecordRetirementProof): boolean => {
+  const facts = getContextRecordBindingFacts(proof.state, proof.program, proof.scopes);
+  const stateReadsByComponent = (facts.stateReadsByComponent ??= new WeakMap());
+  let stateReadsByContext = stateReadsByComponent.get(proof.component);
+  if (!stateReadsByContext) {
+    stateReadsByContext = new WeakMap();
+    stateReadsByComponent.set(proof.component, stateReadsByContext);
+  }
+  let stateReadsByStamp = stateReadsByContext.get(proof.currentContext);
+  if (!stateReadsByStamp) {
+    stateReadsByStamp = new Map();
+    stateReadsByContext.set(proof.currentContext, stateReadsByStamp);
+  }
+  const cached = stateReadsByStamp.get(proof.stampName);
+  if (cached !== undefined) return cached;
+  stateReadsByStamp.set(proof.stampName, false);
   if (!hasClosedReadonlyBinding(proof.state, proof.program, proof.scopes)) return false;
   let hasProjection = false;
   for (const reference of proof.state.references) {
@@ -289,6 +390,7 @@ const hasClosedStateReads = (proof: ContextRecordRetirementProof): boolean => {
       return false;
     hasProjection = true;
   }
+  stateReadsByStamp.set(proof.stampName, hasProjection);
   return hasProjection;
 };
 

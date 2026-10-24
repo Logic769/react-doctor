@@ -104,3 +104,20 @@ export const DEFERRED_IFRAME_HTML_ID_PATTERN = /\bid\s*=\s*["']([^"']*)["']/giu;
 
 export const DEFERRED_IFRAME_HTML_ID_START_PATTERN = /\bid\s*=/giu;
 export const DEFERRED_IFRAME_HTML_ACTIVE_PATTERN = /<\s*script\b|\bon[a-z]+\s*=|javascript\s*:/iu;
+
+export const DEFERRED_IFRAME_MAX_RENDER_FORWARDING_DEPTH = 8;
+export const DEFERRED_IFRAME_INACTIVE_RENDER_TAGS: ReadonlySet<string> = new Set([
+  "script",
+  "style",
+  "title",
+  "noembed",
+  "noframes",
+  "plaintext",
+  "xmp",
+]);
+
+export const DEFERRED_IFRAME_SINGLE_CARRIER_COUNT = 1;
+
+export const DEFERRED_IFRAME_MAX_WORK_GROWTH_RATIO = 6;
+
+export const DEFERRED_IFRAME_SINGLE_SOURCE_QUERY_COUNT = 1;

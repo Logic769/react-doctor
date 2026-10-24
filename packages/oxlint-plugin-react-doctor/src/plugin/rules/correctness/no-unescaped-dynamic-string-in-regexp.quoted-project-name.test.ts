@@ -1,7 +1,19 @@
+import { resetTsconfigAliasCaches } from "../../utils/resolve-tsconfig-alias.js";
+import { resetModuleResolutionCaches } from "../../utils/resolve-relative-import-path.js";
+import * as astWalking from "../../utils/walk-ast.js";
+import {
+  PROVIDER_PROOF_SMALL_COMPONENT_COUNT,
+  PROVIDER_PROOF_LARGE_COMPONENT_COUNT,
+  PROVIDER_PROOF_MAX_GROWTH_RATIO,
+} from "../../../test-utils/constants.js";
+import { captureCrossFileProbes } from "../../utils/cross-file-probe-recorder.js";
+import type { Rule } from "../../utils/rule.js";
+import { isNodeOfType } from "../../utils/is-node-of-type.js";
+import { createQuotedProjectNameRegexpOriginChecker } from "./utils/create-quoted-project-name-regexp-origin-checker.js";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { runRule } from "../../../test-utils/run-rule.js";
 import { resetFilesystemCaches } from "../../utils/reset-filesystem-caches.js";
 import { noUnescapedDynamicStringInRegexp } from "./no-unescaped-dynamic-string-in-regexp.js";
@@ -411,4 +423,152 @@ describe("quoted project-name literal RegExp provenance", () => {
     counts.push(inspectDescriptors().diagnostics.length);
     expect(counts).toEqual([1, 0, 1]);
   });
+});
+
+it("amortizes quoted project origin proofs for repeated constructions", () => {
+  const countVisits = (constructionCount: number): number => {
+    const source = `export const buildChanges = ({ before, after }) => [${Array.from({ length: constructionCount }, (_, index) => `{ files: 'file${index}', from: new RegExp(before, 'g'), to: after }`).join(",")}];`;
+    writeFile("descriptors.js", source);
+    writeFile("bridge.ts", bridge);
+    writeFile("entry.js", caller);
+    resetFilesystemCaches();
+    let visits = 0;
+    const walkAst = astWalking.walkAst;
+    const traversal = vi.spyOn(astWalking, "walkAst").mockImplementation((node, visitor) =>
+      walkAst(node, (candidate) => {
+        visits++;
+        return visitor(candidate);
+      }),
+    );
+    try {
+      const result = inspectDescriptors(source);
+      expect(result.parseErrors).toEqual([]);
+      expect(result.diagnostics).toHaveLength(constructionCount);
+    } finally {
+      traversal.mockRestore();
+    }
+    return visits;
+  };
+  const small = countVisits(PROVIDER_PROOF_SMALL_COMPONENT_COUNT);
+  const large = countVisits(PROVIDER_PROOF_LARGE_COMPONENT_COUNT);
+  expect(small).toBeGreaterThan(0);
+  expect(large).toBeLessThan(small * PROVIDER_PROOF_MAX_GROWTH_RATIO);
+});
+
+it("replays warm origin probes and refreshes the same checker at filesystem epochs", () => {
+  writeFile("descriptors.js", descriptors);
+  const providerFilename = writeFile("bridge.ts", bridge);
+  writeFile("entry.js", caller);
+  writeFile("replacement.js", "export default options => options;");
+  writeFile("tsconfig.json", "{}");
+  resetFilesystemCaches();
+  const outcomes: boolean[] = [];
+  const observed: Rule = {
+    id: "quoted-project-origin-replay",
+    severity: "warn",
+    create: (context) => {
+      const check = createQuotedProjectNameRegexpOriginChecker(context);
+      return {
+        NewExpression: (construction) => {
+          const argument = construction.arguments[0];
+          if (!argument || !isNodeOfType(argument, "Identifier")) return;
+          const cold = captureCrossFileProbes(() => check(construction, argument));
+          const warm = captureCrossFileProbes(() => check(construction, argument));
+          expect(cold.trace.contentPaths.size).toBeGreaterThan(0);
+          expect([...warm.trace.contentPaths].sort()).toEqual([...cold.trace.contentPaths].sort());
+          expect([...warm.trace.existencePaths].sort()).toEqual(
+            [...cold.trace.existencePaths].sort(),
+          );
+          outcomes.push(cold.value, warm.value);
+          fs.writeFileSync(providerFilename, bridge.replace("settings.gradle", "patterns.gradle"));
+          resetFilesystemCaches();
+          outcomes.push(check(construction, argument));
+          fs.writeFileSync(providerFilename, bridge);
+          resetFilesystemCaches();
+          outcomes.push(check(construction, argument));
+          writeFile(
+            "tsconfig.json",
+            '{"compilerOptions":{"paths":{"replace-in-file":["./replacement.js"]}}}',
+          );
+          resetTsconfigAliasCaches();
+          outcomes.push(check(construction, argument));
+          writeFile("tsconfig.json", "{}");
+          resetTsconfigAliasCaches();
+          outcomes.push(check(construction, argument));
+          const relocatedFilename = path.join(directory, "relocated.ts");
+          fs.renameSync(providerFilename, relocatedFilename);
+          resetModuleResolutionCaches();
+          outcomes.push(check(construction, argument));
+          fs.renameSync(relocatedFilename, providerFilename);
+          resetModuleResolutionCaches();
+          outcomes.push(check(construction, argument));
+        },
+      };
+    },
+  };
+  const result = runRule(observed, descriptors, {
+    filename: path.join(directory, "descriptors.js"),
+    settings: { "react-doctor": { rootDirectory: directory } },
+  });
+  expect(result.parseErrors).toEqual([]);
+  expect(outcomes).toEqual([true, true, false, true, false, true, false, true]);
+});
+
+it("indexes callers once across independent quoted project descriptor owners", () => {
+  const countVisits = (ownerCount: number): number => {
+    const source = Array.from(
+      { length: ownerCount },
+      (_, index) =>
+        `export const buildChanges${index}=({before,after})=>[{files:'file${index}',from:new RegExp(before,'g'),to:after}];`,
+    ).join("\n");
+    const imports = Array.from({ length: ownerCount }, (_, index) => `buildChanges${index}`).join(
+      ",",
+    );
+    const wrappers = Array.from(
+      { length: ownerCount },
+      (_, index) =>
+        `export const updateExisting${index}=async({previous,next})=>{const options=buildChanges${index}({before:previous,after:next});await applyChanges(options);};`,
+    ).join("\n");
+    const provider = bridge
+      .replace("{ buildChanges }", `{ ${imports} }`)
+      .replace(/export const updateExisting = async \([\s\S]*$/, wrappers);
+    const callerImports = Array.from(
+      { length: ownerCount },
+      (_, index) => `updateExisting${index}`,
+    ).join(",");
+    const callerInvocations = Array.from(
+      { length: ownerCount },
+      (_, index) => `await updateExisting${index}({previous:existing,next:replacement});`,
+    ).join("");
+    const entry = caller
+      .replace("readExisting, updateExisting", `readExisting, ${callerImports}`)
+      .replace(
+        "await updateExisting({ previous: existing, next: replacement });",
+        callerInvocations,
+      );
+    writeFile("descriptors.js", source);
+    writeFile("bridge.ts", provider);
+    writeFile("entry.js", entry);
+    resetFilesystemCaches();
+    let visits = 0;
+    const walkAst = astWalking.walkAst;
+    const traversal = vi.spyOn(astWalking, "walkAst").mockImplementation((node, visitor) =>
+      walkAst(node, (candidate) => {
+        visits++;
+        return visitor(candidate);
+      }),
+    );
+    try {
+      const result = inspectDescriptors(source);
+      expect(result.parseErrors).toEqual([]);
+      expect(result.diagnostics).toHaveLength(ownerCount);
+    } finally {
+      traversal.mockRestore();
+    }
+    return visits;
+  };
+  const small = countVisits(PROVIDER_PROOF_SMALL_COMPONENT_COUNT);
+  const large = countVisits(PROVIDER_PROOF_LARGE_COMPONENT_COUNT);
+  expect(small).toBeGreaterThan(0);
+  expect(large).toBeLessThan(small * PROVIDER_PROOF_MAX_GROWTH_RATIO);
 });

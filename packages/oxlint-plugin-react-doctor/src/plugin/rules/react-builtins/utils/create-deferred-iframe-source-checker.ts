@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import { analyzeControlFlow } from "../../../semantic/control-flow-graph.js";
-import type { SymbolDescriptor } from "../../../semantic/scope-analysis.js";
+import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import { buildSourceProjectIndex } from "../../../utils/build-source-project-index.js";
 import type {
   SourceProjectIndex,
@@ -9,14 +9,16 @@ import type {
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
 import { findEnclosingFunction } from "../../../utils/find-enclosing-function.js";
+import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
 import { findProgramRoot } from "../../../utils/find-program-root.js";
 import { getAuthoritativeJsxAttribute } from "../../../utils/get-authoritative-jsx-attribute.js";
 import { getDirectFunctionBindingIdentifier } from "../../../utils/get-direct-function-binding-identifier.js";
 import { getEquivalentSymbols } from "../../../utils/get-equivalent-symbols.js";
-import { getFunctionExportNames } from "../../../utils/get-function-export-names.js";
+import { collectDeferredIframeFunctionExports } from "./collect-deferred-iframe-function-exports.js";
 import { getImportedName } from "../../../utils/get-imported-name.js";
 import { getJsxPropStringValue } from "../../../utils/get-jsx-prop-string-value.js";
 import { getReactDoctorStringSetting } from "../../../utils/get-react-doctor-setting.js";
+import { getStaticArrayExpressionLength } from "../../../utils/get-static-array-expression-length.js";
 import { getStaticPropertyName } from "../../../utils/get-static-property-name.js";
 import { getStaticPropertyKeyName } from "../../../utils/get-static-property-key-name.js";
 import { getValueImportDeclaration } from "../../../utils/get-value-import-declaration.js";
@@ -39,6 +41,8 @@ import type { RuleContext } from "../../../utils/rule-context.js";
 import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
 import { walkAst } from "../../../utils/walk-ast.js";
 import { isRefNotificationNativeEvent } from "../../state-and-effects/utils/is-ref-notification-native-event.js";
+import { hasSupportedDeferredIframeRenderUse } from "./has-supported-deferred-iframe-render-use.js";
+import { hasPassiveDeferredIframeCapture } from "./has-passive-deferred-iframe-capture.js";
 import { hasClosedDeferredIframeNativeRef } from "./has-closed-deferred-iframe-native-ref.js";
 import {
   SOURCE_PROJECT_FINGERPRINT_MAX_ENTRY_COUNT,
@@ -57,6 +61,8 @@ import {
   DEFERRED_IFRAME_PROP_TYPE_NAMES,
   DEFERRED_IFRAME_SELECTOR_PATTERN,
   DEFERRED_IFRAME_SINGLE_ARGUMENT_COUNT,
+  DEFERRED_IFRAME_SINGLE_CARRIER_COUNT,
+  DEFERRED_IFRAME_SINGLE_SOURCE_QUERY_COUNT,
   DEFERRED_IFRAME_SOURCE_ARGUMENT_COUNT,
 } from "./constants.js";
 
@@ -64,6 +70,11 @@ interface DeferredIframeModule extends SourceProjectModule {
   readonly sourceText: string;
   readonly cfg: RuleContext["cfg"];
 }
+interface DeferredIframeCarrierChildren {
+  readonly hasNonNativeChildren: boolean;
+  readonly directIframeCount: number;
+}
+
 interface DeferredIframeComponent {
   readonly module: DeferredIframeModule;
   readonly functionNode: EsTreeNode;
@@ -206,8 +217,35 @@ const staticMetadata = (reference: EsTreeNode, module: DeferredIframeModule): bo
 export const createDeferredIframeSourceChecker = (context: RuleContext) => {
   let modules: ReadonlyArray<DeferredIframeModule> | null | undefined;
   let index: SourceProjectIndex | null = null;
+  let documentLookups: ReadonlyArray<EsTreeNode> | undefined;
+  let sourceQueryClass: string | null = null;
+  let nativeCarrierCounts: ReadonlyMap<string, number> | undefined;
+  const mapProofsByScopes = new WeakMap<ScopeAnalysis, WeakMap<EsTreeNode, boolean>>();
+  const metadataMapCallsByScopes = new WeakMap<ScopeAnalysis, WeakMap<EsTreeNode, boolean>>();
+  const exportsByScopes = new WeakMap<
+    ScopeAnalysis,
+    WeakMap<EsTreeNode, ReadonlyMap<EsTreeNode, ReadonlySet<string>>>
+  >();
+  const noRuntimeExports: ReadonlySet<string> = new Set();
+  const runtimeFunctionExports = (functionNode: EsTreeNode, module: SourceProjectModule) => {
+    let exportsByProgram = exportsByScopes.get(module.scopes);
+    if (!exportsByProgram) {
+      exportsByProgram = new WeakMap();
+      exportsByScopes.set(module.scopes, exportsByProgram);
+    }
+    let exports = exportsByProgram.get(module.programNode);
+    if (!exports) {
+      exports = collectDeferredIframeFunctionExports(module);
+      exportsByProgram.set(module.programNode, exports);
+    }
+    return exports.get(functionNode) ?? noRuntimeExports;
+  };
   const htmlSources: string[] = [];
   const components = new Map<EsTreeNode, DeferredIframeComponent | null>();
+  const carrierChildrenByComponent = new WeakMap<
+    DeferredIframeComponent,
+    DeferredIframeCarrierChildren
+  >();
   const nativeRefUses = new Map<SymbolDescriptor, boolean>();
   const moduleFor = (filePath: string) => modules?.find((module) => module.filePath === filePath);
   const reachable = (node: EsTreeNode, module: DeferredIframeModule) =>
@@ -293,9 +331,11 @@ export const createDeferredIframeSourceChecker = (context: RuleContext) => {
     for (const symbol of symbols)
       for (const reference of symbol.references)
         if (!classify(reference.identifier, owner, true)) return null;
-    const exports = getFunctionExportNames(owner.programNode, functionNode);
-    if (exports.length === 0) return [...uses];
-    for (const module of modules ?? [])
+    const exports = runtimeFunctionExports(functionNode, owner);
+    if (exports.size === 0) return [...uses];
+    for (const consumer of index?.consumerModulesByFilePath.get(owner.filePath) ?? []) {
+      const module = moduleFor(consumer.filePath);
+      if (!module) return null;
       for (const statement of module.programNode.body) {
         if (
           (isNodeOfType(statement, "ExportNamedDeclaration") ||
@@ -314,13 +354,14 @@ export const createDeferredIframeSourceChecker = (context: RuleContext) => {
           const name = isNodeOfType(specifier, "ImportDefaultSpecifier")
             ? "default"
             : getImportedName(specifier);
-          if (!name || !exports.includes(name)) continue;
+          if (!name || !exports.has(name)) continue;
           const symbol = readonlySymbol(specifier.local, module);
           if (!symbol || !getValueImportDeclaration(symbol)) return null;
           for (const reference of symbol.references)
             if (!classify(reference.identifier, module, false)) return null;
         }
       }
+    }
     return [...uses];
   };
   const component = (
@@ -394,6 +435,139 @@ export const createDeferredIframeSourceChecker = (context: RuleContext) => {
     components.set(functionNode, result);
     return result;
   };
+  const supportedMap = (
+    invocation: EsTreeNodeOfType<"CallExpression">,
+    owner: SourceProjectModule,
+  ): boolean => {
+    if (
+      invocation.arguments.length !== DEFERRED_IFRAME_SINGLE_ARGUMENT_COUNT ||
+      !isNodeOfType(invocation.callee, "MemberExpression")
+    )
+      return false;
+    const receiver = stripParenExpression(invocation.callee.object);
+    const literalLength = getStaticArrayExpressionLength(receiver);
+    if (literalLength !== null) return literalLength > 0;
+    if (!isNodeOfType(receiver, "Identifier")) return false;
+    const symbol = readonlySymbol(receiver, owner);
+    if (
+      !symbol ||
+      !symbol.references.every((reference) => {
+        if (isNonReferenceIdentifier(reference.identifier)) return true;
+        const member = reference.identifier.parent;
+        const call = member && directCall(member.parent, "map");
+        return Boolean(
+          isNodeOfType(member, "MemberExpression") &&
+          member.object === reference.identifier &&
+          call &&
+          call.callee === member,
+        );
+      })
+    )
+      return false;
+    if (symbol.kind !== "parameter") {
+      const initializer = readonlyInitializer(receiver, owner);
+      const length = getStaticArrayExpressionLength(initializer);
+      if (length !== null) return length > 0;
+    }
+    const originModule = moduleFor(owner.filePath);
+    if (!originModule) return false;
+    const origin = itemOrigin(invocation.callee, originModule);
+    if (!origin) return false;
+    const uses = componentUses(origin.component, originModule);
+    if (!uses) return false;
+    if (uses.length === 0) return runtimeFunctionExports(origin.component, owner).size > 0;
+    const values = new Map<EsTreeNode, DeferredIframeModule>();
+    for (const use of uses) {
+      const useModule = modules?.find(
+        (candidate) => candidate.programNode === findProgramRoot(use),
+      );
+      const value = attributeValue(use.openingElement, origin.propName);
+      if (!useModule || !value) return false;
+      values.set(value, useModule);
+    }
+    return [...values].every(([value, module]) => {
+      const directLength = getStaticArrayExpressionLength(value);
+      if (directLength !== null) return directLength > 0;
+      if (!isNodeOfType(value, "Identifier")) return false;
+      const arraySymbol = readonlySymbol(value, module);
+      if (
+        !arraySymbol ||
+        !arraySymbol.references.every((reference) => {
+          if (isNonReferenceIdentifier(reference.identifier) || values.has(reference.identifier))
+            return true;
+          const member = reference.identifier.parent;
+          return (
+            isNodeOfType(member, "MemberExpression") &&
+            member.object === reference.identifier &&
+            !member.optional &&
+            !member.computed &&
+            directMemberName(member) === "length"
+          );
+        })
+      )
+        return false;
+      const length = getStaticArrayExpressionLength(readonlyInitializer(value, module));
+      return length !== null && length > 0;
+    });
+  };
+  const supportedRenderUse = (node: EsTreeNode, module: DeferredIframeModule) =>
+    hasSupportedDeferredIframeRenderUse(node, module, {
+      moduleForNode: (use) => {
+        const program = findProgramRoot(use);
+        return modules?.find((candidate) => candidate.programNode === program) ?? null;
+      },
+      isExportedFunction: (functionNode, owner) =>
+        runtimeFunctionExports(functionNode, owner).size > 0,
+      componentUses: (functionNode, owner) => {
+        const source = moduleFor(owner.filePath);
+        return source ? componentUses(functionNode, source) : null;
+      },
+      forwardedRoot: (opening, owner) => {
+        const source = moduleFor(owner.filePath);
+        return source ? component(opening, source) : null;
+      },
+      supportedMap: (invocation, owner) => {
+        let proofs = mapProofsByScopes.get(owner.scopes);
+        if (!proofs) {
+          proofs = new WeakMap();
+          mapProofsByScopes.set(owner.scopes, proofs);
+        }
+        const cached = proofs.get(invocation);
+        if (cached !== undefined) return cached;
+        let metadataCalls = metadataMapCallsByScopes.get(owner.scopes);
+        if (!metadataCalls) {
+          metadataCalls = new WeakMap();
+          metadataMapCallsByScopes.set(owner.scopes, metadataCalls);
+        }
+        let hasMetadata = metadataCalls.get(invocation);
+        if (hasMetadata === undefined) {
+          const originModule = moduleFor(owner.filePath);
+          const origin =
+            originModule && isNodeOfType(invocation.callee, "MemberExpression")
+              ? itemOrigin(invocation.callee, originModule)
+              : null;
+          const binding = origin && getDirectFunctionBindingIdentifier(origin.component);
+          hasMetadata = Boolean(
+            binding &&
+            getEquivalentSymbols(binding, owner.scopes).some((symbol) =>
+              symbol.references.some(
+                (reference) => directMemberName(reference.identifier.parent) === "propTypes",
+              ),
+            ),
+          );
+          metadataCalls.set(invocation, hasMetadata);
+        }
+        const supported = supportedMap(invocation, owner);
+        if (!hasMetadata) proofs.set(invocation, supported);
+        return supported;
+      },
+      passiveCapture: (opening, owner) =>
+        hasPassiveDeferredIframeCapture(opening, {
+          module: owner,
+          getReadonlySymbol: (identifier) => readonlySymbol(identifier, owner),
+          getReadonlyInitializer: (identifier) => readonlyInitializer(identifier, owner),
+        }),
+    });
   const carrierClass = (
     iframe: EsTreeNodeOfType<"JSXOpeningElement">,
     module: DeferredIframeModule,
@@ -410,18 +584,33 @@ export const createDeferredIframeSourceChecker = (context: RuleContext) => {
     const attribute = getAuthoritativeJsxAttribute(root.openingElement.attributes, "className");
     const className = attribute ? getJsxPropStringValue(attribute) : "";
     if (className === null) return null;
-    if (
-      wrapper &&
-      wrapper.uses.some((use) =>
-        use.children.some(
-          (child) =>
-            !isNodeOfType(child, "JSXText") &&
-            (!isNodeOfType(child, "JSXElement") || !nativeName(child.openingElement)),
-        ),
-      )
-    )
-      return null;
-    return { classes: className.split(/\s+/u), parent };
+    let wrapperIframeCount = 0;
+    if (wrapper) {
+      let children = carrierChildrenByComponent.get(wrapper);
+      if (!children) {
+        const hasNonNativeChildren = wrapper.uses.some((use) =>
+          use.children.some(
+            (child) =>
+              !isNodeOfType(child, "JSXText") &&
+              (!isNodeOfType(child, "JSXElement") || !nativeName(child.openingElement)),
+          ),
+        );
+        let directIframeCount = 0;
+        if (!hasNonNativeChildren)
+          for (const use of wrapper.uses)
+            for (const child of use.children)
+              if (
+                isNodeOfType(child, "JSXElement") &&
+                nativeName(child.openingElement) === "iframe"
+              )
+                directIframeCount += DEFERRED_IFRAME_SINGLE_CARRIER_COUNT;
+        children = { hasNonNativeChildren, directIframeCount };
+        carrierChildrenByComponent.set(wrapper, children);
+      }
+      if (children.hasNonNativeChildren) return null;
+      wrapperIframeCount = children.directIframeCount;
+    }
+    return { classes: className.split(/\s+/u), parent, wrapperIframeCount };
   };
   const itemOrigin = (
     expression: EsTreeNode,
@@ -641,6 +830,11 @@ export const createDeferredIframeSourceChecker = (context: RuleContext) => {
       const event = getAuthoritativeJsxAttribute(opening.attributes, "onClick");
       return Boolean(
         nativeName(opening) === "button" &&
+        hasPassiveDeferredIframeCapture(opening, {
+          module,
+          getReadonlySymbol: (identifier) => readonlySymbol(identifier, module),
+          getReadonlyInitializer: (identifier) => readonlyInitializer(identifier, module),
+        }) &&
         owner &&
         event &&
         isRefNotificationNativeEvent(event, owner, {
@@ -732,7 +926,8 @@ export const createDeferredIframeSourceChecker = (context: RuleContext) => {
           !isNodeOfType(parent.parent.parent, "JSXOpeningElement") ||
           !reachable(reference.identifier, module) ||
           !isPlainJsxUse(parent.parent.parent.parent) ||
-          !forwardsNativeClick(parent.parent.parent, module, 0)
+          !forwardsNativeClick(parent.parent.parent, module, 0) ||
+          !supportedRenderUse(parent.parent.parent.parent, module)
         )
           return false;
         const componentOwner = findEnclosingFunction(reference.identifier);
@@ -810,6 +1005,66 @@ export const createDeferredIframeSourceChecker = (context: RuleContext) => {
     }
     const current = moduleFor(filename);
     if (!current || !modules) return false;
+    if (documentLookups === undefined) {
+      const lookups: EsTreeNode[] = [];
+      for (const module of modules)
+        walkAst(module.programNode, (node) => {
+          const call = directCall(node, "querySelector");
+          if (
+            call &&
+            isNodeOfType(call.callee, "MemberExpression") &&
+            isNodeOfType(call.callee.object, "Identifier") &&
+            call.callee.object.name === "document" &&
+            module.scopes.isGlobalReference(call.callee.object)
+          )
+            lookups.push(call);
+        });
+      documentLookups = lookups;
+      if (lookups.length === DEFERRED_IFRAME_SINGLE_ARGUMENT_COUNT) {
+        const lookup = lookups[0];
+        const declaration = lookup && findTransparentExpressionRoot(lookup).parent;
+        const lookupModule =
+          lookup && modules.find((module) => module.programNode === findProgramRoot(lookup));
+        if (
+          lookup &&
+          lookupModule &&
+          isNodeOfType(declaration, "VariableDeclarator") &&
+          isNodeOfType(declaration.id, "Identifier") &&
+          declaration.init &&
+          stripParenExpression(declaration.init) === lookup
+        ) {
+          const receiver = lookupModule.scopes.symbolFor(declaration.id);
+          if (receiver?.declarationNode === declaration) {
+            const queries = new Set<EsTreeNode>();
+            let queryClass: string | null = null;
+            for (const reference of receiver.references) {
+              const member = reference.identifier.parent;
+              const query = directCall(member?.parent, "querySelector");
+              if (
+                isNodeOfType(member, "MemberExpression") &&
+                member.object === reference.identifier &&
+                query?.callee === member &&
+                query.arguments.length === DEFERRED_IFRAME_SINGLE_ARGUMENT_COUNT &&
+                isNodeOfType(query.arguments[0], "Literal") &&
+                typeof query.arguments[0].value === "string"
+              ) {
+                const selectedClass = DEFERRED_IFRAME_SELECTOR_PATTERN.exec(
+                  query.arguments[0].value,
+                )?.[DEFERRED_IFRAME_CLASS_MATCH_INDEX];
+                if (selectedClass) {
+                  queries.add(query);
+                  queryClass = selectedClass;
+                }
+              }
+            }
+            if (queries.size === DEFERRED_IFRAME_SINGLE_SOURCE_QUERY_COUNT)
+              sourceQueryClass = queryClass;
+          }
+        }
+      }
+    }
+    if (documentLookups.length !== DEFERRED_IFRAME_SINGLE_ARGUMENT_COUNT) return false;
+    const documentLookup = documentLookups[0];
     nativeRefUses.clear();
     const parent = carrierClass(iframe, current);
     if (
@@ -819,6 +1074,32 @@ export const createDeferredIframeSourceChecker = (context: RuleContext) => {
     )
       return false;
     const className = parent.classes[0];
+    if (className !== sourceQueryClass) return false;
+    if (nativeCarrierCounts === undefined) {
+      const counts = new Map<string, number>();
+      for (const module of modules)
+        walkAst(module.programNode, (node) => {
+          if (!isNodeOfType(node, "JSXOpeningElement") || resolveJsxElementType(node) !== "iframe")
+            return;
+          const element = node.parent;
+          const container = element?.parent;
+          if (
+            !isNodeOfType(container, "JSXElement") ||
+            nativeName(container.openingElement) !== "div" ||
+            !isPlainJsxUse(container)
+          )
+            return;
+          const carrier = carrierClass(node, module);
+          for (const name of new Set(carrier?.classes ?? []))
+            counts.set(name, (counts.get(name) ?? 0) + DEFERRED_IFRAME_SINGLE_CARRIER_COUNT);
+        });
+      nativeCarrierCounts = counts;
+    }
+    if (
+      (nativeCarrierCounts.get(className) ?? 0) + parent.wrapperIframeCount >
+      DEFERRED_IFRAME_SINGLE_CARRIER_COUNT
+    )
+      return false;
     if (
       !modules.every((module) =>
         hasClosedDeferredIframeNativeSurface(
@@ -830,20 +1111,6 @@ export const createDeferredIframeSourceChecker = (context: RuleContext) => {
       )
     )
       return false;
-    const documentLookups: EsTreeNode[] = [];
-    for (const module of modules)
-      walkAst(module.programNode, (node) => {
-        const call = directCall(node, "querySelector");
-        if (
-          call &&
-          isNodeOfType(call.callee, "MemberExpression") &&
-          isNodeOfType(call.callee.object, "Identifier") &&
-          call.callee.object.name === "document" &&
-          module.scopes.isGlobalReference(call.callee.object)
-        )
-          documentLookups.push(call);
-      });
-    if (documentLookups.length !== DEFERRED_IFRAME_SINGLE_ARGUMENT_COUNT) return false;
     const ref = attributeValue(iframe, "ref");
     if (!ref || !isNodeOfType(ref, "Identifier") || !closedNativeRef(ref, current, className))
       return false;
@@ -851,7 +1118,14 @@ export const createDeferredIframeSourceChecker = (context: RuleContext) => {
     const outer = parent.parent.parent;
     if (!owner || !isNodeOfType(outer, "JSXElement") || returnedRoot(owner) !== outer) return false;
     const uses = componentUses(owner, current);
-    if (!uses || (uses.length === 0 && getFunctionExportNames(program, owner).length === 0))
+    if (!uses || (uses.length === 0 && runtimeFunctionExports(owner, current).size === 0))
+      return false;
+    if (
+      !uses.every((use) => {
+        const useModule = modules?.find((module) => module.programNode === findProgramRoot(use));
+        return Boolean(useModule && supportedRenderUse(use, useModule));
+      })
+    )
       return false;
     const id = outerId(parent.parent, current);
     if (!id) return false;
@@ -995,7 +1269,7 @@ export const createDeferredIframeSourceChecker = (context: RuleContext) => {
         !isNodeOfType(lookup.callee.object, "Identifier") ||
         lookup.callee.object.name !== "document" ||
         !current.scopes.isGlobalReference(lookup.callee.object) ||
-        lookup !== documentLookups[0] ||
+        lookup !== documentLookup ||
         lookup.arguments.length !== DEFERRED_IFRAME_SINGLE_ARGUMENT_COUNT ||
         !lookup.arguments[0] ||
         !linkedIds(lookup.arguments[0], id, current)
