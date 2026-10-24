@@ -7,7 +7,14 @@ import { getPromiseChainCallForCallback } from "../../utils/collect-effect-invok
 import { collectFunctionReturnStatements } from "../../utils/collect-function-return-statements.js";
 import { resolveCleanupFunctions } from "../../utils/collect-returned-cleanup-functions.js";
 import { hasUnguardedOwnedAbortContinuation } from "./utils/has-unguarded-owned-abort-continuation.js";
-import { ASYNC_WHILE_UNSUPPORTED_CONTROL_TYPES } from "./utils/constants.js";
+import {
+  collectScalarCancellationWrites,
+  type ScalarCancellationWrites,
+} from "./utils/collect-scalar-cancellation-writes.js";
+import {
+  createAsyncWhileFlowChecker,
+  type AsyncWhileFlowChecker,
+} from "./utils/create-async-while-flow-checker.js";
 import { defineRule } from "../../utils/define-rule.js";
 import { doNodesCoverEveryPathAfterNode } from "../../utils/do-nodes-cover-every-path-after-node.js";
 import { findEnclosingFunction } from "../../utils/find-enclosing-function.js";
@@ -1003,6 +1010,28 @@ interface AsyncPathState {
   suspensionNode: EsTreeNode | null;
 }
 
+interface AsyncStatementsResult {
+  readonly states: AsyncPathState[];
+  readonly hasUnsafeSetter: boolean;
+}
+
+interface AsyncStatementsCacheEntry {
+  readonly statements: EsTreeNode[];
+  readonly initialStates: AsyncPathState[];
+  readonly result: AsyncStatementsResult;
+}
+
+interface AsyncFlowCache {
+  readonly scopes: RuleContext["scopes"];
+  readonly program: EsTreeNode;
+  readonly supportsStructuredWhile: AsyncWhileFlowChecker;
+  readonly resultsByStatement: WeakMap<EsTreeNode, Map<string, AsyncStatementsCacheEntry>>;
+  hasSupportedWhile: boolean;
+  scalarWrites: ScalarCancellationWrites | null;
+}
+
+const asyncFlowCachesByContext = new WeakMap<RuleContext, AsyncFlowCache>();
+
 const dedupeAsyncPathStates = (states: AsyncPathState[]): AsyncPathState[] => {
   const dedupedStates = new Map<string, AsyncPathState>();
   for (const state of states) {
@@ -1094,7 +1123,7 @@ const analyzeAsyncEvents = (
   return { states, hasUnsafeSetter: false };
 };
 
-const analyzeAsyncStatements = (
+const analyzeAsyncStatementsUncached = (
   statements: EsTreeNode[],
   initialStates: AsyncPathState[],
   context: RuleContext,
@@ -1194,69 +1223,41 @@ const analyzeAsyncStatements = (
       states = dedupeAsyncPathStates(states);
       continue;
     }
-    if (isNodeOfType(statement, "WhileStatement")) {
-      let supportsStructuredFlow =
-        sequenceSnapshots.size === 0 &&
-        [...cleanupWrites.keys()].every((targetKey) => !targetKey.includes("."));
-      let ancestor = statement.parent;
-      while (ancestor && !isFunctionLike(ancestor)) {
-        if (isNodeOfType(ancestor, "TryStatement")) supportsStructuredFlow = false;
-        ancestor = ancestor.parent;
+    if (
+      isNodeOfType(statement, "WhileStatement") &&
+      sequenceSnapshots.size === 0 &&
+      [...cleanupWrites.keys()].every((targetKey) => !targetKey.includes("."))
+    ) {
+      const scopes = context.scopes;
+      let flowCache = asyncFlowCachesByContext.get(context);
+      if (
+        !flowCache ||
+        flowCache.scopes !== scopes ||
+        flowCache.program !== scopes.rootScope.node
+      ) {
+        flowCache = {
+          scopes,
+          program: scopes.rootScope.node,
+          supportsStructuredWhile: createAsyncWhileFlowChecker({
+            isStateSetterCall: (candidate) => isStateDispatcherCall(candidate, context),
+          }),
+          resultsByStatement: new WeakMap(),
+          hasSupportedWhile: false,
+          scalarWrites: null,
+        };
+        asyncFlowCachesByContext.set(context, flowCache);
       }
-      walkWithoutNestedFunctions(statement, (candidate) => {
-        if (
-          ASYNC_WHILE_UNSUPPORTED_CONTROL_TYPES.has(candidate.type) ||
-          (isNodeOfType(candidate, "ReturnStatement") && candidate.argument) ||
-          (isNodeOfType(candidate, "IfStatement") &&
-            !candidate.alternate &&
-            isEarlyExitStatement(candidate.consequent) &&
-            collectOrderedAsyncEvents(candidate.consequent, context).length > 0)
-        ) {
-          supportsStructuredFlow = false;
-          return false;
-        }
-      });
-      if (supportsStructuredFlow) {
-        const invalidatedGuardKeys = new Set<string>();
-        walkAst(context.scopes.rootScope.node, (candidate) => {
-          const callee = isNodeOfType(candidate, "CallExpression")
-            ? stripParenExpression(candidate.callee)
-            : null;
-          if (isNodeOfType(callee, "Identifier") && callee.name === "eval") {
-            for (const targetKey of cleanupWrites.keys()) invalidatedGuardKeys.add(targetKey);
-          }
-          if (!isNodeOfType(candidate, "Identifier")) return;
-          const reference = context.scopes.referenceFor(candidate);
-          if (!reference || reference.flag === "read") return;
-          const targetKey = serializeReferenceKey({ node: candidate, scopes: context.scopes });
-          if (!targetKey || !cleanupWrites.has(targetKey)) return;
-          const symbol = context.scopes.symbolFor(candidate);
-          const declaration = symbol?.declarationNode;
-          if (
-            !symbol ||
-            !isNodeOfType(declaration, "VariableDeclarator") ||
-            declaration.id !== symbol.bindingIdentifier ||
-            !isNodeOfType(declaration.init, "Literal") ||
-            typeof declaration.init.value !== "boolean"
-          ) {
-            invalidatedGuardKeys.add(targetKey);
-            return;
-          }
-          if (symbol.bindingIdentifier === candidate) return;
-          const assignment = candidate.parent;
-          if (
-            isNodeOfType(assignment, "AssignmentExpression") &&
-            assignment.operator === "=" &&
-            assignment.left === candidate &&
-            isNodeOfType(assignment.right, "Literal") &&
-            assignment.right.value === cleanupWrites.get(targetKey)
-          ) {
-            return;
-          }
-          invalidatedGuardKeys.add(targetKey);
-        });
+      if (flowCache.supportsStructuredWhile(statement)) {
+        flowCache.hasSupportedWhile = true;
+        flowCache.scalarWrites ??= collectScalarCancellationWrites(scopes);
+        const cancellationWrites = flowCache.scalarWrites;
         const loopCleanupWrites = new Map(
-          [...cleanupWrites].filter(([targetKey]) => !invalidatedGuardKeys.has(targetKey)),
+          [...cleanupWrites].filter(
+            ([targetKey, cleanupValue]) =>
+              !cancellationWrites.hasDirectEval &&
+              !cancellationWrites.unsupportedTargets.has(targetKey) &&
+              !cancellationWrites.assignedValues.get(targetKey)?.has(!cleanupValue),
+          ),
         );
         let headerStates = dedupeAsyncPathStates(states);
         const exitStates: AsyncPathState[] = [];
@@ -1424,6 +1425,85 @@ const analyzeAsyncStatements = (
     states = analyzedEvents.states;
   }
   return { states, hasUnsafeSetter: false };
+};
+
+const analyzeAsyncStatements = (
+  statements: EsTreeNode[],
+  initialStates: AsyncPathState[],
+  context: RuleContext,
+  cleanupWrites: ReadonlyMap<string, boolean>,
+  abortProtectedControllers: ReadonlySet<string>,
+  sequenceSnapshots: ReadonlyMap<string, SequenceSnapshot>,
+): AsyncStatementsResult => {
+  const flowCache = asyncFlowCachesByContext.get(context);
+  if (
+    flowCache &&
+    (flowCache.scopes !== context.scopes || flowCache.program !== context.scopes.rootScope.node)
+  )
+    asyncFlowCachesByContext.delete(context);
+  const firstStatement = statements[0];
+  if (
+    !flowCache?.hasSupportedWhile ||
+    flowCache.scopes !== context.scopes ||
+    flowCache.program !== context.scopes.rootScope.node ||
+    !firstStatement
+  )
+    return analyzeAsyncStatementsUncached(
+      statements,
+      initialStates,
+      context,
+      cleanupWrites,
+      abortProtectedControllers,
+      sequenceSnapshots,
+    );
+  let resultsByInput = flowCache.resultsByStatement.get(firstStatement);
+  if (!resultsByInput) {
+    resultsByInput = new Map();
+    flowCache.resultsByStatement.set(firstStatement, resultsByInput);
+  }
+  const cacheKey = JSON.stringify([
+    statements.map((statement) => statement.range?.[0] ?? null),
+    initialStates.map((state) => [
+      state.didSuspend,
+      state.hasDominatingGuard,
+      state.isAbortProtected,
+      state.suspensionNode?.range?.[0] ?? null,
+    ]),
+    [...cleanupWrites],
+    [...abortProtectedControllers],
+    [...sequenceSnapshots],
+  ]);
+  const cachedResult = resultsByInput.get(cacheKey);
+  if (
+    cachedResult &&
+    cachedResult.statements.length === statements.length &&
+    cachedResult.statements.every((statement, index) => statement === statements[index]) &&
+    cachedResult.initialStates.length === initialStates.length &&
+    cachedResult.initialStates.every(
+      (state, index) => state.suspensionNode === initialStates[index]?.suspensionNode,
+    )
+  )
+    return {
+      states: cachedResult.result.states.map((state) => ({ ...state })),
+      hasUnsafeSetter: cachedResult.result.hasUnsafeSetter,
+    };
+  const result = analyzeAsyncStatementsUncached(
+    statements,
+    initialStates,
+    context,
+    cleanupWrites,
+    abortProtectedControllers,
+    sequenceSnapshots,
+  );
+  resultsByInput.set(cacheKey, {
+    statements: [...statements],
+    initialStates: initialStates.map((state) => ({ ...state })),
+    result: {
+      states: result.states.map((state) => ({ ...state })),
+      hasUnsafeSetter: result.hasUnsafeSetter,
+    },
+  });
+  return result;
 };
 
 const hasUnsafePostAwaitSetter = (
