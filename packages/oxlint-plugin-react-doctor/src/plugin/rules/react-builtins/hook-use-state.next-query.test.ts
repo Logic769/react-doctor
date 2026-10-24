@@ -410,7 +410,7 @@ describe("hook-use-state Next query snapshots", () => {
       "an outside computed Window provider lookup",
       'const root=window;const name="URL"+"SearchParams";const provider=root[name];export const ExternalView=()=>provider;',
     ],
-  ])("retains advice for %s", (_name, ui) => {
+  ])("retains advice for %s", (name, ui) => {
     const source =
       '"use client";\nimport {ExternalView} from "../../../shared-ui";\n' +
       panel
@@ -419,15 +419,74 @@ describe("hook-use-state Next query snapshots", () => {
           "return <span>{params.toString()}</span>;",
           "return <ExternalView params={params}/>;",
         );
-    expect(
-      diagnose(source, {
-        "shared-ui/index.tsx": ui,
-        "shared-ui/bridge.tsx":
-          'import {QueryPanel} from "../project/app/[item]/query-panel";export const ExternalView=()=> <QueryPanel query={custom()}/>;',
-        "shared-ui/package.json":
-          '{"name":"shared-ui","private":true,"type":"module","imports":{"#panel":"./bridge.tsx"}}',
-      }).length,
-    ).toBeGreaterThan(0);
+    const files: Record<string, string> = { "shared-ui/index.tsx": ui };
+    if (name === "an outside reexport chain" || name === "an outside package-import remap")
+      files["shared-ui/bridge.tsx"] =
+        'import {QueryPanel} from "../project/app/[item]/query-panel";export const ExternalView=()=> <QueryPanel query={custom()}/>;';
+    if (name === "an outside package-import remap")
+      files["shared-ui/package.json"] =
+        '{"name":"shared-ui","private":true,"type":"module","imports":{"#panel":"./bridge.tsx"}}';
+    expect(diagnose(source, files).length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    {
+      name: "a data-only consumer",
+      source: "export const ExternalView=({params})=><span>{params.toString()}</span>;",
+      expected: 0,
+    },
+    {
+      name: "a destructured Window evaluator",
+      source:
+        'if(typeof window!=="undefined"){const operation="ev"+"al";const{[operation]:invoke}=window;invoke("URLSearchParams.prototype.set=()=>{throw Error()}");}export const ExternalView=()=>null;',
+      expected: 1,
+    },
+    {
+      name: "a destructured Window function constructor",
+      source:
+        'if(typeof window!=="undefined"){const operation="Fun"+"ction";const{[operation]:compile}=window;compile("URLSearchParams.prototype.set=()=>{throw Error()}")();}export const ExternalView=()=>null;',
+      expected: 1,
+    },
+  ])("isolates the outside provider proof for $name", ({ source: externalSource, expected }) => {
+    const source =
+      '"use client";\nimport {ExternalView} from "../../../shared-ui";\n' +
+      panel
+        .replace('"use client";', "")
+        .replace(
+          "return <span>{params.toString()}</span>;",
+          "return <ExternalView params={params}/>;",
+        );
+    expect(diagnose(source, { "shared-ui/index.tsx": externalSource })).toHaveLength(expected);
+  });
+
+  it.each([
+    {
+      name: "a harmless outside component",
+      source: "export const ExternalView=()=>null;",
+      expected: 0,
+    },
+    {
+      name: "an outside function-constructor destructure",
+      source:
+        'const {constructor:compile}=(()=>{});compile("URLSearchParams.prototype.set=()=>{throw Error()}")();export const ExternalView=()=>null;',
+      expected: 1,
+    },
+    {
+      name: "an outside active HTML script",
+      source:
+        'export const ExternalView=()=> <script dangerouslySetInnerHTML={{__html:"URLSearchParams.prototype.set=()=>{throw Error()}"}}/>;',
+      expected: 1,
+    },
+  ])("isolates executable outside sources for $name", ({ source: externalSource, expected }) => {
+    const source =
+      '"use client";\nimport {ExternalView} from "../../../shared-ui";\n' +
+      panel
+        .replace('"use client";', "")
+        .replace(
+          "return <span>{params.toString()}</span>;",
+          "return <ExternalView params={params}/>;",
+        );
+    expect(diagnose(source, { "shared-ui/index.tsx": externalSource })).toHaveLength(expected);
   });
 
   it("disables per-file fingerprinting before either a passing or failing caller proof", () => {

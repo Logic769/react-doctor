@@ -461,6 +461,29 @@ const hasClosedOwnSourceEdges = (
         return false;
       }
       if (isTypeScriptTypePosition(node)) return false;
+      if (
+        (isNodeOfType(node, "JSXOpeningElement") &&
+          NEXT_QUERY_ACTIVE_HTML_ELEMENTS.has(resolveJsxElementType(node))) ||
+        (isNodeOfType(node, "JSXAttribute") &&
+          NEXT_QUERY_ACTIVE_HTML_ATTRIBUTES.has(getJsxAttributeName(node.name) ?? ""))
+      ) {
+        hasLoader = true;
+        return false;
+      }
+      if (isNodeOfType(node, "Property") && isNodeOfType(node.parent, "ObjectPattern")) {
+        const property = getResolvedStaticPropertyName(node, scopes, {
+          allowConstNumericLiteral: true,
+          allowConstTemplateLiteral: true,
+          stringifyNonStringLiterals: true,
+        });
+        if (
+          NEXT_QUERY_OUTSIDE_REFUSED_MEMBERS.has(property ?? "") ||
+          (node.computed && property === null)
+        ) {
+          hasLoader = true;
+          return false;
+        }
+      }
       if (isNodeOfType(node, "MemberExpression")) {
         const property = getStaticPropertyName(node);
         if (
