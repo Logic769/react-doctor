@@ -630,8 +630,11 @@ const hasPortProcessBody = (environment: NodePortProcessEnvironment): boolean =>
   const acceptMember = (node: EsTreeNodeOfType<"MemberExpression">): void => {
     allowedMembers.add(node);
   };
+  const providerNodes: EsTreeNode[] = [];
   walkAst(environment.program, (node) => {
-    if (!valid || !isNodeOfType(node, "CallExpression")) return;
+    if (!valid) return;
+    providerNodes.push(node);
+    if (!isNodeOfType(node, "CallExpression")) return;
     const call = directCall(node);
     if (!call) {
       valid = false;
@@ -928,11 +931,11 @@ const hasPortProcessBody = (environment: NodePortProcessEnvironment): boolean =>
   )
     return false;
   const providerValidator = createClosedNodeProviderValidator(environment);
-  walkAst(environment.program, (node) => {
-    if (!valid) return false;
+  for (const node of providerNodes) {
+    if (!valid) break;
     if (providerValidator.inspect(node) === false) {
       valid = false;
-      return false;
+      break;
     }
     if (
       isNodeOfType(node, "MemberExpression") &&
@@ -980,7 +983,7 @@ const hasPortProcessBody = (environment: NodePortProcessEnvironment): boolean =>
       )
         valid = false;
     }
-  });
+  }
   return (
     valid &&
     providerValidator.isClosed() &&
