@@ -65,7 +65,7 @@ export const symbolHasStableHookOrigin = (
   symbol: SymbolDescriptor,
   scopes: ScopeAnalysis,
 ): boolean => {
-  if (hasSymbolBindingWrites(symbol)) return false;
+  if (hasSymbolBindingWrites(symbol, scopes)) return false;
   // We need the binding's parent context. The symbol's
   // declarationNode is the VariableDeclarator (when destructured) or
   // the binding identifier itself.
@@ -163,7 +163,7 @@ const symbolHasStableMemoizedOrigin = (
   scopes: ScopeAnalysis,
   visitedSymbolIds: Set<number>,
 ): boolean => {
-  if (hasSymbolBindingWrites(symbol)) return false;
+  if (hasSymbolBindingWrites(symbol, scopes)) return false;
   if (visitedSymbolIds.has(symbol.id)) return true;
   let declarator: EsTreeNode | null | undefined = symbol.declarationNode;
   while (declarator && declarator.type !== "VariableDeclarator") {
@@ -252,7 +252,7 @@ const symbolHasStableFunctionOrigin = (
   scopes: ScopeAnalysis,
   visitedSymbolIds: Set<number>,
 ): boolean => {
-  if (hasSymbolBindingWrites(symbol)) return false;
+  if (hasSymbolBindingWrites(symbol, scopes)) return false;
   if (visitedSymbolIds.has(symbol.id)) return true;
   const functionNode = getFunctionValueNode(symbol);
   if (!functionNode) return false;
