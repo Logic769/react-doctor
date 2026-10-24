@@ -11,6 +11,8 @@ import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
 import { walkAst } from "../../../utils/walk-ast.js";
 import type { EsTreeNodeOfType } from "../../../utils/es-tree-node-of-type.js";
 import type { RuleContext } from "../../../utils/rule-context.js";
+import type { ScopeAnalysis } from "../../../semantic/scope-analysis.js";
+import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import {
   FINITE_COUNTDOWN_BODY_STATEMENT_COUNT,
   FINITE_COUNTDOWN_DECREMENT_COUNT,
@@ -34,6 +36,13 @@ interface FindFiniteCountdownLoopInput {
     context: RuleContext,
   ) => boolean;
 }
+
+interface FiniteCountdownScopeFacts {
+  readonly program: EsTreeNode;
+  readonly dynamicScopeByEffect: WeakMap<EsTreeNode, boolean>;
+}
+
+const factsByScopes = new WeakMap<ScopeAnalysis, FiniteCountdownScopeFacts>();
 
 export const findFiniteCountdownLoop = ({
   whileStatement,
@@ -160,17 +169,28 @@ export const findFiniteCountdownLoop = ({
     invocationCount += 1;
   }
   if (invocationCount === 0) return null;
-  let hasDynamicScope = false;
-  walkAst(effectCallback, (candidate) => {
-    const callee = isNodeOfType(candidate, "CallExpression")
-      ? stripParenExpression(candidate.callee)
-      : null;
-    if (
-      isNodeOfType(candidate, "WithStatement") ||
-      (isNodeOfType(callee, "Identifier") && callee.name === "eval")
-    )
-      hasDynamicScope = true;
-  });
+  const scopes = context.scopes;
+  const program = scopes.rootScope.node;
+  let scopeFacts = factsByScopes.get(scopes);
+  if (!scopeFacts || scopeFacts.program !== program) {
+    scopeFacts = { program, dynamicScopeByEffect: new WeakMap() };
+    factsByScopes.set(scopes, scopeFacts);
+  }
+  let hasDynamicScope = scopeFacts.dynamicScopeByEffect.get(effectCallback);
+  if (hasDynamicScope === undefined) {
+    hasDynamicScope = false;
+    walkAst(effectCallback, (candidate) => {
+      const callee = isNodeOfType(candidate, "CallExpression")
+        ? stripParenExpression(candidate.callee)
+        : null;
+      if (
+        isNodeOfType(candidate, "WithStatement") ||
+        (isNodeOfType(callee, "Identifier") && callee.name === "eval")
+      )
+        hasDynamicScope = true;
+    });
+    scopeFacts.dynamicScopeByEffect.set(effectCallback, hasDynamicScope);
+  }
   if (hasDynamicScope) return null;
   const countdown = { iterationCount: declaration.init.value, resetGuardKey: null };
   if (isNodeOfType(firstStatement.expression, "CallExpression")) return countdown;
