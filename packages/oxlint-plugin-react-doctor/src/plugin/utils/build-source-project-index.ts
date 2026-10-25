@@ -31,7 +31,7 @@ export interface SourceProjectIndexInput {
   readonly rootDirectory: string;
   readonly currentFilePath: string;
   readonly currentProgramNode: EsTreeNodeOfType<"Program">;
-  readonly currentScopes: ScopeAnalysis;
+  readonly currentScopes?: ScopeAnalysis;
   readonly requiredModuleSources?: ReadonlyArray<string>;
   readonly knownModuleSources?: ReadonlyArray<string>;
   readonly sourceFileLimits?: ProductionSourceFileLimits;
@@ -160,7 +160,9 @@ export const buildSourceProjectIndex = ({
       modulesByFilePath.set(filePath, {
         filePath,
         programNode: currentProgramNode,
-        scopes: currentScopes,
+        get scopes() {
+          return currentScopes ?? getSourceProjectModuleScopes(currentProgramNode);
+        },
       });
       continue;
     }
@@ -169,7 +171,9 @@ export const buildSourceProjectIndex = ({
     modulesByFilePath.set(filePath, {
       filePath,
       programNode: parsedProgram,
-      scopes: getSourceProjectModuleScopes(parsedProgram),
+      get scopes() {
+        return getSourceProjectModuleScopes(parsedProgram);
+      },
     });
   }
 

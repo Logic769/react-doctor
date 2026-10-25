@@ -1,3 +1,4 @@
+import { getReactProviderProofCache } from "./get-react-provider-proof-cache.js";
 import { isReadonlyReactNamespaceJsxReference } from "./is-readonly-react-namespace-jsx-reference.js";
 import type { ScopeAnalysis } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
@@ -27,26 +28,26 @@ export const isProvenUnmodifiedReactApiCall = (
   const callee = stripParenExpression(invocation.callee);
   const identifier = getRootIdentifier(callee);
   const symbol = identifier ? scopes.symbolFor(identifier) : null;
-  if (
-    !identifier ||
-    symbol?.kind !== "import" ||
-    symbol.references.some(
-      (reference) => reference.flag !== "read" || isBindingAssignmentTarget(reference.identifier),
-    )
-  ) {
-    return false;
-  }
+  if (!identifier || symbol?.kind !== "import") return false;
+  const cache = getReactProviderProofCache(scopes);
   if (isNodeOfType(callee, "MemberExpression")) {
     const propertyName = getStaticPropertyName(callee);
+    if (!propertyName) return false;
+    const cacheKey = `${symbol.id}:${propertyName}`;
+    const cached = cache.namespaceApiCalls.get(cacheKey);
+    if (cached !== undefined) return cached;
     if (
-      !propertyName ||
+      symbol.references.some(
+        (reference) => reference.flag !== "read" || isBindingAssignmentTarget(reference.identifier),
+      ) ||
       hasPossibleStaticPropertyMutationOrEscape(identifier, propertyName, scopes, (reference) =>
         isReadonlyReactNamespaceJsxReference(reference, scopes),
       )
     ) {
+      cache.namespaceApiCalls.set(cacheKey, false);
       return false;
     }
-    return getEquivalentSymbols(identifier, scopes).every((namespaceSymbol) =>
+    const unmodified = getEquivalentSymbols(identifier, scopes).every((namespaceSymbol) =>
       namespaceSymbol.references.every((reference) => {
         if (isReadonlyReactNamespaceJsxReference(reference.identifier, scopes)) return true;
         const referenceRoot = findTransparentExpressionRoot(reference.identifier);
@@ -67,8 +68,16 @@ export const isProvenUnmodifiedReactApiCall = (
         );
       }),
     );
+    cache.namespaceApiCalls.set(cacheKey, unmodified);
+    return unmodified;
   }
-  return symbol.references.every((reference) =>
-    isNonEscapingReactApiReference(reference.identifier),
-  );
+  const cached = cache.namedApiCalls.get(symbol);
+  if (cached !== undefined) return cached;
+  const unmodified =
+    !symbol.references.some(
+      (reference) => reference.flag !== "read" || isBindingAssignmentTarget(reference.identifier),
+    ) &&
+    symbol.references.every((reference) => isNonEscapingReactApiReference(reference.identifier));
+  cache.namedApiCalls.set(symbol, unmodified);
+  return unmodified;
 };

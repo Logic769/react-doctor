@@ -2,7 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { runRule } from "../../../test-utils/run-rule.js";
 import { defineRule } from "../../utils/define-rule.js";
 import { getDirectFunctionBindingIdentifier } from "../../utils/get-direct-function-binding-identifier.js";
-import { isClosedLocalUtilityFunction } from "../../utils/is-closed-local-utility-function.js";
+import { getClosedLocalUtilityCalls } from "../../utils/get-closed-local-utility-calls.js";
 import { isFunctionLike } from "../../utils/is-function-like.js";
 import { walkAst } from "../../utils/walk-ast.js";
 import { noMutatingArrayMethodOnPropOrHookResult } from "./no-mutating-array-method-on-prop-or-hook-result.js";
@@ -528,7 +528,7 @@ describe("closed local utility parameter roles", () => {
               if (
                 isFunctionLike(node) &&
                 getDirectFunctionBindingIdentifier(node)?.name === selectedName &&
-                isClosedLocalUtilityFunction(node, context)
+                getClosedLocalUtilityCalls(node, context)
               )
                 didCertify = true;
             });
@@ -555,7 +555,7 @@ it("keeps declaration-only and with syntax outside the certificate", () => {
     recommendation: "Keep dynamic scopes unsupported.",
     create: (context) => ({
       FunctionDeclaration: (node) => {
-        if (node.id?.name === "Drain" && isClosedLocalUtilityFunction(node, context))
+        if (node.id?.name === "Drain" && getClosedLocalUtilityCalls(node, context))
           didCertify = true;
       },
     }),

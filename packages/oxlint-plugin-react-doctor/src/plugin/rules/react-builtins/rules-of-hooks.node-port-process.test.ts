@@ -1,13 +1,60 @@
+import { resetParseSourceFileCache } from "../../utils/parse-source-file.js";
+import { resetTsconfigAliasCaches } from "../../utils/resolve-tsconfig-alias.js";
+import { resetModuleResolutionCaches } from "../../utils/resolve-relative-import-path.js";
 import * as fs from "node:fs";
 import os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { runRule } from "../../../test-utils/run-rule.js";
+import { captureCrossFileProbes } from "../../utils/cross-file-probe-recorder.js";
+import {
+  NODE_PORT_PROCESS_SMALL_CALL_COUNT,
+  NODE_PORT_PROCESS_LARGE_CALL_COUNT,
+  NODE_PORT_PROCESS_MAXIMUM_LOOKUP_GROWTH_MULTIPLIER,
+  NODE_PORT_PROCESS_MAXIMUM_PROVIDER_WALK_COUNT,
+  NODE_PORT_PROCESS_SINGLE_VALUE_COUNT,
+} from "../../constants/react.js";
 import { collectCrossFileDependencyProbes } from "../../cross-file-dependencies.js";
 import { isImportedNodePortProcessUtility } from "../../utils/is-imported-node-port-process-utility.js";
 import { resetFilesystemCaches } from "../../utils/reset-filesystem-caches.js";
 import type { Rule } from "../../utils/rule.js";
 import { rulesOfHooks } from "./rules-of-hooks.js";
+
+const providerWork = vi.hoisted(() => ({ inspectedReferences: 0, programTraversals: 0 }));
+vi.mock("../../utils/walk-ast.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../utils/walk-ast.js")>();
+  const { isNodeOfType } = await import("../../utils/is-node-of-type.js");
+  return {
+    ...original,
+    walkAst: (...arguments_: Parameters<typeof original.walkAst>): void => {
+      const [program] = arguments_;
+      const firstStatement = isNodeOfType(program, "Program") ? program.body[0] : undefined;
+      if (
+        isNodeOfType(firstStatement, "VariableDeclaration") &&
+        firstStatement.declarations.some(
+          (declaration) =>
+            isNodeOfType(declaration.id, "Identifier") && declaration.id.name === "reservePort",
+        )
+      )
+        providerWork.programTraversals += 1;
+      original.walkAst(...arguments_);
+    },
+  };
+});
+
+vi.mock("../../utils/is-within-assignment-target.js", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("../../utils/is-within-assignment-target.js")>();
+  return {
+    ...original,
+    isWithinAssignmentTarget: (
+      expression: Parameters<typeof original.isWithinAssignmentTarget>[0],
+    ): boolean => {
+      providerWork.inspectedReferences += 1;
+      return original.isWithinAssignmentTarget(expression);
+    },
+  };
+});
 
 interface NodeUtilityCase {
   readonly name: string;
@@ -635,5 +682,266 @@ describe("Node utility cross-file dependencies", () => {
       expect(result.parseErrors).toEqual([]);
       expect(result.diagnostics).toHaveLength(phase.count);
     }
+  });
+});
+
+describe("memoized Node utility proofs", () => {
+  it.each([false, true])("bounds consumer work with distinct providers=$0", (distinctProviders) => {
+    const measurements = [
+      NODE_PORT_PROCESS_SMALL_CALL_COUNT,
+      NODE_PORT_PROCESS_LARGE_CALL_COUNT,
+    ].map((callCount) => {
+      resetFilesystemCaches();
+      const declarations = distinctProviders
+        ? Array.from(
+            { length: callCount },
+            (_, index) => `const useTerminal${index} = require('./terminal-${index}');`,
+          ).join("\n")
+        : "const useTerminal = require('./terminal');";
+      for (let index = 0; index < callCount; index += 1)
+        writeFile(`src/terminal-${index}.js`, provider);
+      writeFile("src/terminal.js", provider);
+      const source =
+        declarations +
+        "\nconst start = async(directory, command) => {" +
+        Array.from(
+          { length: callCount },
+          (_, index) =>
+            `await useTerminal${distinctProviders ? index : ""}(directory, command, 7123);`,
+        ).join("\n") +
+        "};";
+      let lookups = 0;
+      const probe: Rule = {
+        ...certificateProbe,
+        create: (context) =>
+          certificateProbe.create({
+            ...context,
+            scopes: {
+              ...context.scopes,
+              isGlobalReference: (identifier) => {
+                lookups += 1;
+                return context.scopes.isGlobalReference(identifier);
+              },
+              symbolFor: (identifier) => {
+                lookups += 1;
+                return context.scopes.symbolFor(identifier);
+              },
+              referenceFor: (identifier) => {
+                lookups += 1;
+                return context.scopes.referenceFor(identifier);
+              },
+            },
+          }),
+      };
+      providerWork.inspectedReferences = 0;
+      providerWork.programTraversals = 0;
+      const result = runRule(probe, source, {
+        filename: path.join(temporaryDirectory, "src/start.js"),
+      });
+      expect(result.parseErrors).toEqual([]);
+      expect(result.diagnostics).toHaveLength(callCount);
+      expect(providerWork.programTraversals).toBeGreaterThan(0);
+      expect(providerWork.programTraversals).toBeLessThanOrEqual(
+        (distinctProviders ? callCount : NODE_PORT_PROCESS_SINGLE_VALUE_COUNT) *
+          NODE_PORT_PROCESS_MAXIMUM_PROVIDER_WALK_COUNT,
+      );
+      return { lookups, inspectedReferences: providerWork.inspectedReferences };
+    });
+    expect(measurements[0].lookups).toBeGreaterThan(0);
+    expect(measurements[0].inspectedReferences).toBeGreaterThan(0);
+    expect(measurements[1].lookups).toBeLessThan(
+      measurements[0].lookups * NODE_PORT_PROCESS_MAXIMUM_LOOKUP_GROWTH_MULTIPLIER,
+    );
+    expect(measurements[1].inspectedReferences).toBeLessThan(
+      measurements[0].inspectedReferences * NODE_PORT_PROCESS_MAXIMUM_LOOKUP_GROWTH_MULTIPLIER,
+    );
+  });
+
+  it("replays all warm probes and refreshes the same analysis after a filesystem epoch", () => {
+    const filename = writeFile("src/start.js", consumer);
+    const implementation = writeFile("src/terminal.js", provider);
+    let exercised = false;
+    const probe: Rule = {
+      ...certificateProbe,
+      create: (context) => ({
+        CallExpression: (node) => {
+          const cold = captureCrossFileProbes(() =>
+            isImportedNodePortProcessUtility(node, context),
+          );
+          if (!cold.value) return;
+          exercised = true;
+          const warm = captureCrossFileProbes(() =>
+            isImportedNodePortProcessUtility(node, context),
+          );
+          expect(warm.value).toBe(true);
+          expect([...warm.trace.contentPaths].sort()).toEqual([...cold.trace.contentPaths].sort());
+          expect([...warm.trace.existencePaths].sort()).toEqual(
+            [...cold.trace.existencePaths].sort(),
+          );
+          expect(cold.trace.contentPaths.has(implementation)).toBe(true);
+          expect(
+            isImportedNodePortProcessUtility(node, {
+              ...context,
+              filename: path.join(temporaryDirectory, "elsewhere/start.js"),
+            }),
+          ).toBe(false);
+          expect(isImportedNodePortProcessUtility(node, context)).toBe(true);
+          for (const phase of [
+            { manifest: '{"dependencies":{"use-port":"file:./hook-provider"}}', expected: false },
+            { manifest: '{"dependencies":{"use-port":"^1.0.3"}}', expected: true },
+          ]) {
+            writeFile("package.json", phase.manifest);
+            resetFilesystemCaches();
+            expect(isImportedNodePortProcessUtility(node, context)).toBe(phase.expected);
+          }
+          fs.writeFileSync(implementation, provider.replace("'use-port'", "'bad-port'"));
+          resetFilesystemCaches();
+          expect(isImportedNodePortProcessUtility(node, context)).toBe(false);
+        },
+      }),
+    };
+    const result = runRule(probe, consumer, { filename });
+    expect(result.parseErrors).toEqual([]);
+    expect(exercised).toBe(true);
+  });
+
+  for (const initiallyAccepted of [false, true]) {
+    for (const recording of [false, true]) {
+      it(`refreshes ${initiallyAccepted ? "accepted" : "refused"} origins after a parser-only reset with recording ${recording}`, () => {
+        const filename = writeFile("src/start.js", consumer);
+        const refusedProvider = provider.replace(
+          "module.exports = openTerminal;",
+          "module.exports = console.log;",
+        );
+        expect(refusedProvider).not.toBe(provider);
+        const setProvider = (accepted: boolean): void => {
+          writeFile("src/terminal.js", accepted ? provider : refusedProvider);
+        };
+        setProvider(initiallyAccepted);
+        resetFilesystemCaches();
+        const outcomes: boolean[] = [];
+        const probe: Rule = {
+          ...certificateProbe,
+          create: (context) => ({
+            CallExpression: (node) => {
+              if (node.callee.type !== "Identifier" || node.callee.name !== "useTerminal") return;
+              const inspect = (): void => {
+                const evaluate = (): boolean => isImportedNodePortProcessUtility(node, context);
+                outcomes.push(recording ? captureCrossFileProbes(evaluate).value : evaluate());
+              };
+              inspect();
+              setProvider(!initiallyAccepted);
+              resetParseSourceFileCache();
+              inspect();
+              setProvider(initiallyAccepted);
+              resetParseSourceFileCache();
+              inspect();
+            },
+          }),
+        };
+        const result = runRule(probe, consumer, { filename });
+        expect(result.parseErrors).toEqual([]);
+        expect(outcomes).toEqual([initiallyAccepted, !initiallyAccepted, initiallyAccepted]);
+      });
+    }
+  }
+
+  for (const resetKind of ["alias", "resolution"]) {
+    for (const initiallyMapped of [false, true]) {
+      it(`refreshes ${initiallyMapped ? "refused" : "accepted"} origins after a granular ${resetKind} reset`, () => {
+        const filename = writeFile("src/start.js", consumer);
+        writeFile("src/terminal.js", provider);
+        const mappedFilename = path.join(temporaryDirectory, "src/mapped-files.js");
+        const relocatedFilename = path.join(temporaryDirectory, "src/relocated-files.js");
+        const setMapping = (enabled: boolean): void => {
+          writeFile(
+            "tsconfig.json",
+            JSON.stringify({
+              compilerOptions: {
+                baseUrl: ".",
+                paths: resetKind === "resolution" || enabled ? { fs: ["src/mapped-files.js"] } : {},
+              },
+            }),
+          );
+          if (resetKind === "alias" || enabled) {
+            if (!fs.existsSync(mappedFilename))
+              fs.writeFileSync(mappedFilename, "module.exports = {};\n");
+          } else if (fs.existsSync(mappedFilename)) {
+            fs.renameSync(mappedFilename, relocatedFilename);
+          }
+        };
+        setMapping(initiallyMapped);
+        resetFilesystemCaches();
+        const outcomes: boolean[] = [];
+        const probe: Rule = {
+          ...certificateProbe,
+          create: (context) => ({
+            CallExpression: (node) => {
+              if (node.callee.type !== "Identifier" || node.callee.name !== "useTerminal") return;
+              outcomes.push(isImportedNodePortProcessUtility(node, context));
+              setMapping(!initiallyMapped);
+              if (resetKind === "alias") resetTsconfigAliasCaches();
+              else resetModuleResolutionCaches();
+              outcomes.push(isImportedNodePortProcessUtility(node, context));
+              setMapping(initiallyMapped);
+              if (resetKind === "alias") resetTsconfigAliasCaches();
+              else resetModuleResolutionCaches();
+              outcomes.push(isImportedNodePortProcessUtility(node, context));
+            },
+          }),
+        };
+        const result = runRule(probe, consumer, { filename });
+        expect(result.parseErrors).toEqual([]);
+        expect(outcomes).toEqual([!initiallyMapped, initiallyMapped, !initiallyMapped]);
+      });
+    }
+  }
+
+  it("does not resolve unrelated consumer modules after an ineligible manifest", () => {
+    const filename = writeFile("src/start.js", consumer);
+    writeFile("src/terminal.js", provider);
+    writeFile("package.json", '{"dependencies":{"use-port":"file:./hook-provider"}}');
+    const source = consumer + "const extra = require('./unrelated');";
+    let exercised = false;
+    const probe: Rule = {
+      ...certificateProbe,
+      create: (context) => ({
+        CallExpression: (node) => {
+          if (node.arguments.length !== 3) return;
+          const captured = captureCrossFileProbes(() =>
+            isImportedNodePortProcessUtility(node, context),
+          );
+          expect(captured.value).toBe(false);
+          expect(
+            captured.trace.contentPaths.has(path.join(temporaryDirectory, "package.json")),
+          ).toBe(true);
+          expect(
+            [...captured.trace.existencePaths].some((candidate) => candidate.includes("unrelated")),
+          ).toBe(false);
+          exercised = true;
+        },
+      }),
+    };
+    const result = runRule(probe, source, { filename });
+    expect(result.parseErrors).toEqual([]);
+    expect(exercised).toBe(true);
+  });
+
+  it("keeps finite argument and direct-call gates outside the symbol proof", () => {
+    writeFile("src/terminal.js", provider);
+    const source = consumer.replace(
+      "console.log(address);",
+      "await useTerminal(directory, command, '7123');await useTerminal(directory, command);await useTerminal(directory, command, 7123, 9);await useTerminal(directory, command, 7123);",
+    );
+    const result = runRule(certificateProbe, source, {
+      filename: path.join(temporaryDirectory, "src/start.js"),
+    });
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toHaveLength(2);
+    const optional = runRule(certificateProbe, source + "useTerminal?.('.', [], 7123);", {
+      filename: path.join(temporaryDirectory, "src/start.js"),
+    });
+    expect(optional.parseErrors).toEqual([]);
+    expect(optional.diagnostics).toHaveLength(0);
   });
 });

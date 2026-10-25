@@ -179,6 +179,60 @@ describe("scan result cache", () => {
     );
 
     expect(fingerprint).toMatch(/^oxlint-plugin-react-doctor#fingerprint=[0-9a-f]+$/);
+    expect(
+      resolveScanResultToolchainFingerprint(null).find((entry) =>
+        entry.startsWith("oxlint-plugin-react-doctor/core#fingerprint="),
+      ),
+    ).toMatch(/^oxlint-plugin-react-doctor\/core#fingerprint=[0-9a-f]+$/);
+  });
+
+  it("preserves the validated source proof across payload stores and repeated lookups", async () => {
+    const projectDirectory = setupReactProject(tempDirectory, "retained-source-proof", {
+      files: { "src/App.tsx": "export const App = () => <div />;\n" },
+    });
+    initGitRepo(projectDirectory, { commit: true });
+    const options = baseOptions({ lint: true });
+    const key = await cacheKey(projectDirectory, options);
+    if (key === null) throw new Error("Expected a complete source fingerprint");
+    const cacheFile = path.join(
+      resolveReactDoctorCacheDir(projectDirectory),
+      SCAN_RESULT_CACHE_FILENAME,
+    );
+    const initial = JSON.parse(fs.readFileSync(cacheFile, "utf8"));
+    expect(typeof initial.sourceProjectFingerprint.snapshot).toBe("string");
+    createScanResultCache(projectDirectory).store(key, basePayload(projectDirectory));
+    const stored = fs.readFileSync(cacheFile, "utf8");
+    expect(JSON.parse(stored).sourceProjectFingerprint).toEqual(initial.sourceProjectFingerprint);
+    expect(await cacheKey(projectDirectory, options)).toBe(key);
+    expect(fs.readFileSync(cacheFile, "utf8")).toBe(stored);
+    expect(createScanResultCache(projectDirectory).lookup(key)).not.toBeNull();
+  });
+
+  it("recaptures a source proof whose toolchain identity does not match", async () => {
+    const projectDirectory = setupReactProject(tempDirectory, "stale-source-proof", {
+      files: { "src/App.tsx": "export const App = () => <div />;\n" },
+    });
+    initGitRepo(projectDirectory, { commit: true });
+    const options = baseOptions({ lint: true });
+    const key = await cacheKey(projectDirectory, options);
+    expect(key).not.toBeNull();
+    const cacheFile = path.join(
+      resolveReactDoctorCacheDir(projectDirectory),
+      SCAN_RESULT_CACHE_FILENAME,
+    );
+    const initial = JSON.parse(fs.readFileSync(cacheFile, "utf8"));
+    const changed = {
+      ...initial,
+      sourceProjectFingerprint: {
+        toolchainFingerprint: "different-toolchain",
+        snapshot: "invalid",
+      },
+    };
+    fs.writeFileSync(cacheFile, JSON.stringify(changed));
+    expect(await cacheKey(projectDirectory, options)).toBe(key);
+    expect(JSON.parse(fs.readFileSync(cacheFile, "utf8")).sourceProjectFingerprint).toEqual(
+      initial.sourceProjectFingerprint,
+    );
   });
 
   it("reuses one repository identity across workspace projects", async () => {

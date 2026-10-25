@@ -1,3 +1,4 @@
+import { getReactProviderProofCache } from "./get-react-provider-proof-cache.js";
 import { hasPossibleStaticPropertyWrite } from "./has-static-property-write-before.js";
 import type { ScopeAnalysis } from "../semantic/scope-analysis.js";
 import type { EsTreeNode } from "./es-tree-node.js";
@@ -23,18 +24,27 @@ export const isReadonlyReactNamespaceJsxReference = (
   )
     return false;
   const provider = resolveConstIdentifierAlias(identifier, scopes);
-  return Boolean(
-    provider &&
-    getValueImportSource(provider) === "react" &&
-    (isNodeOfType(provider.declarationNode, "ImportDefaultSpecifier") ||
-      isNodeOfType(provider.declarationNode, "ImportNamespaceSpecifier") ||
-      getImportedName(provider.declarationNode) === "default") &&
+  if (
+    !provider ||
+    getValueImportSource(provider) !== "react" ||
+    (!isNodeOfType(provider.declarationNode, "ImportDefaultSpecifier") &&
+      !isNodeOfType(provider.declarationNode, "ImportNamespaceSpecifier") &&
+      getImportedName(provider.declarationNode) !== "default")
+  ) {
+    return false;
+  }
+  const cache = getReactProviderProofCache(scopes).readonlyJsxProperties;
+  const cacheKey = `${provider.id}:${member.property.name}`;
+  const cached = cache.get(cacheKey);
+  if (cached !== undefined) return cached;
+  const readonly =
     !hasPossibleStaticPropertyWrite(provider.bindingIdentifier, member.property.name, scopes) &&
     getEquivalentSymbols(provider.bindingIdentifier, scopes).every((symbol) =>
       symbol.references.every(
         (reference) =>
           reference.flag === "read" && !isBindingAssignmentTarget(reference.identifier),
       ),
-    ),
-  );
+    );
+  cache.set(cacheKey, readonly);
+  return readonly;
 };
