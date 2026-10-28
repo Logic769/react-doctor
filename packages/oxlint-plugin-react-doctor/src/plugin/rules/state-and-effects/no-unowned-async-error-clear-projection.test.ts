@@ -814,6 +814,620 @@ describe("no-unowned-async-error-clear request projections", () => {
         };
       `,
     },
+    {
+      name: "declines unsupported switch mismatch returns",
+      expectedCount: 0,
+      code: `
+        import { useLayoutEffect, useRef, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const latest = useRef(ticket);
+          useLayoutEffect(() => {
+            latest.current = ticket;
+          }, [ticket]);
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            switch (latest.current) {
+              case ticket:
+                break;
+              default:
+                return;
+            }
+            if (result.ok) setFailure(null);
+            else setFailure({ requestId: ticket, result });
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "declines unsupported while mismatch returns",
+      expectedCount: 0,
+      code: `
+        import { useLayoutEffect, useRef, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const latest = useRef(ticket);
+          useLayoutEffect(() => {
+            latest.current = ticket;
+          }, [ticket]);
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            while (latest.current !== ticket) {
+              return;
+            }
+            if (result.ok) setFailure(null);
+            else setFailure({ requestId: ticket, result });
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "declines unsupported for mismatch returns",
+      expectedCount: 0,
+      code: `
+        import { useLayoutEffect, useRef, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const latest = useRef(ticket);
+          useLayoutEffect(() => {
+            latest.current = ticket;
+          }, [ticket]);
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            for (; latest.current !== ticket;) {
+              return;
+            }
+            if (result.ok) setFailure(null);
+            else setFailure({ requestId: ticket, result });
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "declines unsupported do while enclosing exit guard",
+      expectedCount: 0,
+      code: `
+        import { useLayoutEffect, useRef, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const latest = useRef(ticket);
+          useLayoutEffect(() => {
+            latest.current = ticket;
+          }, [ticket]);
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            do {
+              if (latest.current !== ticket) return;
+            } while (false);
+            if (result.ok) setFailure(null);
+            else setFailure({ requestId: ticket, result });
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "declines unsupported try finally enclosing exit guard",
+      expectedCount: 0,
+      code: `
+        import { useLayoutEffect, useRef, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const latest = useRef(ticket);
+          useLayoutEffect(() => {
+            latest.current = ticket;
+          }, [ticket]);
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            try {
+              if (latest.current !== ticket) return;
+            } finally {}
+            if (result.ok) setFailure(null);
+            else setFailure({ requestId: ticket, result });
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "declines unsupported plain block enclosing exit",
+      expectedCount: 0,
+      code: `
+        import { useLayoutEffect, useRef, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const latest = useRef(ticket);
+          useLayoutEffect(() => {
+            latest.current = ticket;
+          }, [ticket]);
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            {
+              if (latest.current !== ticket) return;
+            }
+            if (result.ok) setFailure(null);
+            else setFailure({ requestId: ticket, result });
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "declines unsupported label enclosing exit",
+      expectedCount: 0,
+      code: `
+        import { useLayoutEffect, useRef, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const latest = useRef(ticket);
+          useLayoutEffect(() => {
+            latest.current = ticket;
+          }, [ticket]);
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            ownerCheck: {
+              if (latest.current !== ticket) return;
+            }
+            if (result.ok) setFailure(null);
+            else setFailure({ requestId: ticket, result });
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "declines unsupported for of enclosing exit",
+      expectedCount: 0,
+      code: `
+        import { useLayoutEffect, useRef, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const latest = useRef(ticket);
+          useLayoutEffect(() => {
+            latest.current = ticket;
+          }, [ticket]);
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            for (const marker of [true]) {
+              if (latest.current !== ticket) return;
+            }
+            if (result.ok) setFailure(null);
+            else setFailure({ requestId: ticket, result });
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "declines unsupported for in enclosing exit",
+      expectedCount: 0,
+      code: `
+        import { useLayoutEffect, useRef, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const latest = useRef(ticket);
+          useLayoutEffect(() => {
+            latest.current = ticket;
+          }, [ticket]);
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            for (const marker in {once:true}) {
+              if (latest.current !== ticket) return;
+            }
+            if (result.ok) setFailure(null);
+            else setFailure({ requestId: ticket, result });
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "declines unsupported try catch enclosing exit",
+      expectedCount: 0,
+      code: `
+        import { useLayoutEffect, useRef, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const latest = useRef(ticket);
+          useLayoutEffect(() => {
+            latest.current = ticket;
+          }, [ticket]);
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            try {
+              if (latest.current !== ticket) return;
+            } catch {}
+            if (result.ok) setFailure(null);
+            else setFailure({ requestId: ticket, result });
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "flags nested function exit that does not guard async writer",
+      expectedCount: 1,
+      code: `
+        import { useLayoutEffect, useRef, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const latest = useRef(ticket);
+          useLayoutEffect(() => {
+            latest.current = ticket;
+          }, [ticket]);
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            (() => {
+              if (latest.current !== ticket) return;
+            })();
+            if (result.ok) setFailure(null);
+            else setFailure({ requestId: ticket, result });
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "declines unsupported boolean comparison alias exit",
+      expectedCount: 0,
+      code: `
+        import { useLayoutEffect, useRef, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const latest = useRef(ticket);
+          useLayoutEffect(() => {
+            latest.current = ticket;
+          }, [ticket]);
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            const stillCurrent = latest.current === ticket;
+            if (!stillCurrent) return;
+            if (result.ok) setFailure(null);
+            else setFailure({ requestId: ticket, result });
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "declines unsupported boolean comparison alias enclosing completion",
+      expectedCount: 0,
+      code: `
+        import { useLayoutEffect, useRef, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const latest = useRef(ticket);
+          useLayoutEffect(() => {
+            latest.current = ticket;
+          }, [ticket]);
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            const stillCurrent = latest.current === ticket;
+            if (stillCurrent) {
+              if (result.ok) setFailure(null);
+              else setFailure({ requestId: ticket, result });
+            }
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "declines unsupported opaque predicate alias exit",
+      expectedCount: 0,
+      code: `
+        import { useLayoutEffect, useRef, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const latest = useRef(ticket);
+          useLayoutEffect(() => {
+            latest.current = ticket;
+          }, [ticket]);
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            const owns = (identity) => latest.current === identity;
+            const stillCurrent = owns(ticket);
+            if (!stillCurrent) return;
+            if (result.ok) setFailure(null);
+            else setFailure({ requestId: ticket, result });
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "declines unsupported closure predicate exit",
+      expectedCount: 0,
+      code: `
+        import { useLayoutEffect, useRef, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const latest = useRef(ticket);
+          useLayoutEffect(() => {
+            latest.current = ticket;
+          }, [ticket]);
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            const owns = () => latest.current === ticket;
+            if (!owns()) return;
+            if (result.ok) setFailure(null);
+            else setFailure({ requestId: ticket, result });
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "declines unsupported owned cancellation lease exit",
+      expectedCount: 0,
+      code: `
+        import { useLayoutEffect, useMemo, useRef, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const lease = useMemo(() => ({current:true}), [ticket]);
+          useLayoutEffect(() => () => {
+            lease.current=false;
+          }, [lease]);
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            if (!lease.current) return;
+            if (result.ok) setFailure(null);
+            else setFailure({ requestId: ticket, result });
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "declines unsupported owned cancellation lease enclosing completion",
+      expectedCount: 0,
+      code: `
+        import { useLayoutEffect, useMemo, useRef, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const lease = useMemo(() => ({current:true}), [ticket]);
+          useLayoutEffect(() => () => {
+            lease.current=false;
+          }, [lease]);
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            if (lease.current) {
+              if (result.ok) setFailure(null);
+              else setFailure({ requestId: ticket, result });
+            }
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "declines unsupported outcome ok visibly replaced with ownership check",
+      expectedCount: 0,
+      code: `
+        import { useLayoutEffect, useRef, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const latest = useRef(ticket);
+          useLayoutEffect(() => {
+            latest.current = ticket;
+          }, [ticket]);
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            result.ok = latest.current === ticket;
+            if (result.ok) setFailure(null);
+            else setFailure({ requestId: ticket, result });
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "declines unsupported outcome ok replaced through readonly alias",
+      expectedCount: 0,
+      code: `
+        import { useLayoutEffect, useRef, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const latest = useRef(ticket);
+          useLayoutEffect(() => {
+            latest.current = ticket;
+          }, [ticket]);
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            const reply = result;
+            reply.ok = latest.current === ticket;
+            if (result.ok) setFailure(null);
+            else setFailure({ requestId: ticket, result });
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "declines unsupported outcome escaped to local mutator before test",
+      expectedCount: 0,
+      code: `
+        import { useLayoutEffect, useRef, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const latest = useRef(ticket);
+          useLayoutEffect(() => {
+            latest.current = ticket;
+          }, [ticket]);
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            const update = (reply) => {
+              reply.ok = latest.current === ticket;
+            };
+            update(result);
+            if (result.ok) setFailure(null);
+            else setFailure({ requestId: ticket, result });
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "declines unsupported outcome defineProperty before test",
+      expectedCount: 0,
+      code: `
+        import { useLayoutEffect, useRef, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const latest = useRef(ticket);
+          useLayoutEffect(() => {
+            latest.current = ticket;
+          }, [ticket]);
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            Object.defineProperty(result, "ok", { value: latest.current === ticket });
+            if (result.ok) setFailure(null);
+            else setFailure({ requestId: ticket, result });
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "reports stale clear with readonly awaited reply spelling remains supported",
+      expectedCount: 1,
+      code: `
+        import { useLayoutEffect, useRef, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const latest = useRef(ticket);
+          useLayoutEffect(() => {
+            latest.current = ticket;
+          }, [ticket]);
+          const submit = async () => {
+            const reply = await send({ requestId: ticket });
+            if (reply.ok) setFailure(null);
+            else setFailure({ requestId: ticket, reply });
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "declines unsupported unrelated ownership result must not borrow awaited binding",
+      expectedCount: 0,
+      code: `
+        import { useLayoutEffect, useRef, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const latest = useRef(ticket);
+          useLayoutEffect(() => {
+            latest.current = ticket;
+          }, [ticket]);
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            const other = { ok: latest.current === ticket };
+            if (other.ok) setFailure(null);
+            else setFailure({ requestId: ticket, result });
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "declines unsupported shadowed outcome spelling is not awaited result",
+      expectedCount: 0,
+      code: `
+        import { useLayoutEffect, useRef, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const latest = useRef(ticket);
+          useLayoutEffect(() => {
+            latest.current = ticket;
+          }, [ticket]);
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            {
+              const result = { ok: latest.current === ticket };
+              if (result.ok) setFailure(null);
+              else setFailure({ requestId: ticket, result });
+            }
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "reports stale clear with failure branch escape after ok test remains supported",
+      expectedCount: 1,
+      code: `
+        import { useLayoutEffect, useRef, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const latest = useRef(ticket);
+          useLayoutEffect(() => {
+            latest.current = ticket;
+          }, [ticket]);
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            if (result.ok) setFailure(null);
+            else {
+              result.ok = false;
+              setFailure({ requestId: ticket, result });
+            }
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
   ])("$name", ({ code, expectedCount }) => {
     const result = runRule(noUnownedAsyncErrorClear, code);
     expect(result.parseErrors).toEqual([]);

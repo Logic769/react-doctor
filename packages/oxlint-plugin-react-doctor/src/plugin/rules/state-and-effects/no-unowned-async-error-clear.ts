@@ -2,7 +2,10 @@ import type { ScopeDescriptor, SymbolDescriptor } from "../../semantic/scope-ana
 import { defineRule } from "../../utils/define-rule.js";
 import { getDirectConstInitializer } from "../../utils/get-direct-const-initializer.js";
 import { hasSymbolBindingWrites } from "../../utils/has-symbol-binding-writes.js";
-import { hasPossibleStaticPropertyMutationOrEscape } from "../../utils/has-static-property-write-before.js";
+import {
+  hasPossibleStaticPropertyMutationOrEscape,
+  hasPossibleStaticPropertyMutationOrEscapeBefore,
+} from "../../utils/has-static-property-write-before.js";
 import { isProvenUnmodifiedReactApiCall } from "../../utils/is-proven-unmodified-react-api-call.js";
 import type { EsTreeNode } from "../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../utils/es-tree-node-of-type.js";
@@ -316,6 +319,10 @@ const asyncWriterUsesRequestIdentityProjection = (
   const requestReads = new Set<RequestIdentityProjection>();
   const failureReads = new Set<RequestIdentityProjection>();
   const projectionGuardTests = new Set<EsTreeNode>();
+  const awaitedResultSymbols = new Set<number>();
+  let firstProjectedAwaitEnd = Number.POSITIVE_INFINITY;
+  const unsupportedCompletionTests = new Set<EsTreeNode>();
+  let hasUnsupportedProjectionControl = false;
   walkOwnFunctionScope(asyncFunction, (child) => {
     let matchingProjections: RequestIdentityProjection[] = [];
     if (isNodeOfType(child, "Identifier")) {
@@ -345,6 +352,27 @@ const asyncWriterUsesRequestIdentityProjection = (
     while (ancestor && ancestor !== asyncFunction) {
       if (isNodeOfType(ancestor, "AwaitExpression") && isAstDescendant(child, ancestor.argument)) {
         for (const projection of matchingProjections) requestReads.add(projection);
+        firstProjectedAwaitEnd = Math.min(firstProjectedAwaitEnd, ancestor.range[1]);
+        const requestCall = stripParenExpression(ancestor.argument);
+        const awaitRoot = findTransparentExpressionRoot(ancestor);
+        const declarator = awaitRoot.parent;
+        if (
+          isNodeOfType(requestCall, "CallExpression") &&
+          !requestCall.optional &&
+          requestCall.arguments.some((argument) => isAstDescendant(child, argument)) &&
+          isNodeOfType(declarator, "VariableDeclarator") &&
+          declarator.init === awaitRoot &&
+          isNodeOfType(declarator.id, "Identifier")
+        ) {
+          const resultSymbol = context.scopes.symbolFor(declarator.id);
+          if (
+            resultSymbol &&
+            getDirectConstInitializer(resultSymbol) &&
+            !hasSymbolBindingWrites(resultSymbol)
+          ) {
+            awaitedResultSymbols.add(resultSymbol.id);
+          }
+        }
       }
       if (
         (isNodeOfType(ancestor, "IfStatement") ||
@@ -352,6 +380,29 @@ const asyncWriterUsesRequestIdentityProjection = (
         isAstDescendant(child, ancestor.test)
       ) {
         projectionGuardTests.add(ancestor.test);
+        if (
+          isNodeOfType(ancestor, "IfStatement") &&
+          (statementAlwaysExits(ancestor.consequent) ||
+            Boolean(ancestor.alternate && statementAlwaysExits(ancestor.alternate)))
+        ) {
+          hasUnsupportedProjectionControl = true;
+        }
+      }
+      if (
+        (isNodeOfType(ancestor, "SwitchStatement") &&
+          isAstDescendant(child, ancestor.discriminant)) ||
+        (isNodeOfType(ancestor, "SwitchCase") &&
+          ancestor.test &&
+          isAstDescendant(child, ancestor.test)) ||
+        ((isNodeOfType(ancestor, "WhileStatement") ||
+          isNodeOfType(ancestor, "DoWhileStatement") ||
+          isNodeOfType(ancestor, "ForStatement")) &&
+          ancestor.test &&
+          isAstDescendant(child, ancestor.test)) ||
+        ((isNodeOfType(ancestor, "ForInStatement") || isNodeOfType(ancestor, "ForOfStatement")) &&
+          isAstDescendant(child, ancestor.right))
+      ) {
+        hasUnsupportedProjectionControl = true;
       }
       if (isNodeOfType(ancestor, "LogicalExpression") && isAstDescendant(child, ancestor.left)) {
         projectionGuardTests.add(ancestor.left);
@@ -370,6 +421,64 @@ const asyncWriterUsesRequestIdentityProjection = (
       }
     }
   });
+  walkOwnFunctionScope(asyncFunction, (child) => {
+    let test: EsTreeNode | null = null;
+    if (
+      isNodeOfType(child, "IfStatement") ||
+      isNodeOfType(child, "ConditionalExpression") ||
+      isNodeOfType(child, "WhileStatement") ||
+      isNodeOfType(child, "DoWhileStatement")
+    ) {
+      test = child.test;
+    } else if (isNodeOfType(child, "ForStatement") || isNodeOfType(child, "SwitchCase")) {
+      test = child.test ?? null;
+    } else if (isNodeOfType(child, "LogicalExpression")) {
+      test = child.left;
+    } else if (isNodeOfType(child, "SwitchStatement")) {
+      test = child.discriminant;
+    } else if (isNodeOfType(child, "ForInStatement") || isNodeOfType(child, "ForOfStatement")) {
+      test = child.right;
+    }
+    if (!test || test.range[0] < firstProjectedAwaitEnd) return;
+    let expression = stripParenExpression(test);
+    if (isNodeOfType(expression, "UnaryExpression") && expression.operator === "!") {
+      expression = stripParenExpression(expression.argument);
+    }
+    if (
+      isNodeOfType(expression, "MemberExpression") &&
+      !expression.optional &&
+      getStaticPropertyName(expression) === "ok"
+    ) {
+      const receiver = stripParenExpression(expression.object);
+      const resultSymbol = isNodeOfType(receiver, "Identifier")
+        ? context.scopes.symbolFor(receiver)
+        : null;
+      if (
+        isNodeOfType(receiver, "Identifier") &&
+        resultSymbol &&
+        awaitedResultSymbols.has(resultSymbol.id) &&
+        !hasPossibleStaticPropertyMutationOrEscapeBefore(receiver, "ok", test, context.scopes)
+      ) {
+        return;
+      }
+    }
+    unsupportedCompletionTests.add(test);
+    if (
+      (isNodeOfType(child, "IfStatement") &&
+        (statementAlwaysExits(child.consequent) ||
+          Boolean(child.alternate && statementAlwaysExits(child.alternate)))) ||
+      isNodeOfType(child, "SwitchStatement") ||
+      isNodeOfType(child, "SwitchCase") ||
+      isNodeOfType(child, "WhileStatement") ||
+      isNodeOfType(child, "DoWhileStatement") ||
+      isNodeOfType(child, "ForStatement") ||
+      isNodeOfType(child, "ForInStatement") ||
+      isNodeOfType(child, "ForOfStatement")
+    ) {
+      hasUnsupportedProjectionControl = true;
+    }
+  });
+  if (hasUnsupportedProjectionControl) return false;
   for (const call of completionCalls) {
     const argument = call.arguments[0];
     if (
@@ -387,7 +496,8 @@ const asyncWriterUsesRequestIdentityProjection = (
       if (
         (isNodeOfType(ancestor, "IfStatement") ||
           isNodeOfType(ancestor, "ConditionalExpression")) &&
-        projectionGuardTests.has(ancestor.test) &&
+        (projectionGuardTests.has(ancestor.test) ||
+          unsupportedCompletionTests.has(ancestor.test)) &&
         (isAstDescendant(call, ancestor.consequent) ||
           Boolean(ancestor.alternate && isAstDescendant(call, ancestor.alternate)))
       ) {
@@ -395,23 +505,11 @@ const asyncWriterUsesRequestIdentityProjection = (
       }
       if (
         isNodeOfType(ancestor, "LogicalExpression") &&
-        projectionGuardTests.has(ancestor.left) &&
+        (projectionGuardTests.has(ancestor.left) ||
+          unsupportedCompletionTests.has(ancestor.left)) &&
         isAstDescendant(call, ancestor.right)
       ) {
         return false;
-      }
-      if (isNodeOfType(ancestor, "BlockStatement")) {
-        for (const statement of ancestor.body) {
-          if (isAstDescendant(call, statement)) break;
-          if (
-            isNodeOfType(statement, "IfStatement") &&
-            projectionGuardTests.has(statement.test) &&
-            (statementAlwaysExits(statement.consequent) ||
-              Boolean(statement.alternate && statementAlwaysExits(statement.alternate)))
-          ) {
-            return false;
-          }
-        }
       }
       ancestor = ancestor.parent;
     }
