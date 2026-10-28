@@ -59,11 +59,51 @@ export const RequestStatus = ({ payload, send }) => {
     if (result.ok) setFailure(null);
     else setFailure({ requestId: ticket, result });
   };
+  const submitWithWhileBreak = async () => {
+    const result = await send({ requestId: ticket });
+    if (result.ok) {
+      while (result.ok) {
+        if (!lease.current) break;
+        setFailure(null);
+        break;
+      }
+    } else setFailure({ requestId: ticket, result });
+  };
+  const submitWithTestlessForBreak = async () => {
+    const result = await send({ requestId: ticket });
+    for (;;) {
+      if (!lease.current) break;
+      if (result.ok) setFailure(null);
+      else setFailure({ requestId: ticket, result });
+      break;
+    }
+  };
+  const submitWithLabelledBreak = async () => {
+    const result = await send({ requestId: ticket });
+    ownerCheck: {
+      if (!lease.current) break ownerCheck;
+      if (result.ok) setFailure(null);
+      else setFailure({ requestId: ticket, result });
+    }
+  };
+  const submitWithDefaultSwitchBreak = async () => {
+    const result = await send({ requestId: ticket });
+    switch (result.ok) {
+      default:
+        if (!lease.current) break;
+        setFailure(null);
+    }
+    if (!result.ok) setFailure({ requestId: ticket, result });
+  };
   return (
     <div>
       <button onClick={submit}>{failure ? "Retry" : "Send"}</button>
       <button onClick={submitWithSnapshot}>Send with snapshot</button>
       <button onClick={submitWithLease}>Send with lease</button>
+      <button onClick={submitWithLabelledBreak}>Send with labelled cancellation</button>
+      <button onClick={submitWithWhileBreak}>Send with while cancellation</button>
+      <button onClick={submitWithTestlessForBreak}>Send with for cancellation</button>
+      <button onClick={submitWithDefaultSwitchBreak}>Send with switch cancellation</button>
     </div>
   );
 };

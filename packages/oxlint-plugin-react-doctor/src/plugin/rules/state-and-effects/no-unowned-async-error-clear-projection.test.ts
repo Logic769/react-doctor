@@ -1428,6 +1428,122 @@ describe("no-unowned-async-error-clear request projections", () => {
         };
       `,
     },
+    {
+      name: "declines projected clear inside while cancellation break",
+      expectedCount: 0,
+      code: `
+        import { useLayoutEffect, useMemo, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const lease = useMemo(() => ({ current: true, requestId: ticket }), [ticket]);
+          useLayoutEffect(
+            () => () => {
+              lease.current = false;
+            },
+            [lease],
+          );
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            if (result.ok) {
+              while (result.ok) {
+                if (!lease.current) break;
+                setFailure(null);
+                break;
+              }
+            } else setFailure({ requestId: ticket, result });
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "declines projected clear inside testless for cancellation break",
+      expectedCount: 0,
+      code: `
+        import { useLayoutEffect, useMemo, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const lease = useMemo(() => ({ current: true, requestId: ticket }), [ticket]);
+          useLayoutEffect(
+            () => () => {
+              lease.current = false;
+            },
+            [lease],
+          );
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            for (;;) {
+              if (!lease.current) break;
+              if (result.ok) setFailure(null);
+              else setFailure({ requestId: ticket, result });
+              break;
+            }
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "declines projected clear inside labelled block cancellation break",
+      expectedCount: 0,
+      code: `
+        import { useLayoutEffect, useMemo, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const lease = useMemo(() => ({ current: true, requestId: ticket }), [ticket]);
+          useLayoutEffect(
+            () => () => {
+              lease.current = false;
+            },
+            [lease],
+          );
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            ownerCheck: {
+              if (!lease.current) break ownerCheck;
+              if (result.ok) setFailure(null);
+              else setFailure({ requestId: ticket, result });
+            }
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
+    {
+      name: "declines projected clear inside default switch cancellation break",
+      expectedCount: 0,
+      code: `
+        import { useLayoutEffect, useMemo, useState } from "react";
+
+        export const RequestStatus = ({ payload, send }) => {
+          const [failure, setFailure] = useState(null);
+          const ticket = payload.requestId;
+          const lease = useMemo(() => ({ current: true, requestId: ticket }), [ticket]);
+          useLayoutEffect(
+            () => () => {
+              lease.current = false;
+            },
+            [lease],
+          );
+          const submit = async () => {
+            const result = await send({ requestId: ticket });
+            switch (result.ok) {
+              default:
+                if (!lease.current) break;
+                setFailure(null);
+            }
+            if (!result.ok) setFailure({ requestId: ticket, result });
+          };
+          return <button onClick={submit}>{failure ? "Retry" : "Send"}</button>;
+        };
+      `,
+    },
   ])("$name", ({ code, expectedCount }) => {
     const result = runRule(noUnownedAsyncErrorClear, code);
     expect(result.parseErrors).toEqual([]);

@@ -494,6 +494,17 @@ const asyncWriterUsesRequestIdentityProjection = (
     let ancestor = call.parent;
     while (ancestor && ancestor !== asyncFunction) {
       if (
+        isNodeOfType(ancestor, "LabeledStatement") ||
+        isNodeOfType(ancestor, "SwitchStatement") ||
+        isNodeOfType(ancestor, "WhileStatement") ||
+        isNodeOfType(ancestor, "DoWhileStatement") ||
+        isNodeOfType(ancestor, "ForStatement") ||
+        isNodeOfType(ancestor, "ForInStatement") ||
+        isNodeOfType(ancestor, "ForOfStatement")
+      ) {
+        return false;
+      }
+      if (
         (isNodeOfType(ancestor, "IfStatement") ||
           isNodeOfType(ancestor, "ConditionalExpression")) &&
         (projectionGuardTests.has(ancestor.test) ||
