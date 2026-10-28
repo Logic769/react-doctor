@@ -6,21 +6,21 @@ import { isNodeOfType } from "./is-node-of-type.js";
 import { isValueImportFromModule } from "./is-value-import-from-module.js";
 import { stripParenExpression } from "./strip-paren-expression.js";
 
-interface ImportedNextNotFoundExitInput {
+interface ImportedNextNavigationExitInput {
   statement: EsTreeNode;
   scopes: ScopeAnalysis;
 }
 
-const nextNotFoundExitProofs = new WeakMap<ScopeAnalysis, WeakMap<EsTreeNode, boolean>>();
+const nextNavigationExitProofs = new WeakMap<ScopeAnalysis, WeakMap<EsTreeNode, boolean>>();
 
-export const isImportedNextNotFoundExit = ({
+export const isImportedNextNavigationExit = ({
   statement,
   scopes,
-}: ImportedNextNotFoundExitInput): boolean => {
-  let scopeProofs = nextNotFoundExitProofs.get(scopes);
+}: ImportedNextNavigationExitInput): boolean => {
+  let scopeProofs = nextNavigationExitProofs.get(scopes);
   if (!scopeProofs) {
     scopeProofs = new WeakMap<EsTreeNode, boolean>();
-    nextNotFoundExitProofs.set(scopes, scopeProofs);
+    nextNavigationExitProofs.set(scopes, scopeProofs);
   }
   const cachedProof = scopeProofs.get(statement);
   if (cachedProof !== undefined) return cachedProof;
@@ -34,10 +34,13 @@ export const isImportedNextNotFoundExit = ({
   const callee = stripParenExpression(expression.callee);
   if (!isNodeOfType(callee, "Identifier")) return false;
   const symbol = scopes.symbolFor(callee);
+  const importedName = symbol?.kind === "import" ? getImportedName(symbol.declarationNode) : null;
   const hasProvenExit = Boolean(
     symbol?.kind === "import" &&
     isValueImportFromModule(symbol, "next/navigation") &&
-    getImportedName(symbol.declarationNode) === "notFound" &&
+    (importedName === "notFound" ||
+      importedName === "redirect" ||
+      importedName === "permanentRedirect") &&
     symbol.references.every((reference) => reference.flag === "read") &&
     !findGuardingTryStatement(expression),
   );

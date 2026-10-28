@@ -3,7 +3,7 @@ import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
 import { getBooleanCallArgument } from "../../../utils/get-boolean-call-argument.js";
 import { isUnmodifiedGlobalBooleanCall } from "../../../utils/is-unmodified-global-boolean-call.js";
-import { isImportedNextNotFoundExit } from "../../../utils/is-imported-next-not-found-exit.js";
+import { isImportedNextNavigationExit } from "../../../utils/is-imported-next-navigation-exit.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { isPresenceProvenBeforeNode } from "../../../utils/is-presence-proven-before-node.js";
 import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
@@ -71,6 +71,6 @@ export const isFindResultAliasGuarded = (
     );
   };
   return isPresenceProvenBeforeNode(access, provesPresence, undefined, (statement) =>
-    isImportedNextNotFoundExit({ statement, scopes }),
+    isImportedNextNavigationExit({ statement, scopes }),
   );
 };
