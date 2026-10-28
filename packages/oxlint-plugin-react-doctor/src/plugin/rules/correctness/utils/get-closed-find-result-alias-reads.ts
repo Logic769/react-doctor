@@ -1,8 +1,10 @@
 import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import { findEnclosingFunction } from "../../../utils/find-enclosing-function.js";
+import { getBooleanCallArgument } from "../../../utils/get-boolean-call-argument.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
+import { isUnmodifiedGlobalBooleanCall } from "../../../utils/is-unmodified-global-boolean-call.js";
 import { isWithinAssignmentTarget } from "../../../utils/is-within-assignment-target.js";
 import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
 import { walkAst } from "../../../utils/walk-ast.js";
@@ -51,7 +53,15 @@ export const getClosedFindResultAliasReads = (
       continue;
     }
     let condition = expression;
-    if (isNodeOfType(parent, "BinaryExpression")) {
+    if (
+      getBooleanCallArgument(parent) === stripParenExpression(expression) &&
+      isUnmodifiedGlobalBooleanCall({ node: parent, scopes })
+    ) {
+      condition = findTransparentExpressionRoot(parent);
+      if (isNodeOfType(condition.parent, "UnaryExpression") && condition.parent.operator === "!") {
+        condition = findTransparentExpressionRoot(condition.parent);
+      }
+    } else if (isNodeOfType(parent, "BinaryExpression")) {
       const other = stripParenExpression(parent.left === expression ? parent.right : parent.left);
       if (
         !["===", "!==", "==", "!="].includes(parent.operator) ||
@@ -69,7 +79,6 @@ export const getClosedFindResultAliasReads = (
       isNodeOfType(consumer, "LogicalExpression") &&
       (consumer.operator === "&&" || consumer.operator === "||")
     ) {
-      if (consumer.operator === "||" && isNodeOfType(parent, "BinaryExpression")) return null;
       condition = findTransparentExpressionRoot(consumer);
       consumer = condition.parent;
     }

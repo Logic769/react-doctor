@@ -1,6 +1,9 @@
 import type { ScopeAnalysis, SymbolDescriptor } from "../../../semantic/scope-analysis.js";
 import type { EsTreeNode } from "../../../utils/es-tree-node.js";
 import { findTransparentExpressionRoot } from "../../../utils/find-transparent-expression-root.js";
+import { getBooleanCallArgument } from "../../../utils/get-boolean-call-argument.js";
+import { isUnmodifiedGlobalBooleanCall } from "../../../utils/is-unmodified-global-boolean-call.js";
+import { isImportedNextNotFoundExit } from "../../../utils/is-imported-next-not-found-exit.js";
 import { isNodeOfType } from "../../../utils/is-node-of-type.js";
 import { isPresenceProvenBeforeNode } from "../../../utils/is-presence-proven-before-node.js";
 import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
@@ -24,6 +27,12 @@ export const isFindResultAliasGuarded = (
   };
   const provesPresence = (candidate: EsTreeNode): boolean => {
     const expression = stripParenExpression(candidate);
+    const booleanArgument = getBooleanCallArgument(expression);
+    if (booleanArgument) {
+      return (
+        readsAlias(booleanArgument) && isUnmodifiedGlobalBooleanCall({ node: expression, scopes })
+      );
+    }
     if (isNodeOfType(expression, "LogicalExpression")) {
       if (expression.operator === "&&")
         return provesPresence(expression.left) || provesPresence(expression.right);
@@ -61,5 +70,7 @@ export const isFindResultAliasGuarded = (
             comparison.value === null)),
     );
   };
-  return isPresenceProvenBeforeNode(access, provesPresence);
+  return isPresenceProvenBeforeNode(access, provesPresence, undefined, (statement) =>
+    isImportedNextNotFoundExit({ statement, scopes }),
+  );
 };
