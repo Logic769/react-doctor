@@ -9,23 +9,34 @@ import { isWithinAssignmentTarget } from "../../../utils/is-within-assignment-ta
 import { stripParenExpression } from "../../../utils/strip-paren-expression.js";
 import { walkAst } from "../../../utils/walk-ast.js";
 
+const dynamicCodeReferencesByAnalysis = new WeakMap<ScopeAnalysis, WeakMap<EsTreeNode, boolean>>();
+
 export const getClosedFindResultAliasReads = (
   symbol: SymbolDescriptor,
   scopes: ScopeAnalysis,
 ): EsTreeNode[] | null => {
   const owner = findEnclosingFunction(symbol.declarationNode);
   if (!owner) return null;
-  let hasDynamicCodeReference = false;
-  walkAst(owner, (node) => {
-    if (
-      isNodeOfType(node, "Identifier") &&
-      node.name === "eval" &&
-      scopes.isGlobalReference(node)
-    ) {
-      hasDynamicCodeReference = true;
-      return false;
-    }
-  });
+  let ownerReferences = dynamicCodeReferencesByAnalysis.get(scopes);
+  if (!ownerReferences) {
+    ownerReferences = new WeakMap<EsTreeNode, boolean>();
+    dynamicCodeReferencesByAnalysis.set(scopes, ownerReferences);
+  }
+  let hasDynamicCodeReference = ownerReferences.get(owner);
+  if (hasDynamicCodeReference === undefined) {
+    hasDynamicCodeReference = false;
+    walkAst(owner, (node) => {
+      if (
+        isNodeOfType(node, "Identifier") &&
+        node.name === "eval" &&
+        scopes.isGlobalReference(node)
+      ) {
+        hasDynamicCodeReference = true;
+        return false;
+      }
+    });
+    ownerReferences.set(owner, hasDynamicCodeReference);
+  }
   if (hasDynamicCodeReference) return null;
   const reads: EsTreeNode[] = [];
   for (const reference of symbol.references) {
