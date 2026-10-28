@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { loadFuzzCorpus } from "../../../../../fuzz/src/load-fuzz-corpus.js";
 import { EFFECT_SNIPPET_POOL } from "../../../../../fuzz/src/snippet-pools.js";
 import { describe, expect, it } from "vite-plus/test";
@@ -99,7 +100,7 @@ describe("finite character-map fuzz transport", () => {
     ({ fixtureName, verdict, expected }) => {
       const relativePath = `regressions/no-pass-live-state-to-parent--${fixtureName}.tsx`;
       const corpus = loadFuzzCorpus(
-        new URL("../../../../../fuzz/corpus/", import.meta.url).pathname,
+        fileURLToPath(new URL("../../../../../fuzz/corpus/", import.meta.url)),
         { maximumFiles: Number.POSITIVE_INFINITY },
       );
       const entry = corpus.find((candidate) => candidate.relativePath === relativePath);

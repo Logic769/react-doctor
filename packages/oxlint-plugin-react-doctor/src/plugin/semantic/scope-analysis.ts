@@ -1,6 +1,7 @@
 import type { EsTreeNode } from "../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../utils/es-tree-node-of-type.js";
 import { getValuePositionChildKeys } from "../utils/get-value-position-child-keys.js";
+import { pushChildNodesInReverse } from "../utils/push-child-nodes-in-reverse.js";
 import { isAstNode } from "../utils/is-ast-node.js";
 import { isFunctionLike } from "../utils/is-function-like.js";
 import { isNodeOfType } from "../utils/is-node-of-type.js";
@@ -640,6 +641,7 @@ const walk = (
   node: EsTreeNode,
   state: BuilderState,
   inheritedScope: ScopeDescriptor | null,
+  pendingValuePositionNodes?: EsTreeNode[],
 ): void => {
   // Special-case structural nodes that open scopes BEFORE they bind
   // their own children. Keep these in source order to match JS scope
@@ -860,21 +862,23 @@ const walk = (
     }
   }
 
-  walkValuePositionChildren(node, state);
+  walkValuePositionChildren(node, state, pendingValuePositionNodes);
 };
 
 // Children of `node` resolve to `state.currentScope` through `scopeFor`'s
 // parent walk, because `node` is either tagged with it or inherits it.
-const walkValuePositionChildren = (node: EsTreeNode, state: BuilderState): void => {
-  const nodeRecord = node as unknown as Record<string, unknown>;
+const walkValuePositionChildren = (
+  node: EsTreeNode,
+  state: BuilderState,
+  pendingValuePositionNodes?: EsTreeNode[],
+): void => {
+  const pendingNodes = pendingValuePositionNodes ?? [];
+  pushChildNodesInReverse(node, pendingNodes, getValuePositionChildKeys(node));
+  if (pendingValuePositionNodes !== undefined) return;
   const childScope = state.currentScope;
-  for (const key of getValuePositionChildKeys(node)) {
-    const child = nodeRecord[key];
-    if (Array.isArray(child)) {
-      for (const item of child) if (isAstNode(item)) walk(item, state, childScope);
-    } else if (isAstNode(child)) {
-      walk(child, state, childScope);
-    }
+  while (pendingNodes.length > 0) {
+    const child = pendingNodes.pop();
+    if (child) walk(child, state, childScope, pendingNodes);
   }
 };
 

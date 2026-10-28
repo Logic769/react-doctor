@@ -3,6 +3,7 @@ import { analyzeScopes } from "./scope-analysis.js";
 import { attachParentReferences } from "../../test-utils/attach-parent-references.js";
 import { parseFixture } from "../../test-utils/parse-fixture.js";
 import type { EsTreeNode } from "../utils/es-tree-node.js";
+import { forEachChildNode, walkAst } from "../utils/walk-ast.js";
 
 const analyze = (code: string) => {
   const parsed = parseFixture(code);
@@ -68,6 +69,43 @@ const findAllNamedNodes = (root: EsTreeNode, type: string, name?: string): EsTre
 };
 
 describe("scope-analysis", () => {
+  it("preserves reference order and lexical scopes through deeply nested expressions", () => {
+    const referenceNames = Array.from({ length: 4_000 }, (_, referenceIndex) =>
+      referenceIndex % 2 === 0 ? "first" : "second",
+    );
+    const parsed = parseFixture(`
+      const first = 1;
+      function readTotal(first: number, second: number): number {
+        return ${referenceNames.join(" + ")};
+      }
+      const outside = first;
+    `);
+    walkAst(parsed.program, (parentNode) => {
+      forEachChildNode(parentNode, (childNode) => {
+        childNode.parent = parentNode;
+      });
+    });
+    const { rootScope } = analyzeScopes(parsed.program);
+    const functionScope = rootScope.children.find((scope) => scope.kind === "function");
+    expect(
+      functionScope?.references.map((reference) =>
+        reference.identifier.type === "Identifier" ? reference.identifier.name : null,
+      ),
+    ).toEqual(referenceNames);
+    expect(
+      functionScope?.references.every((reference) => {
+        const identifier = reference.identifier;
+        return (
+          identifier.type === "Identifier" &&
+          reference.scope === functionScope &&
+          reference.resolvedSymbol === functionScope.symbolsByName.get(identifier.name)
+        );
+      }),
+    ).toBe(true);
+    expect(rootScope.symbolsByName.get("first")?.references).toHaveLength(1);
+    expect(rootScope.symbolsByName.get("first")?.references[0]?.scope).toBe(rootScope);
+  });
+
   describe("module scope bindings", () => {
     it("binds top-level const", () => {
       const { rootScope } = analyze(`const foo = 1;`);
