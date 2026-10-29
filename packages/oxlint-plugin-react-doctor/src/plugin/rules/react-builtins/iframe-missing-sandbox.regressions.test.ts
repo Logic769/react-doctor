@@ -191,4 +191,62 @@ describe("react-builtins/iframe-missing-sandbox — regressions", () => {
     expect(result.parseErrors).toEqual([]);
     expect(result.diagnostics.length).toBeGreaterThan(0);
   });
+
+  // Cross-origin embeds (issue #2267): `allow-scripts allow-same-origin` only
+  // lets a framed page remove its own sandbox when it shares the embedder's
+  // origin. A third-party absolute src cannot reach window.parent, so the pair
+  // is not the self-escape this rule warns about.
+  it("stays silent on a cross-origin src with allow-scripts allow-same-origin", () => {
+    const result = runRule(
+      iframeMissingSandbox,
+      `const Frame = () => <iframe src="https://usercontent.example.net/" sandbox="allow-scripts allow-same-origin" />;`,
+    );
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it("still flags a same-origin relative src with allow-scripts allow-same-origin", () => {
+    const result = runRule(
+      iframeMissingSandbox,
+      `const Frame = () => <iframe src="/embed.html" sandbox="allow-scripts allow-same-origin" />;`,
+    );
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics.length).toBe(1);
+  });
+
+  it("still flags a dynamic (unresolvable) src with allow-scripts allow-same-origin", () => {
+    const result = runRule(
+      iframeMissingSandbox,
+      `const Frame = ({ url }) => <iframe src={url} sandbox="allow-scripts allow-same-origin" />;`,
+    );
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics.length).toBe(1);
+  });
+
+  it("reports only the invalid token on a cross-origin src (combination suppressed)", () => {
+    const result = runRule(
+      iframeMissingSandbox,
+      `const Frame = () => <iframe src="https://usercontent.example.net/" sandbox="allow-scripts allow-same-origin nonsense" />;`,
+    );
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics.length).toBe(1);
+  });
+
+  it("stays silent on a cross-origin createElement iframe with allow-scripts allow-same-origin", () => {
+    const result = runRule(
+      iframeMissingSandbox,
+      `React.createElement("iframe", { src: "https://usercontent.example.net/", sandbox: "allow-scripts allow-same-origin" });`,
+    );
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it("still flags a same-origin createElement iframe with allow-scripts allow-same-origin", () => {
+    const result = runRule(
+      iframeMissingSandbox,
+      `React.createElement("iframe", { src: "/embed.html", sandbox: "allow-scripts allow-same-origin" });`,
+    );
+    expect(result.parseErrors).toEqual([]);
+    expect(result.diagnostics.length).toBe(1);
+  });
 });

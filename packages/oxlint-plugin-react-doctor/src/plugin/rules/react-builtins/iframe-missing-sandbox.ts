@@ -1,12 +1,14 @@
 import { defineRule } from "../../utils/define-rule.js";
 import type { EsTreeNode } from "../../utils/es-tree-node.js";
 import type { EsTreeNodeOfType } from "../../utils/es-tree-node-of-type.js";
+import { getJsxPropStaticStringValues } from "../../utils/get-jsx-prop-static-string-values.js";
 import { getJsxPropStringValue } from "../../utils/get-jsx-prop-string-value.js";
 import { hasJsxPropIgnoreCase } from "../../utils/has-jsx-prop-ignore-case.js";
 import { hasJsxSpreadAttribute } from "../../utils/has-jsx-spread-attribute.js";
 import { isCreateElementCall } from "../../utils/is-create-element-call.js";
 import { isNodeOfType } from "../../utils/is-node-of-type.js";
 import { isNullishExpression } from "../../utils/is-nullish-expression.js";
+import type { ScopeAnalysis } from "../../semantic/scope-analysis.js";
 import type { Rule } from "../../utils/rule.js";
 import { skipNonProductionFiles } from "../../utils/skip-non-production-files.js";
 import { resolveJsxElementType } from "../../utils/resolve-jsx-element-type.js";
@@ -42,6 +44,26 @@ const INVALID_COMBINATION_MESSAGE =
 // cross-origin frame never had "full access to your site" to begin with.
 const MEDIA_EMBED_ALLOW_PATTERN = /encrypted-media|picture-in-picture/i;
 
+// A `sandbox="allow-scripts allow-same-origin"` pair only lets the framed
+// document strip its own `sandbox` when it shares the embedder's origin (MDN);
+// a cross-origin document cannot reach `window.parent` to remove the attribute.
+// When `src` resolves to an absolute URL every candidate value is a third-party
+// embed, so the pair is not the self-escape this rule warns about — the same
+// origin reasoning behind the media-embed bailout below.
+const ABSOLUTE_URL_SRC_PATTERN = /^(?:[a-z][a-z0-9+.-]*:)?\/\//i;
+
+const isAbsoluteUrl = (value: string): boolean => ABSOLUTE_URL_SRC_PATTERN.test(value.trim());
+
+const areAllAbsoluteUrls = (values: ReadonlyArray<string> | null): boolean =>
+  values !== null && values.length > 0 && values.every(isAbsoluteUrl);
+
+const isCrossOriginEmbed = (
+  srcAttribute: EsTreeNodeOfType<"JSXAttribute"> | undefined,
+  scopes: ScopeAnalysis,
+): boolean =>
+  srcAttribute !== undefined &&
+  areAllAbsoluteUrls(getJsxPropStaticStringValues(srcAttribute, scopes));
+
 const isAllowedSandboxToken = (token: string): boolean => {
   if (token === "") return true;
   if (!token.startsWith("allow-")) return false;
@@ -52,6 +74,7 @@ const validateSandboxValue = (
   context: Parameters<Rule["create"]>[0],
   value: string,
   reportNode: EsTreeNode,
+  isCrossOriginFrame: boolean,
 ): void => {
   let hasAllowScripts = false;
   let hasAllowSameOrigin = false;
@@ -66,7 +89,7 @@ const validateSandboxValue = (
     if (token === "allow-scripts") hasAllowScripts = true;
     if (token === "allow-same-origin") hasAllowSameOrigin = true;
   }
-  if (hasAllowScripts && hasAllowSameOrigin) {
+  if (hasAllowScripts && hasAllowSameOrigin && !isCrossOriginFrame) {
     context.report({ node: reportNode, message: INVALID_COMBINATION_MESSAGE });
   }
 };
@@ -119,7 +142,12 @@ export const iframeMissingSandbox = defineRule({
       }
       const stringValue = getJsxPropStringValue(sandboxAttr);
       if (stringValue === null) return;
-      validateSandboxValue(context, stringValue, sandboxAttr);
+      validateSandboxValue(
+        context,
+        stringValue,
+        sandboxAttr,
+        isCrossOriginEmbed(hasJsxPropIgnoreCase(node.attributes, "src"), context.scopes),
+      );
     },
     CallExpression(node: EsTreeNodeOfType<"CallExpression">) {
       if (!isCreateElementCall(node)) return;
@@ -137,6 +165,7 @@ export const iframeMissingSandbox = defineRule({
       // `sandbox` at runtime — mirror the JSX spread bailout above.
       if (!isNodeOfType(propsArgument, "ObjectExpression")) return;
       let sandboxValueNode: EsTreeNode | null = null;
+      let srcValueNode: EsTreeNode | null = null;
       let hasSpread = false;
       let hasExplicitSrcProperty = false;
       for (const property of propsArgument.properties) {
@@ -151,11 +180,11 @@ export const iframeMissingSandbox = defineRule({
           : isNodeOfType(propertyKey, "Literal")
             ? propertyKey.value
             : null;
-        if (keyName === "src") hasExplicitSrcProperty = true;
-        if (keyName === "sandbox") {
-          sandboxValueNode = property.value;
-          break;
+        if (keyName === "src") {
+          hasExplicitSrcProperty = true;
+          srcValueNode = property.value;
         }
+        if (keyName === "sandbox") sandboxValueNode = property.value;
       }
       if (!sandboxValueNode) {
         // `{ ...props }` may supply `sandbox` at runtime, like a JSX spread —
@@ -170,7 +199,12 @@ export const iframeMissingSandbox = defineRule({
       ) {
         return;
       }
-      validateSandboxValue(context, sandboxValueNode.value, sandboxValueNode);
+      const isCrossOriginCall =
+        srcValueNode !== null &&
+        isNodeOfType(srcValueNode, "Literal") &&
+        typeof srcValueNode.value === "string" &&
+        isAbsoluteUrl(srcValueNode.value);
+      validateSandboxValue(context, sandboxValueNode.value, sandboxValueNode, isCrossOriginCall);
     },
   })),
 });
