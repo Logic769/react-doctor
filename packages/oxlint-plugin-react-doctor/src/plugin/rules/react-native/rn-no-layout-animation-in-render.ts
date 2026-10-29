@@ -110,7 +110,15 @@ export const rnNoLayoutAnimationInRender = defineRule({
           (isNodeOfType(parent, "UpdateExpression") && parent.argument === expressionRoot) ||
           (isNodeOfType(parent, "UnaryExpression") &&
             parent.operator === "delete" &&
-            parent.argument === expressionRoot)
+            parent.argument === expressionRoot) ||
+          isNodeOfType(parent, "ArrayPattern") ||
+          (isNodeOfType(parent, "Property") &&
+            parent.value === expressionRoot &&
+            isNodeOfType(parent.parent, "ObjectPattern")) ||
+          (isNodeOfType(parent, "RestElement") && parent.argument === expressionRoot) ||
+          (isNodeOfType(parent, "AssignmentPattern") && parent.left === expressionRoot) ||
+          ((isNodeOfType(parent, "ForInStatement") || isNodeOfType(parent, "ForOfStatement")) &&
+            parent.left === expressionRoot)
         ) {
           hasProviderExposure = true;
         }

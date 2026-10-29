@@ -10,6 +10,72 @@ interface SyntheticLayoutAnimationCase {
 
 const SYNTHETIC_CASES: SyntheticLayoutAnimationCase[] = [
   {
+    name: "array pattern method replacement",
+    source:
+      'import { LayoutAnimation, View } from "react-native"; [LayoutAnimation.spring] = [() => {}]; export const Tile = () => { LayoutAnimation.spring(); return <View />; };',
+    expectedCount: 0,
+  },
+  {
+    name: "object pattern method replacement",
+    source:
+      'import { LayoutAnimation, View } from "react-native"; ({ replacement: LayoutAnimation.spring } = { replacement: () => {} }); export const Tile = () => { LayoutAnimation.spring(); return <View />; };',
+    expectedCount: 0,
+  },
+  {
+    name: "for of method replacement",
+    source:
+      'import { LayoutAnimation, View } from "react-native"; for (LayoutAnimation.spring of [() => {}]) {} export const Tile = () => { LayoutAnimation.spring(); return <View />; };',
+    expectedCount: 0,
+  },
+  {
+    name: "declines inline type subpath imports with retained module side effects",
+    source:
+      'import { type ViewProps } from "react-native/Libraries/Components/View/ViewPropTypes"; import { LayoutAnimation, View } from "react-native"; export const Tile = () => { LayoutAnimation.spring(); return <View />; };',
+    expectedCount: 0,
+  },
+  {
+    name: "whole type subpath inverse",
+    source:
+      'import type { ViewProps } from "react-native/Libraries/Components/View/ViewPropTypes"; import { LayoutAnimation, View } from "react-native"; export const Tile = () => { LayoutAnimation.spring(); return <View />; };',
+    expectedCount: 1,
+  },
+  {
+    name: "declines a defaulted assignment target",
+    source:
+      'import { LayoutAnimation, View } from "react-native"; [LayoutAnimation.spring = () => {}] = []; export const Tile = () => { LayoutAnimation.spring(); return <View />; };',
+    expectedCount: 0,
+  },
+  {
+    name: "declines a rest assignment target",
+    source:
+      'import { LayoutAnimation, View } from "react-native"; [...LayoutAnimation.spring] = []; export const Tile = () => { LayoutAnimation.spring(); return <View />; };',
+    expectedCount: 0,
+  },
+  {
+    name: "retains direct scheduling after a computed assignment key reads the method",
+    source:
+      'import { LayoutAnimation, View } from "react-native"; let target; ({ [String(LayoutAnimation.spring)]: target } = {}); export const Tile = () => { LayoutAnimation.spring(); return <View />; };',
+    expectedCount: 1,
+  },
+  {
+    name: "retains direct scheduling after a pattern default reads the method",
+    source:
+      'import { LayoutAnimation, View } from "react-native"; let target; [target = LayoutAnimation.spring] = []; export const Tile = () => { LayoutAnimation.spring(); return <View />; };',
+    expectedCount: 1,
+  },
+  {
+    name: "declines a bare runtime subpath import",
+    source:
+      'import "react-native/Libraries/LayoutAnimation/LayoutAnimation"; import { LayoutAnimation, View } from "react-native";  export const Tile = () => { LayoutAnimation.spring(); return <View />; };',
+    expectedCount: 0,
+  },
+  {
+    name: "declines a mixed runtime and inline type subpath import",
+    source:
+      'import { type ViewProps, View as NativeView } from "react-native/Libraries/Components/View/ViewPropTypes"; import { LayoutAnimation, View } from "react-native";  export const Tile = () => { LayoutAnimation.spring(); return <View />; };',
+    expectedCount: 0,
+  },
+  {
     name: "reports direct configureNext scheduling",
     source:
       'import { LayoutAnimation, View } from "react-native"; const Tile = () => { LayoutAnimation.configureNext({duration: 160}); return <View />; };',
