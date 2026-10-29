@@ -1874,7 +1874,8 @@ const collectDerivedRowContentNames = (
               outerSymbol?.kind === "const" && outerSymbol.initializer
                 ? stripParenExpression(outerSymbol.initializer)
                 : outerReceiver;
-            let hasSupportedProvider = true;
+            let hasSupportedProvider =
+              !outerSymbol?.initializer && !isNodeOfType(outerInitializer, "ObjectExpression");
             if (isNodeOfType(outerInitializer, "ArrayExpression")) {
               hasSupportedProvider =
                 outerInitializer.elements.length > 0 &&

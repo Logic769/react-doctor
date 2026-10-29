@@ -158,6 +158,41 @@ const cases: StatefulContentAliasCase[] = [
     count: 0,
   },
   {
+    name: "declines an explicit custom outer map with empty nested output",
+    body: "const content=item.parts.map(part=><input/>);return <div key={index}>{content}</div>;",
+    count: 0,
+    prelude: "const records={map:callback=>callback({parts:{map:()=>[]}},0)};",
+    collection: "records",
+  },
+  {
+    name: "declines a mutable custom outer map provider",
+    body: "const content=item.parts.map(part=><input/>);return <div key={index}>{content}</div>;",
+    count: 0,
+    prelude: "let records={map:callback=>callback({parts:{map:()=>[]}},0)};",
+    collection: "records",
+  },
+  {
+    name: "declines a local factory result with a custom outer map",
+    body: "const content=item.parts.map(part=><input/>);return <div key={index}>{content}</div>;",
+    count: 0,
+    prelude:
+      "const makeRecords=()=>({map:callback=>callback({parts:{map:()=>[]}},0)});const records=makeRecords();",
+    collection: "records",
+  },
+  {
+    name: "declines a function-owned custom outer map",
+    body: "const content=item.parts.map(part=><input/>);return <div key={index}>{content}</div>;",
+    count: 0,
+    prelude: "function records(){}records.map=callback=>callback({parts:{map:()=>[]}},0);",
+    collection: "records",
+  },
+  {
+    name: "declines an inline object-owned outer map",
+    body: "const content=item.parts.map(part=><input/>);return <div key={index}>{content}</div>;",
+    count: 0,
+    collection: "({map:callback=>callback({parts:{map:()=>[]}},0)})",
+  },
+  {
     name: "declines a known own custom map",
     body: "const content=item.parts.map(part=><input/>);return <div key={index}>{content}</div>;",
     count: 0,
