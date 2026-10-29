@@ -56,15 +56,14 @@ export const rnNoLayoutAnimationInRender = defineRule({
         }
       },
       ExportNamedDeclaration: (node: EsTreeNodeOfType<"ExportNamedDeclaration">) => {
-        if (
-          node.exportKind === "type" ||
-          !node.source ||
-          typeof node.source.value !== "string" ||
-          node.specifiers.every((specifier) => specifier.exportKind === "type")
-        ) {
+        if (node.exportKind === "type" || !node.source || typeof node.source.value !== "string") {
           return;
         }
-        if (node.source.value === "react-native" || node.source.value.startsWith("react-native/")) {
+        if (
+          node.source.value.startsWith("react-native/") ||
+          (node.source.value === "react-native" &&
+            !node.specifiers.every((specifier) => specifier.exportKind === "type"))
+        ) {
           hasProviderExposure = true;
         }
       },

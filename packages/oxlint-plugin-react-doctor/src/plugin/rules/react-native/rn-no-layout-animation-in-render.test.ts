@@ -10,6 +10,42 @@ interface SyntheticLayoutAnimationCase {
 
 const SYNTHETIC_CASES: SyntheticLayoutAnimationCase[] = [
   {
+    name: "declines inline type subpath re-export side effects",
+    source:
+      'export { type Marker } from "react-native/Libraries/review-side-effect"; import {LayoutAnimation, View} from "react-native"; export const Tile = () => { LayoutAnimation.spring(); return <View />; };',
+    expectedCount: 0,
+  },
+  {
+    name: "declines explicit empty subpath re-export side effects",
+    source:
+      'export {} from "react-native/Libraries/review-side-effect"; import {LayoutAnimation, View} from "react-native"; export const Tile = () => { LayoutAnimation.spring(); return <View />; };',
+    expectedCount: 0,
+  },
+  {
+    name: "allows a wholly erased type-only subpath re-export",
+    source:
+      'export type { Marker } from "react-native/Libraries/review-side-effect"; import {LayoutAnimation, View} from "react-native"; export const Tile = () => { LayoutAnimation.spring(); return <View />; };',
+    expectedCount: 1,
+  },
+  {
+    name: "declines runtime subpath value re-export exposure",
+    source:
+      'export { Marker } from "react-native/Libraries/review-side-effect"; import {LayoutAnimation, View} from "react-native"; export const Tile = () => { LayoutAnimation.spring(); return <View />; };',
+    expectedCount: 0,
+  },
+  {
+    name: "allows inline type root re-export with an already loaded root provider",
+    source:
+      'export { type Marker } from "react-native"; import {LayoutAnimation, View} from "react-native"; export const Tile = () => { LayoutAnimation.spring(); return <View />; };',
+    expectedCount: 1,
+  },
+  {
+    name: "allows empty root re-export with an already loaded root provider",
+    source:
+      'export {} from "react-native"; import {LayoutAnimation, View} from "react-native"; export const Tile = () => { LayoutAnimation.spring(); return <View />; };',
+    expectedCount: 1,
+  },
+  {
     name: "array pattern method replacement",
     source:
       'import { LayoutAnimation, View } from "react-native"; [LayoutAnimation.spring] = [() => {}]; export const Tile = () => { LayoutAnimation.spring(); return <View />; };',
